@@ -45,6 +45,15 @@ Focused regions were not separately cropped because the 390px source and impleme
 - Pastel: 390 × 1061, no horizontal overflow, fonts loaded, all six images loaded.
 - No actionable P0, P1, or P2 visual mismatch remains.
 
+### Icon alignment correction
+
+- Evidence before the fix: `artifacts/qa/icon-alignment-before-actions-390.png` and `artifacts/qa/icon-alignment-before-pastel-390.png`.
+- Root cause: `.bottom-actions .action-button` changed the shared inline action control into an implicit two-row grid. Its auto rows stretched through the 44px touch target, so the icon and label read as vertically detached instead of sharing the single baseline used by both source references.
+- Fix: restored inline flex alignment for all footer actions, made SVG boxes block-level and deterministic, and matched the two Pastel save-card layouts to the reference: centered vertical on the left and icon/text/chevron on the right.
+- Browser geometry after the fix: every route and footer action content group was centered on both axes with a measured center delta between `-0.01px` and `0px`; both save cards measured `0px` vertical center delta.
+- Accepted focused screenshots: `artifacts/qa/icon-alignment-after-actions-quiet-390.png` and `artifacts/qa/icon-alignment-after-pastel-390.png`.
+- Quiet's canonical full-page screenshot was recaptured after the correction. Pastel's focused current-state screenshot and post-fix DOM geometry are the acceptance evidence for this alignment-only change; the existing full-page baseline remains the broader composition reference.
+
 ## Responsive and interaction verification
 
 - Browser widths checked for both variants: 360, 390, 430, 768, 1440px.

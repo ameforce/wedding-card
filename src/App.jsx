@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Bus,
   CalendarBlank,
+  CaretRight,
   Car,
   Check,
   Copy,
@@ -83,11 +84,12 @@ function Greeting() {
   );
 }
 
-function ActionButton({ icon: Icon, children, onClick, className = "" }) {
+function ActionButton({ icon: Icon, trailingIcon: TrailingIcon, children, onClick, className = "" }) {
   return (
     <button className={`action-button ${className}`} type="button" onClick={onClick}>
-      <Icon aria-hidden="true" weight="light" />
+      <Icon className="action-icon" aria-hidden="true" weight="light" />
       <span>{children}</span>
+      {TrailingIcon && <TrailingIcon className="action-trailing-icon" aria-hidden="true" weight="light" />}
     </button>
   );
 }
@@ -163,10 +165,10 @@ function QuietInvitation({ notify }) {
 function SaveCards({ notify }) {
   return (
     <section className="save-cards section-pad" aria-label="날짜와 캘린더 저장">
-      <ActionButton icon={CalendarBlank} onClick={() => notify("실제 예식 날짜가 확정된 후 사용할 수 있어요.")}>
+      <ActionButton icon={CalendarBlank} className="save-date-action" onClick={() => notify("실제 예식 날짜가 확정된 후 사용할 수 있어요.")}>
         <strong>날짜 기억하기</strong><small>소중한 날을 기억해 주세요.</small>
       </ActionButton>
-      <ActionButton icon={CalendarBlank} onClick={() => notify("실제 예식 날짜가 확정된 후 사용할 수 있어요.")}>
+      <ActionButton icon={CalendarBlank} trailingIcon={CaretRight} className="save-calendar-action" onClick={() => notify("실제 예식 날짜가 확정된 후 사용할 수 있어요.")}>
         <strong>캘린더에 저장하기</strong><small>iCalendar 파일 준비 예정</small>
       </ActionButton>
     </section>

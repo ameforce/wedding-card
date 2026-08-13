@@ -133,11 +133,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .venue-copy strong { font-family: "Noto Serif KR Variable", serif; font-size: 10px; font-weight: 520; }
 .venue-copy span { color: #88817b; font-size: 8px; }
 .action-button { display: inline-flex; min-width: 0; min-height: 44px; align-items: center; justify-content: center; gap: 6px; color: inherit; background: transparent; border: 0; cursor: pointer; }
-.action-button svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.action-button > svg { display: block; width: 16px; height: 16px; flex: 0 0 auto; }
+.action-button > span { min-width: 0; }
 .route-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 7px; }
 .route-actions .action-button { border: 1px solid rgba(72,68,64,.12); font-size: 8px; }
 .bottom-actions { display: grid; grid-template-columns: repeat(3, 1fr); margin-inline: 24px; padding: 7px 0 13px; border-top: 1px solid rgba(62,59,56,.12); }
-.bottom-actions .action-button { position: relative; display: grid; gap: 4px; font-size: 8px; }
+.bottom-actions .action-button { position: relative; display: inline-flex; gap: 6px; font-size: 8px; line-height: 1; }
 .bottom-actions .action-button + .action-button::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 1px; background: rgba(62,59,56,.1); }
 
 .pastel-invitation { --paper: #fffdf9; --ink: #233d60; --blue: #d9e7f3; --blush: #f2dcdf; background: var(--paper); color: var(--ink); }
@@ -153,9 +154,13 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-invitation .greeting { padding-top: 14px; padding-bottom: 12px; border-top: 1px solid #f4f1ed; }
 .pastel-invitation .greeting .eyebrow { color: #8091a5; }
 .save-cards { display: grid; grid-template-columns: 1fr 1.35fr; gap: 0; padding-top: 0; padding-bottom: 8px; }
-.save-cards .action-button { min-height: 73px; padding: 10px 9px; align-content: center; color: #294765; border: 1px solid #edf0f2; }
+.save-cards .action-button { min-height: 73px; padding: 10px 9px; color: #294765; border: 1px solid #edf0f2; }
 .save-cards .action-button:nth-child(2) { background: var(--blue); }
 .save-cards .action-button span { display: grid; gap: 4px; text-align: left; }
+.save-cards .save-date-action { flex-direction: column; gap: 5px; }
+.save-cards .save-date-action span { text-align: center; }
+.save-cards .save-calendar-action { display: grid; grid-template-columns: 16px minmax(0, 1fr) 12px; justify-content: stretch; column-gap: 7px; }
+.save-cards .save-calendar-action .action-trailing-icon { width: 12px; height: 12px; }
 .save-cards strong { font-family: "Noto Serif KR Variable", serif; font-size: 8px; font-weight: 550; }
 .save-cards small { color: #77889b; font-size: 6px; }
 .pastel-gallery { display: grid; grid-template-columns: 1.25fr .88fr; grid-template-rows: 94px 94px; gap: 3px; padding-top: 0; padding-bottom: 18px; }
