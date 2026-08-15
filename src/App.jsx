@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bus,
   CalendarBlank,
@@ -12,7 +12,7 @@ import {
   ShareNetwork,
   Train,
 } from "@phosphor-icons/react";
-import { DESIGN_ASSETS, weddingContent } from "./content.js";
+import { DESIGN_ASSETS, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
 
 const VARIANTS = {
   quiet: {
@@ -30,25 +30,59 @@ function getVariant() {
   return value === "pastel" ? "pastel" : "quiet";
 }
 
-function ImageSlot({ className = "", crop = "center", label = "실제 사진으로 교체될 디자인 자리" }) {
+function ImageSlot({ asset, className = "", crop, label = "실제 사진으로 교체될 디자인 자리", priority = false }) {
   const broken = new URLSearchParams(window.location.search).get("brokenAsset") === "1";
   const [failed, setFailed] = useState(false);
+  const source = asset ?? { src: DESIGN_ASSETS.quietLight, alt: "", position: crop ?? "center" };
   return (
-    <figure className={`image-slot ${className} ${failed ? "is-fallback" : ""}`}>
+    <figure className={`image-slot ${asset ? "has-photo" : ""} ${className} ${failed ? "is-fallback" : ""}`}>
       {!failed && (
         <img
-          src={broken ? "/assets/design/missing-image.png" : DESIGN_ASSETS.quietLight}
-          alt=""
-          aria-hidden="true"
-          loading={className.includes("hero-photo") ? "eager" : "lazy"}
+          src={broken ? "/assets/design/missing-image.png" : source.src}
+          srcSet={broken ? undefined : source.srcSet}
+          sizes={source.sizes}
+          alt={source.alt}
+          loading={priority ? "eager" : "lazy"}
           decoding="async"
-          style={{ objectPosition: crop }}
+          fetchPriority={priority ? "high" : "auto"}
+          style={{ objectPosition: crop ?? source.position }}
           onError={() => setFailed(true)}
         />
       )}
-      <figcaption className="sr-only">{label}</figcaption>
-      <span className="crop-mark" aria-hidden="true" />
+      {!asset && <figcaption className="sr-only">{label}</figcaption>}
+      {!asset && <span className="crop-mark" aria-hidden="true" />}
     </figure>
+  );
+}
+
+function SesangCameo({ asset, side, variant = "peek" }) {
+  const nodeRef = useRef(null);
+  const [visible, setVisible] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+  useEffect(() => {
+    if (visible) return undefined;
+    const node = nodeRef.current;
+    if (!node) return undefined;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: "0px 0px -8%", threshold: 0.24 });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  return (
+    <div
+      className={`sesang-cameo is-${side} is-${variant} ${visible ? "is-visible" : ""}`}
+      ref={nodeRef}
+      aria-hidden="true"
+    >
+      <span className="sesang-sticker-motion">
+        <img src={asset} alt="" loading="lazy" decoding="async" />
+      </span>
+    </div>
   );
 }
 
@@ -144,19 +178,22 @@ function QuietInvitation({ notify }) {
       <PlaceholderBadge />
       <header className="quiet-hero section-pad">
         <p className="display-title" lang="en">OUR DAY</p>
-        <ImageSlot className="hero-photo is-arched" crop="48% 42%" />
+        <ImageSlot asset={WEDDING_PHOTOS.quiet.hero} className="hero-photo is-arched" priority />
         <h1>{weddingContent.couple.groom} <i aria-hidden="true">&amp;</i> {weddingContent.couple.bride}</h1>
         <p className="date-line">{weddingContent.event.date} · {weddingContent.event.time}</p>
         <p className="venue-line">{weddingContent.venue.name}</p>
       </header>
       <Greeting />
+      <SesangCameo asset={SESANG_STICKERS.left} side="left" />
       <CalendarPattern />
-      <section className="quiet-gallery section-pad" aria-label="웨딩 사진 갤러리 디자인 자리">
-        <ImageSlot className="quiet-photo photo-one" crop="36% 34%" />
-        <ImageSlot className="quiet-photo photo-two" crop="68% 54%" />
-        <ImageSlot className="quiet-photo photo-three" crop="32% 72%" />
+      <section className="quiet-gallery section-pad" aria-label="웨딩 사진 갤러리">
+        <ImageSlot asset={WEDDING_PHOTOS.quiet.gallery[0]} className="quiet-photo photo-one" />
+        <ImageSlot asset={WEDDING_PHOTOS.quiet.gallery[1]} className="quiet-photo photo-two" />
+        <ImageSlot asset={WEDDING_PHOTOS.quiet.gallery[2]} className="quiet-photo photo-three" />
       </section>
+      <SesangCameo asset={SESANG_STICKERS.right} side="right" />
       <Location notify={notify} compact />
+      <SesangCameo asset={SESANG_STICKERS.sleep} side="left" variant="sleep" />
       <BottomActions notify={notify} />
     </article>
   );
@@ -191,12 +228,14 @@ function PastelInvitation({ notify }) {
       </header>
       <Greeting />
       <SaveCards notify={notify} />
-      <section className="pastel-gallery section-pad" aria-label="웨딩 사진 갤러리 디자인 자리">
-        <ImageSlot className="pastel-photo blue-wide" crop="28% 24%" />
-        <ImageSlot className="pastel-photo blush" crop="72% 44%" />
-        <ImageSlot className="pastel-photo neutral" crop="42% 70%" />
-        <ImageSlot className="pastel-photo pale" crop="80% 76%" />
+      <SesangCameo asset={SESANG_STICKERS.left} side="left" />
+      <section className="pastel-gallery section-pad" aria-label="웨딩 사진 갤러리">
+        <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[0]} className="pastel-photo blue-wide" />
+        <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[1]} className="pastel-photo blush" />
+        <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[2]} className="pastel-photo neutral" />
+        <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[3]} className="pastel-photo pale" />
       </section>
+      <SesangCameo asset={SESANG_STICKERS.right} side="right" />
       <section className="story-grid section-pad" aria-label="예식 일정과 두 사람의 이야기">
         <div>
           <h2>우리의 하루</h2>
@@ -210,6 +249,7 @@ function PastelInvitation({ notify }) {
         </div>
       </section>
       <Location notify={notify} />
+      <SesangCameo asset={SESANG_STICKERS.sleep} side="left" variant="sleep" />
       <BottomActions notify={notify} pastel />
       <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.</footer>
     </article>

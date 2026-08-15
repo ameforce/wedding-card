@@ -18,6 +18,8 @@
 - 시안별 토큰과 배치: `[data-variant="quiet"]`, `[data-variant="pastel"]`
 - URL 선택: `?variant=quiet`, `?variant=pastel`; 알 수 없는 값은 `quiet`
 - 공통 기능: 디자인 전환, 길찾기·연락·일정·공유의 미확정 피드백, 이미지 오류 fallback
+- 실제 스튜디오 사진은 변형 없이 WebP 파생본과 variant별 focal point만 사용
+- 세상이 스티커는 실제 사진의 턱시도 무늬를 기준으로 만든 투명 자산이며 좌우 교대 진입, 일회성 노출, `prefers-reduced-motion` 정지 상태를 공유
 - 44px 이상 터치 영역, 키보드 포커스, `prefers-reduced-motion`
 
 ## Content gate
@@ -30,7 +32,7 @@
 - 예식장·층·홀·주소
 - 주차·대중교통과 공식 길찾기 링크
 - 인사말 최종 원문
-- 실제 사진과 각 사진의 crop·focal point
+- 공개 최종 승인된 사진 범위와 OG 이미지
 - 연락처, 계좌 안내, RSVP, 배경음악
 - 공유 URL·도메인·OG 이미지·검색엔진 노출
 
@@ -41,4 +43,12 @@
 - `quiet-light-study.webp`: 실제 사진이 공급되기 전의 비인물 추상 자산
 - `pastel-watercolor-wash.webp`: Pastel Letter의 비인물 수채 워시
 - `abstract-map.webp`: 실제 지리정보가 없는 디자인용 추상 지도
+- `photos/*.webp`: 사용자가 지정한 수정본에서 만든 480/960px 반응형 파생본. 실제 인물은 AI 편집하지 않는다.
+- `stickers/sesang-*.webp`: 사용자가 제공한 실제 세상이 사진을 identity reference로 사용한 투명 스티커 자산. 원본 고양이 사진은 저장소에 복사하지 않는다.
 - 원본 PNG는 로컬 `artifacts/source-assets/`에 보존하며 배포물에는 포함하지 않는다.
+
+## Photo selection
+
+- Quiet Editorial: `KSJ_1291`, `KSJ_1475`, `KSJ_1400`, `KSJ_1629`
+- Pastel Letter: `KSJ_1068`, `KSJ_1843`, `KSJ_0378`, `KSJ_1102`
+- 브라우저는 480/960px `srcset`에서 슬롯과 DPR에 맞는 자산을 선택한다.

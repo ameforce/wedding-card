@@ -4,6 +4,39 @@ export const DESIGN_ASSETS = {
   map: "/assets/design/abstract-map.webp",
 };
 
+const photo = (name, alt, position) => ({
+  src: `/assets/photos/${name}-480.webp`,
+  srcSet: `/assets/photos/${name}-480.webp 480w, /assets/photos/${name}-960.webp 960w`,
+  sizes: "(min-width: 768px) 430px, 100vw",
+  alt,
+  position,
+});
+
+export const WEDDING_PHOTOS = {
+  quiet: {
+    hero: photo("quiet-hero", "아치형 공간에서 서로를 바라보는 신랑과 신부의 스튜디오 사진", "50% 42%"),
+    gallery: [
+      photo("quiet-gallery-1", "창가에서 함께 선 신랑과 신부의 스튜디오 사진", "50% 33%"),
+      photo("quiet-gallery-2", "꽃잎이 흩날리는 장면의 신랑과 신부 스튜디오 사진", "50% 34%"),
+      photo("quiet-gallery-3", "종이 소품을 들고 미소 짓는 신랑과 신부의 스튜디오 사진", "50% 58%"),
+    ],
+  },
+  pastel: {
+    gallery: [
+      photo("pastel-gallery-1", "밝은 커튼 사이에서 함께 웃는 신랑과 신부의 스튜디오 사진", "50% 39%"),
+      photo("pastel-gallery-2", "초록빛 야외 배경에 함께 선 신랑과 신부의 스튜디오 사진", "50% 31%"),
+      photo("pastel-gallery-3", "흰 꽃 사이에 앉아 있는 신랑과 신부의 스튜디오 사진", "50% 31%"),
+      photo("pastel-gallery-4", "밝은 커튼 사이에서 미소 짓는 신부의 스튜디오 사진", "50% 26%"),
+    ],
+  },
+};
+
+export const SESANG_STICKERS = {
+  left: "/assets/stickers/sesang-left.webp",
+  right: "/assets/stickers/sesang-right.webp",
+  sleep: "/assets/stickers/sesang-sleep.webp",
+};
+
 export const weddingContent = {
   isDesignPlaceholder: true,
   couple: {

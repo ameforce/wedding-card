@@ -7,6 +7,7 @@
 - Never infer names, date, venue, contact, account, family relation, RSVP policy, or public copy.
 - Design placeholders must stay visibly labeled and must be rejected by the default production build.
 - Never generate people or likeness substitutes. Photo slots use non-person abstract design assets until supplied real photographs are approved.
+- Approved real studio photographs may be cropped and responsively optimized, but people must never be AI-edited. Use actual 세상이 references only for the alternating left/right tuxedo-cat sticker cameos and provide a motion-free reduced-motion state.
 - Validate both variants at 360, 390, 430, 768, and 1440px widths, including keyboard focus and reduced motion.
 
 Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.

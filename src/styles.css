@@ -98,6 +98,41 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .image-slot.is-fallback { background: #d9d4ce; }
 .crop-mark { position: absolute; right: 7px; bottom: 7px; width: 8px; height: 8px; border-right: 1px solid rgba(255,255,255,.65); border-bottom: 1px solid rgba(255,255,255,.65); }
 
+.sesang-cameo {
+  position: relative;
+  z-index: 4;
+  height: 108px;
+  pointer-events: none;
+}
+.sesang-sticker-motion {
+  position: absolute;
+  top: 0;
+  width: 96px;
+  height: 108px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity .52s ease, transform .72s cubic-bezier(.2,.82,.26,1);
+  will-change: opacity, transform;
+}
+.sesang-cameo.is-left .sesang-sticker-motion { left: -10px; transform: translateX(-76%) rotate(-8deg) scale(.96); }
+.sesang-cameo.is-right .sesang-sticker-motion { right: -10px; transform: translateX(76%) rotate(8deg) scale(.96); }
+.sesang-cameo.is-visible .sesang-sticker-motion,
+.is-capture .sesang-cameo .sesang-sticker-motion { opacity: 1; transform: translateX(0) rotate(0) scale(1); }
+.sesang-cameo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 8px 11px rgba(44, 37, 31, .11));
+}
+.sesang-cameo.is-visible img { animation: sesang-float 3.8s ease-in-out .75s infinite; }
+.sesang-cameo.is-sleep { height: 76px; }
+.sesang-cameo.is-sleep .sesang-sticker-motion { top: 0; width: 108px; height: auto; overflow: visible; }
+
+@keyframes sesang-float {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  48% { transform: translateY(-4px) rotate(-1.2deg); }
+}
+
 .quiet-invitation { --paper: #f8f5ee; --ink: #33312f; --accent: #c49277; background: var(--paper); color: var(--ink); }
 .quiet-hero { padding-top: 18px; text-align: center; }
 .display-title { margin: 0 0 12px; font-family: "Cormorant Garamond Variable", serif; font-size: clamp(43px, 12vw, 55px); font-weight: 350; line-height: .88; letter-spacing: .015em; }
@@ -166,6 +201,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-gallery { display: grid; grid-template-columns: 1.25fr .88fr; grid-template-rows: 94px 94px; gap: 3px; padding-top: 0; padding-bottom: 18px; }
 .pastel-photo { width: 100%; height: 100%; }
 .pastel-photo img { opacity: .38; filter: saturate(.5); }
+.pastel-photo.has-photo img { opacity: .9; filter: saturate(.78) contrast(.96) brightness(1.02); mix-blend-mode: normal; }
 .blue-wide { background: #c8daeb; }
 .blue-wide img { mix-blend-mode: multiply; }
 .blush { background: #efd2d7; }
@@ -244,4 +280,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .sesang-sticker-motion { opacity: 1 !important; transform: none !important; transition: none !important; }
+  .sesang-cameo img { animation: none !important; }
 }
