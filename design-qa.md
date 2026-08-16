@@ -1,6 +1,49 @@
 # Design QA
 
-## Accepted pass — surface, gallery, and native-action refinements
+## Accepted pass — Letter B-informed photo hero and venue guidance
+
+### Visual result
+
+- Pastel now opens with the approved real `KSJ_1562` photo in a full-width 4:5 hero. The hero participates in the same five-photo accessible lightbox as the four gallery images.
+- The identity block uses the supplied watercolor raster over the sampled `#fcfbf4` paper tone. `더 바실리움` flows directly into `INVITATION` without a rule, background switch, or hard color seam.
+- Current screenshots: `artifacts/qa/letterb-refinement-pastel-top-390.png`, `artifacts/qa/letterb-refinement-pastel-seam-390.png`, `artifacts/qa/letterb-refinement-pastel-venue-390.png`, and `artifacts/qa/letterb-refinement-pastel-hero-lightbox-390.png`.
+- The public Letter B reference and the current 390px captures were inspected side by side in the same comparison inputs. The implementation adopts its photo-first hierarchy, gallery clarity, real-map placement, and readable transport grouping without copying its people, text, photos, graphics, or optional private sections.
+- The separate `카카오맵 제공` caption is absent. The supplied map image's embedded Kakao provider mark and the source metadata in `src/content.js` remain intact.
+- The single calendar action is now in the footer beside the single share action. The upper calendar card is absent.
+
+### Confirmed venue guidance
+
+- Subway: `수인분당선 야탑역 4번 출구에서 도보 400m`.
+- Shuttle: `야탑역 4번 출구에서 10~15분 간격으로 운행`.
+- Parking: `B2·B4 주차장 이용 · 2시간 무료`.
+- Registration: `웨딩홀·연회장 앞`, `8층 웨딩홀 로비 주차등록 기기에서 등록`.
+
+### Responsive and interaction evidence
+
+- Browser widths checked for both variants: 360, 390, 430, 768, and 1440px.
+- At all ten variant/width combinations, `scrollWidth === clientWidth`, failed-image count was zero, minimum control height was 44px, and exactly one calendar plus one share action rendered. Quiet exposed four photo triggers; Pastel exposed five.
+- The Pastel hero opened the lightbox, focused `갤러리 닫기`, locked body scroll, and restored focus to the hero after Escape. The lightbox reported `5장 중 1번째 사진` and retained the Pastel paper tone.
+- Browser logs contained no warning or error; Vite debug and React development info were the only entries.
+
+### iPhone action verdict
+
+- The current LAN preview is `http:` and exposes neither `navigator.share` nor `navigator.canShare`, so iPhone system sharing cannot be proven on this connection. The invitation continues to use native share first on a supported secure context and an explicit copy fallback otherwise.
+- Calendar capability still prefers sharing the generated `text/calendar` file when the platform accepts it. The fallback no longer sets the HTML `download` attribute; it opens the calendar resource inline so the browser or OS can hand it to its calendar handler when supported.
+- A browser cannot force a particular default calendar application. Actual iPhone native-share validation therefore remains gated on an HTTPS preview or production URL.
+
+### Verification
+
+- `npm run test:ui`: 25/25 passed.
+- `npm run lint`: passed.
+- `npm run build:design`: passed.
+- `npm run test:sites`: 4/4 passed.
+- Default production `npm run build` remains intentionally blocked by `isDesignPlaceholder: true` because contact, family, RSVP, account, final greeting, domain/OG, and other publication decisions remain unconfirmed.
+
+final result: passed
+
+## Superseded pass — surface, gallery, and native-action refinements
+
+This section records the prior `45b1ebacc0f3893d4cc88bfd7ae18dc3caa2b384` state. Its top calendar card, visible map caption, and older Pastel paper value were replaced by the current accepted pass above.
 
 ### Visual result
 

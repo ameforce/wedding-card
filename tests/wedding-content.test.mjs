@@ -56,7 +56,7 @@ test("December 2026 calendar has all real dates and emphasizes Sunday the 27th",
   assert.doesNotMatch(app, /date-dots/);
 });
 
-test("venue map can render only the supplied real local asset with its attribution", () => {
+test("venue map keeps source metadata without a separate visible provider caption", () => {
   assert.deepEqual(weddingContent.venue.map, {
     localAssetPath: "/assets/map/venue-map.webp",
     alt: "더 바실리움 주변 실제 지도와 위치 핀",
@@ -65,12 +65,10 @@ test("venue map can render only the supplied real local asset with its attributi
   assert.ok(existsSync(new URL("../public/assets/map/venue-map.webp", import.meta.url)));
   assert.ok(!existsSync(new URL("../public/assets/design/abstract-map.webp", import.meta.url)));
   assert.match(app, /<img src=\{map\.localAssetPath\} alt=\{map\.alt\}/);
-  assert.match(app, /<strong>\{map\.sourceAttribution\}<\/strong> 제공/);
+  assert.doesNotMatch(app, /sourceAttribution\}.*제공|카카오맵 제공/);
+  assert.doesNotMatch(css, /\.map-frame figcaption/);
   assert.doesNotMatch(app, /DESIGN MAP|abstract-map|map-pin/);
   assert.match(css, /\.map-frame > img \{[^}]*aspect-ratio:\s*2\s*\/\s*1/);
-  const caption = css.match(/\.map-frame figcaption\s*\{([^}]+)\}/)?.[1] ?? "";
-  assert.doesNotMatch(caption, /position\s*:\s*absolute/);
-
   const pastelLocation = css.match(/\.pastel-invitation \.location-section\s*\{([^}]+)\}/)?.[1] ?? "";
   const pastelMap = css.match(/\.pastel-invitation \.map-frame\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.match(pastelLocation, /grid-template-columns:\s*1fr/);
@@ -88,6 +86,8 @@ test("Pastel removes the redundant timeline and presents one full-width story", 
 });
 
 test("Pastel gallery uses portrait media and an accessible lightbox", () => {
+  assert.match(app, /const photos = \[WEDDING_PHOTOS\.pastel\.hero, \.\.\.WEDDING_PHOTOS\.pastel\.gallery\]/);
+  assert.match(app, /className="pastel-hero-photo"/);
   assert.match(app, /className="pastel-gallery-item"/);
   assert.match(app, /role="dialog"/);
   assert.match(app, /aria-modal="true"/);
@@ -104,6 +104,19 @@ test("Pastel gallery uses portrait media and an accessible lightbox", () => {
 
   const galleryItem = css.match(/\.pastel-gallery-item\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.match(galleryItem, /aspect-ratio:\s*3\s*\/\s*4/);
+});
+
+test("confirmed subway, shuttle and parking guidance is represented verbatim", () => {
+  assert.deepEqual(weddingContent.transit, {
+    subway: "수인분당선 야탑역 4번 출구에서 도보 400m",
+    shuttle: "야탑역 4번 출구에서 10~15분 간격으로 운행",
+    parking: "B2·B4 주차장 이용 · 2시간 무료",
+    parkingRegistrationLocation: "웨딩홀·연회장 앞",
+    parkingRegistration: "8층 웨딩홀 로비 주차등록 기기에서 등록",
+  });
+  assert.match(app, /weddingContent\.transit\.shuttle/);
+  assert.match(app, /weddingContent\.transit\.parkingRegistrationLocation/);
+  assert.match(app, /weddingContent\.transit\.parkingRegistration/);
 });
 
 test("Quiet photos use the same accessible lightbox contract", () => {

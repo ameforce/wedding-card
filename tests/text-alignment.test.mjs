@@ -19,18 +19,16 @@ function fontSize(selector) {
   return Number(match[1]);
 }
 
-test("Pastel keeps one horizontally aligned calendar action", () => {
+test("Pastel keeps its single calendar action in the bottom utility row", () => {
   assert.match(rule(".action-button"), /align-items:\s*center/);
-  assert.match(rule(".save-cards .save-calendar-action"), /display:\s*grid/);
   assert.doesNotMatch(app, /예식 정보 복사|save-date-action/);
-  assert.equal((app.match(/<CalendarAction/g) ?? []).length, 1);
-  assert.match(app, /showCalendar=\{false\}/);
+  assert.doesNotMatch(app, /CalendarAction|save-cards|showCalendar=\{false\}/);
+  assert.match(app, /<BottomActions notify=\{notify\} pastel \/>/);
 });
 
 test("Pastel actions use independent soft controls without coupon separators", () => {
-  assert.match(rule(".save-cards"), /gap:\s*10px/);
-  assert.match(rule(".save-cards .action-button"), /border-radius:\s*14px/);
   assert.match(rule(".bottom-actions.is-pastel"), /gap:\s*8px/);
+  assert.match(rule(".bottom-actions.is-pastel"), /grid-template-columns:\s*repeat\(3, 1fr\)/);
   assert.match(rule(".bottom-actions.is-pastel .action-button + .action-button::before"), /display:\s*none/);
   assert.match(app, /ariaLabel="네이버 지도에서 길찾기">네이버</);
 });
@@ -56,8 +54,6 @@ test("invitation type scale keeps key information readable on a phone", () => {
     [".venue-copy span", 13],
     [".route-actions .action-button", 13],
     [".bottom-actions .action-button", 13],
-    [".save-cards strong", 13],
-    [".save-cards small", 12],
     [".transit-list span", 12],
   ];
 

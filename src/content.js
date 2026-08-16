@@ -1,8 +1,3 @@
-export const DESIGN_ASSETS = {
-  quietLight: "/assets/design/quiet-light-study.webp",
-  pastelWash: "/assets/design/pastel-watercolor-wash.webp",
-};
-
 export function getCalendarMonth({ year, month, day }) {
   const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -38,6 +33,7 @@ export const WEDDING_PHOTOS = {
     ],
   },
   pastel: {
+    hero: photo("pastel-hero", "베일 아래에서 함께 미소 짓는 신랑과 신부의 스튜디오 사진", "50% 58%"),
     gallery: [
       photo("pastel-gallery-1", "밝은 커튼 사이에서 함께 웃는 신랑과 신부의 스튜디오 사진", "50% 39%"),
       photo("pastel-gallery-2", "초록빛 야외 배경에 함께 선 신랑과 신부의 스튜디오 사진", "50% 31%"),
@@ -104,8 +100,10 @@ export const weddingContent = {
     "함께 계절을 걸어갑니다.",
   ],
   transit: {
-    subway: "노선·출구 정보 입력 예정",
-    bus: "정류장·버스 정보 입력 예정",
-    car: "주차 안내 입력 예정",
+    subway: "수인분당선 야탑역 4번 출구에서 도보 400m",
+    shuttle: "야탑역 4번 출구에서 10~15분 간격으로 운행",
+    parking: "B2·B4 주차장 이용 · 2시간 무료",
+    parkingRegistrationLocation: "웨딩홀·연회장 앞",
+    parkingRegistration: "8층 웨딩홀 로비 주차등록 기기에서 등록",
   },
 };

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { weddingContent } from "../src/content.js";
 import { createCalendarFile, eventSummaryText, saveCalendar, shareInvitation } from "../src/invitation-actions.js";
+
+const actionsSource = await readFile(new URL("../src/invitation-actions.js", import.meta.url), "utf8");
 
 test("calendar export preserves the confirmed Asia/Seoul start and does not infer an end time", () => {
   const calendar = createCalendarFile(weddingContent, new Date("2026-08-16T00:00:00.000Z"));
@@ -43,7 +46,7 @@ test("calendar action prefers a capability-checked native file share", async () 
   assert.match(await shared[0].files[0].text(), /DTSTART;TZID=Asia\/Seoul:20261227T150000/);
 });
 
-test("calendar action treats native-share cancellation as final and does not download", async () => {
+test("calendar action treats native-share cancellation as final and does not open a fallback", async () => {
   let downloads = 0;
   const platform = {
     canShare: () => true,
@@ -56,7 +59,7 @@ test("calendar action treats native-share cancellation as final and does not dow
   assert.equal(downloads, 0);
 });
 
-test("calendar action gracefully downloads when native file sharing is unavailable or fails", async () => {
+test("calendar action opens an inline calendar resource when native file sharing is unavailable or fails", async () => {
   for (const platform of [
     {},
     { share: async () => {}, canShare: () => false },
@@ -65,9 +68,15 @@ test("calendar action gracefully downloads when native file sharing is unavailab
   ]) {
     let downloads = 0;
     const result = await saveCalendar(weddingContent, platform, () => { downloads += 1; });
-    assert.equal(result, "downloaded");
+    assert.equal(result, "opened-file");
     assert.equal(downloads, 1);
   }
+});
+
+test("calendar fallback does not force an attachment download", () => {
+  assert.match(actionsSource, /new Blob\(\[calendar\], \{ type: "text\/calendar;charset=utf-8" \}\)/);
+  assert.match(actionsSource, /anchor\.click\(\)/);
+  assert.doesNotMatch(actionsSource, /anchor\.download/);
 });
 
 test("invitation sharing prefers the system share sheet and falls back to copying", async () => {

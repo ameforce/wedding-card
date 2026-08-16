@@ -73,17 +73,17 @@ export async function copyText(text) {
   if (!copied) throw new Error("copy-failed");
 }
 
-export function downloadCalendar(content) {
+export function openCalendarFile(content) {
   const calendar = createCalendarFile(content);
   const blob = new Blob([calendar], { type: "text/calendar;charset=utf-8" });
   const href = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = href;
-  anchor.download = `${content.event.isoDate}-${content.couple.groom}-${content.couple.bride}.ics`;
+  anchor.rel = "noopener";
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(href), 0);
+  window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
 }
 
 function calendarFilename(content) {
@@ -99,7 +99,7 @@ function createCalendarShareFile(content) {
   );
 }
 
-export async function saveCalendar(content, platform = navigator, fallback = downloadCalendar) {
+export async function saveCalendar(content, platform = navigator, fallback = openCalendarFile) {
   const file = createCalendarShareFile(content);
   const payload = file
     ? { title: `${content.couple.groom} · ${content.couple.bride} 결혼식 일정`, files: [file] }
@@ -127,7 +127,7 @@ export async function saveCalendar(content, platform = navigator, fallback = dow
   }
 
   fallback(content);
-  return "downloaded";
+  return "opened-file";
 }
 
 export async function shareInvitation(content, url, platform = navigator, fallback = copyText) {

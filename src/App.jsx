@@ -4,7 +4,6 @@ import {
   ArrowRight,
   Bus,
   CalendarBlank,
-  CaretRight,
   Car,
   Check,
   Copy,
@@ -17,7 +16,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
-import { DESIGN_ASSETS, getCalendarMonth, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
+import { getCalendarMonth, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
 import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
 
 const VARIANTS = {
@@ -287,7 +286,6 @@ function VenueMap() {
   return (
     <figure className="map-frame">
       <img src={map.localAssetPath} alt={map.alt} loading="lazy" decoding="async" onError={() => setFailed(true)} />
-      <figcaption><strong>{map.sourceAttribution}</strong> 제공</figcaption>
     </figure>
   );
 }
@@ -337,24 +335,30 @@ function Location({ notify, compact = false }) {
         <ActionButton icon={NavigationArrow} href={weddingContent.venue.mapLinks.kakao} onClick={() => openMap("카카오맵")}>카카오맵</ActionButton>
         <ActionButton icon={NavigationArrow} href={weddingContent.venue.mapLinks.tmap} onClick={() => openMap("T map")}>T map</ActionButton>
       </div>
-      {!compact && (
-        <div className="transit-list">
-          <div><Train aria-hidden="true" weight="light" /><p><strong>지하철 이용 시</strong><span>{weddingContent.transit.subway}</span></p></div>
-          <div><Bus aria-hidden="true" weight="light" /><p><strong>버스 이용 시</strong><span>{weddingContent.transit.bus}</span></p></div>
-          <div><Car aria-hidden="true" weight="light" /><p><strong>자가용 이용 시</strong><span>{weddingContent.transit.car}</span></p></div>
+      <div className="transit-list">
+        <div><Train aria-hidden="true" weight="light" /><p><strong>지하철 이용 시</strong><span>{weddingContent.transit.subway}</span></p></div>
+        <div><Bus aria-hidden="true" weight="light" /><p><strong>셔틀버스 운행</strong><span>{weddingContent.transit.shuttle}</span></p></div>
+        <div>
+          <Car aria-hidden="true" weight="light" />
+          <p>
+            <strong>주차 안내</strong>
+            <span>{weddingContent.transit.parking}</span>
+            <span className="transit-detail">{weddingContent.transit.parkingRegistrationLocation}</span>
+            <span className="transit-detail">{weddingContent.transit.parkingRegistration}</span>
+          </p>
         </div>
-      )}
+      </div>
     </section>
   );
 }
 
-function BottomActions({ notify, pastel = false, showCalendar = true }) {
+function BottomActions({ notify, pastel = false }) {
   const unavailable = (label) => notify(`‘${label}’ 기능은 실제 정보 확정 후 활성화됩니다.`);
   const saveDate = async () => {
     try {
       const result = await saveCalendar(weddingContent);
       if (result === "shared-file") notify("일정 파일을 시스템 공유 메뉴로 전달했습니다.");
-      if (result === "downloaded") notify("일정 파일을 저장했습니다. 파일을 열어 캘린더에 추가해 주세요.");
+      if (result === "opened-file") notify("캘린더 일정 열기를 요청했습니다.");
     } catch {
       notify("일정을 준비하지 못했습니다.", "error");
     }
@@ -363,7 +367,11 @@ function BottomActions({ notify, pastel = false, showCalendar = true }) {
     try {
       const result = await shareInvitation(weddingContent, window.location.href);
       if (result === "shared") notify("청첩장을 공유했습니다.");
-      if (result === "copied") notify("공유할 내용과 링크를 복사했습니다.");
+      if (result === "copied") {
+        notify(window.isSecureContext
+          ? "시스템 공유를 사용할 수 없어 공유할 내용과 링크를 복사했습니다."
+          : "현재 HTTP 미리보기에서는 시스템 공유를 열 수 없어 링크를 복사했습니다. HTTPS에서 다시 확인해 주세요.");
+      }
     } catch {
       notify("청첩장을 공유하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
     }
@@ -371,7 +379,7 @@ function BottomActions({ notify, pastel = false, showCalendar = true }) {
   return (
     <nav className={`bottom-actions ${pastel ? "is-pastel" : ""}`} aria-label="청첩장 주요 기능">
       <ActionButton icon={Phone} onClick={() => unavailable("연락하기")}>연락하기</ActionButton>
-      {showCalendar && <ActionButton icon={CalendarBlank} onClick={saveDate}>일정 저장하기</ActionButton>}
+      <ActionButton icon={CalendarBlank} onClick={saveDate}>캘린더 추가</ActionButton>
       <ActionButton icon={ShareNetwork} onClick={share}>공유하기</ActionButton>
     </nav>
   );
@@ -413,71 +421,47 @@ function QuietInvitation({ notify }) {
   );
 }
 
-function CalendarAction({ notify }) {
-  const saveDate = async () => {
-    try {
-      const result = await saveCalendar(weddingContent);
-      if (result === "shared-file") notify("일정 파일을 시스템 공유 메뉴로 전달했습니다.");
-      if (result === "downloaded") notify("일정 파일을 저장했습니다. 파일을 열어 캘린더에 추가해 주세요.");
-    } catch {
-      notify("일정을 준비하지 못했습니다.", "error");
-    }
-  };
+function PastelGallery({ gallery, photos }) {
   return (
-    <section className="save-cards section-pad" aria-label="캘린더 저장">
-      <ActionButton icon={CalendarBlank} trailingIcon={CaretRight} className="save-calendar-action" onClick={saveDate}>
-        <strong>캘린더에 추가하기</strong><small>기기 환경에 따라 파일로 저장돼요</small>
-      </ActionButton>
+    <section className="pastel-gallery-section section-pad" aria-labelledby="pastel-gallery-title">
+      <div className="pastel-section-heading">
+        <p className="eyebrow">OUR MOMENTS</p>
+        <h2 id="pastel-gallery-title">우리의 순간</h2>
+        <p className="gallery-hint">사진을 눌러 크게 보세요</p>
+      </div>
+      <div className="pastel-gallery">
+        {photos.map((photo, index) => (
+          <PhotoButton
+            photo={photo}
+            index={index + 1}
+            openPhoto={gallery.openPhoto}
+            registerTrigger={gallery.registerTrigger}
+            className="pastel-gallery-item"
+            sizes="(min-width: 768px) 169px, calc((100vw - 60px) / 2)"
+            key={photo.src}
+          />
+        ))}
+      </div>
     </section>
   );
 }
 
-function PastelGallery() {
-  const gallery = usePhotoGallery();
-  const photos = WEDDING_PHOTOS.pastel.gallery;
-
-  return (
-    <>
-      <section className="pastel-gallery-section section-pad" aria-labelledby="pastel-gallery-title">
-        <div className="pastel-section-heading">
-          <p className="eyebrow">OUR MOMENTS</p>
-          <h2 id="pastel-gallery-title">우리의 순간</h2>
-        </div>
-        <div className="pastel-gallery">
-          {photos.map((photo, index) => (
-            <button
-              className="pastel-gallery-item"
-              type="button"
-              aria-label={`${photos.length}장 중 ${index + 1}번째 사진 크게 보기`}
-              ref={(node) => gallery.registerTrigger(index, node)}
-              onClick={() => gallery.openPhoto(index)}
-              key={photo.src}
-            >
-              <img
-                src={photo.src}
-                srcSet={photo.srcSet}
-                sizes="(min-width: 768px) 169px, calc((100vw - 60px) / 2)"
-                alt={photo.alt}
-                loading="lazy"
-                decoding="async"
-                style={{ objectPosition: photo.position }}
-              />
-              <span aria-hidden="true">크게 보기</span>
-            </button>
-          ))}
-        </div>
-      </section>
-      {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="pastel" />}
-    </>
-  );
-}
-
 function PastelInvitation({ notify }) {
+  const photos = [WEDDING_PHOTOS.pastel.hero, ...WEDDING_PHOTOS.pastel.gallery];
+  const gallery = usePhotoGallery();
   return (
     <article className="invitation pastel-invitation" data-variant="pastel">
       <PlaceholderBadge />
-      <header className="pastel-hero section-pad">
-        <img className="watercolor-wash" src={DESIGN_ASSETS.pastelWash} alt="" aria-hidden="true" />
+      <header className="pastel-hero">
+        <PhotoButton
+          photo={photos[0]}
+          index={0}
+          openPhoto={gallery.openPhoto}
+          registerTrigger={gallery.registerTrigger}
+          className="pastel-hero-photo"
+          priority
+          sizes="(min-width: 768px) 430px, 100vw"
+        />
         <div className="pastel-hero-copy">
           <p>저희 두 사람<br />새로운 시작을 함께합니다</p>
           <span className="tiny-divider" aria-hidden="true" />
@@ -488,8 +472,7 @@ function PastelInvitation({ notify }) {
         </div>
       </header>
       <Greeting />
-      <CalendarAction notify={notify} />
-      <PastelGallery />
+      <PastelGallery gallery={gallery} photos={WEDDING_PHOTOS.pastel.gallery} />
       <section className="pastel-story section-pad" aria-labelledby="pastel-story-title">
         <div className="pastel-section-heading">
           <p className="eyebrow">OUR STORY</p>
@@ -498,8 +481,9 @@ function PastelInvitation({ notify }) {
         <p>{weddingContent.story.join(" ")}</p>
       </section>
       <Location notify={notify} />
-      <BottomActions notify={notify} pastel showCalendar={false} />
+      <BottomActions notify={notify} pastel />
       <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.</footer>
+      {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="pastel" />}
     </article>
   );
 }
