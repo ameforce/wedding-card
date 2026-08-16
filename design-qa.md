@@ -72,12 +72,19 @@ Focused region crops were not required because the 390px full-page captures keep
 - Fonts and typography: local Cormorant Garamond, Noto Serif KR, and Noto Sans KR variable fonts preserve the established hierarchy and wrapping.
 - Spacing and layout rhythm: the source section order and density remain intact; the only material height increase comes from three explicit cat cameo rows.
 - Colors and visual tokens: warm ivory/taupe/copper and powder-blue/blush/navy palettes remain unchanged around the newly supplied imagery.
-- Image quality and asset fidelity: studio photos ship as 480/960px WebP `srcset` derivatives; stickers retain alpha, have no visible rectangle, and total about 221KB. All new public raster assets total about 1.30MB.
+- Image quality and asset fidelity: studio photos ship as 480/960px WebP `srcset` derivatives; lossless-refined stickers retain alpha, have no visible rectangle, and total about 617KB. All new public raster assets total about 1.69MB.
 - Copy and content: event facts remain visibly design-only. No name, date, venue, contact, family relation, account, or RSVP fact was inferred.
 
 ## Follow-up polish
 
 - P3: retune a focal point only if the couple prefers a different face position after reviewing the live page.
 - P3: recheck final line breaks after names, date, venue, and greeting are supplied.
+
+## 세상이 iris fidelity correction
+
+- Magnified comparison: `artifacts/qa/sesang-eye-refinement-before-after.png` (left column before, right column after; first row left cameo, second row right cameo).
+- Actual reference review showed dominant yellow-green irises with only a faint blue/cyan reflection, so the correction blends only hue-qualified iris pixels toward cool cyan by about 3 RGB levels on average.
+- Changed pixels: left 606, right 60, sleep 14. Alpha differences: 0. Unexpected visible-pixel differences outside the bounded eye regions: 0.
+- Fur, pupils, catchlights, sticker outlines, transparent background, dimensions, animation geometry, and source paths remain unchanged.
 
 final result: passed

@@ -44,7 +44,7 @@
 - `pastel-watercolor-wash.webp`: Pastel Letter의 비인물 수채 워시
 - `abstract-map.webp`: 실제 지리정보가 없는 디자인용 추상 지도
 - `photos/*.webp`: 사용자가 지정한 수정본에서 만든 480/960px 반응형 파생본. 실제 인물은 AI 편집하지 않는다.
-- `stickers/sesang-*.webp`: 사용자가 제공한 실제 세상이 사진을 identity reference로 사용한 투명 스티커 자산. 원본 고양이 사진은 저장소에 복사하지 않는다.
+- `stickers/sesang-*.webp`: 사용자가 제공한 실제 세상이 사진을 identity reference로 사용한 투명 스티커 자산. 원본 고양이 사진은 저장소에 복사하지 않는다. 홍채는 황록색을 주색으로 유지하면서 청록 반사만 3 RGB level 안팎으로 제한 보정했으며, 털·동공·테두리·alpha는 바꾸지 않았다.
 - 원본 PNG는 로컬 `artifacts/source-assets/`에 보존하며 배포물에는 포함하지 않는다.
 
 ## Photo selection
