@@ -1,6 +1,25 @@
 # Design QA
 
-## Accepted pass — confirmed family, contact actions, and Pastel schedule
+## Accepted pass — revised Pastel hero source and confirmed family birth order
+
+### Source, content, and visual contract
+
+- The Pastel top hero is sourced only from the supplied `KSJ_1400.jpg`, converted into the local responsive `public/assets/photos/pastel-hero-480.webp` and `public/assets/photos/pastel-hero-960.webp` derivatives. The browser never reads the original drive path.
+- The photograph remains a 2:3 master inside the existing 86% 4:5 arched inset frame. `object-position: 50% 58%` keeps both faces, the raised bouquet, and the falling petals composed inside the mobile portrait crop without changing the frame, watercolor surface, or typography.
+- The new hero has the accurate descriptive alt text `꽃잎이 흩날리는 야외에서 함께 선 신랑과 신부의 스튜디오 사진`. It is distinct from all four Pastel gallery selections; Quiet's photo mapping remains unchanged.
+- The confirmed family attribution now renders as `김웅기 · 홍정화의 장남 김종인` and `유효상 · 정소은의 장녀 유지혜`.
+
+### Responsive and interaction evidence
+
+- Live Browser capture: `artifacts/qa/pastel-hero-ksj-1400-390.jpg` at 390px width, top-of-page with the shared lightbox closed.
+- The Hero remains the first trigger in the shared accessible Pastel lightbox; opening it, advancing to a gallery image, and closing it restores focus to the new hero trigger.
+- Static coverage verifies the WebP dimensions, no-alpha transport, focal position, and non-duplication against the Pastel gallery.
+
+### Final result
+
+`passed`
+
+## Superseded pass — pre-birth-order-confirmation family, contact actions, and Pastel schedule
 
 ### Source and rendered evidence
 
@@ -17,7 +36,7 @@
 
 ### Content, interaction, and accessibility
 
-- Confirmed family attribution renders as `김웅기 · 홍정화의 아들 김종인` and `유효상 · 정소은의 딸 유지혜`. Birth order is not shown because 장남·장녀 was not confirmed.
+- At this historical acceptance, family attribution used `아들` and `딸`; it is superseded by the current confirmed `장남` and `장녀` display above.
 - Two native `details` disclosures group groom-side and bride-side contacts. Each confirmed person has a labeled phone action and message action with normalized `tel:` and `sms:` destinations; neither opens a browser tab.
 - Pastel now includes a visible `예식 일정` section with the confirmed December 2026 calendar and Sunday 27 highlighted. The footer still has exactly one calendar action, so no duplicate save control was introduced.
 - Live Browser checks found zero failed images and zero horizontal overflow at the capped 430px layout. The narrow-width CSS contract uses a shrinking `minmax(0, 1fr)` person column beside two fixed 44px actions; static tests cover the 360px-sensitive geometry and the five project breakpoints remain governed by the shared invitation cap.
@@ -59,7 +78,7 @@
 
 - Implementable from confirmed facts now: the existing names, start date/time, venue, address, map, transit/parking guidance, December calendar in Quiet, and start-only iCalendar action. Pastel already exposes the same event facts in its Hero and the shared footer calendar action.
 - Optional presentation using confirmed facts: a dedicated Pastel `예식 안내` block or derived countdown. This is a product-choice question, not a missing-data blocker; it must not duplicate the existing footer calendar action, and a separate event timeline remains intentionally excluded.
-- Requires exact user facts and a public-scope decision: family relations; couple or parent contact controls; and account sections, including side, bank, holder, number, disclosure text, and whether the data is always visible or collapsed. None may be inferred from Letter B.
+- Still requires exact user facts and a public-scope decision: account sections, including side, bank, holder, number, disclosure text, and whether the data is always visible or collapsed. The currently rendered family relations and couple/parent contact controls are already confirmed public content; no additional relation or contact value may be inferred from Letter B.
 - Other optional Letter B modules requiring separate product/content decisions: wedding interview, relationship timeline, guest-snap upload, notice carousel, RSVP, guestbook, and music. They are useful patterns, not current project requirements.
 - Highest-value next question: Which family/contact/account items, for which people, should be public, and what are the exact approved values?
 

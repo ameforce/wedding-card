@@ -33,7 +33,7 @@ export const WEDDING_PHOTOS = {
     ],
   },
   pastel: {
-    hero: photo("pastel-hero", "베일 아래에서 함께 미소 짓는 신랑과 신부의 스튜디오 사진", "50% 58%"),
+    hero: photo("pastel-hero", "꽃잎이 흩날리는 야외에서 함께 선 신랑과 신부의 스튜디오 사진", "50% 58%"),
     gallery: [
       photo("pastel-gallery-1", "밝은 커튼 사이에서 함께 웃는 신랑과 신부의 스튜디오 사진", "50% 39%"),
       photo("pastel-gallery-2", "초록빛 야외 배경에 함께 선 신랑과 신부의 스튜디오 사진", "50% 31%"),
@@ -59,7 +59,7 @@ export const weddingContent = {
     groom: {
       label: "신랑 측",
       parents: ["김웅기", "홍정화"],
-      childRole: "아들",
+      childRole: "장남",
       childName: "김종인",
       contacts: [
         { relation: "신랑", name: "김종인", phone: "010-7322-2473" },
@@ -70,7 +70,7 @@ export const weddingContent = {
     bride: {
       label: "신부 측",
       parents: ["유효상", "정소은"],
-      childRole: "딸",
+      childRole: "장녀",
       childName: "유지혜",
       contacts: [
         { relation: "신부", name: "유지혜", phone: "010-6803-6841" },

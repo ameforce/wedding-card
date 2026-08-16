@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { getCalendarMonth, weddingContent } from "../src/content.js";
+import { fileURLToPath } from "node:url";
+import sharp from "sharp";
+import { getCalendarMonth, WEDDING_PHOTOS, weddingContent } from "../src/content.js";
 
 const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -31,7 +33,7 @@ test("confirmed family contacts are modeled once and exposed through accessible 
   const contacts = sides.flatMap((side) => side.contacts);
 
   assert.equal(sides.length, 2);
-  assert.deepEqual(sides.map((side) => side.childRole), ["아들", "딸"]);
+  assert.deepEqual(sides.map((side) => side.childRole), ["장남", "장녀"]);
   assert.deepEqual(sides.map((side) => side.contacts.length), [3, 3]);
   assert.ok(contacts.every((contact) => /^010-\d{4}-\d{4}$/.test(contact.phone)));
   assert.match(app, /function FamilyIntroduction\(\)/);
@@ -41,6 +43,24 @@ test("confirmed family contacts are modeled once and exposed through accessible 
   assert.match(app, /aria-label=\{`\$\{contact\.relation\} \$\{contact\.name\}에게 전화하기`\}/);
   assert.match(app, /aria-label=\{`\$\{contact\.relation\} \$\{contact\.name\}에게 문자 보내기`\}/);
   assert.match(app, /<ActionButton icon=\{Phone\} href="#contact">연락하기<\/ActionButton>/);
+});
+
+test("Pastel hero uses the approved local photo derivatives without reusing a gallery selection", async () => {
+  const hero = WEDDING_PHOTOS.pastel.hero;
+
+  assert.equal(hero.src, "/assets/photos/pastel-hero-480.webp");
+  assert.equal(hero.srcSet, "/assets/photos/pastel-hero-480.webp 480w, /assets/photos/pastel-hero-960.webp 960w");
+  assert.equal(hero.alt, "꽃잎이 흩날리는 야외에서 함께 선 신랑과 신부의 스튜디오 사진");
+  assert.equal(hero.position, "50% 58%");
+  assert.ok(WEDDING_PHOTOS.pastel.gallery.every((photo) => photo.src !== hero.src));
+
+  for (const [name, width, height] of [["pastel-hero-480.webp", 480, 720], ["pastel-hero-960.webp", 960, 1439]]) {
+    const asset = await sharp(fileURLToPath(new URL(`../public/assets/photos/${name}`, import.meta.url))).metadata();
+    assert.equal(asset.format, "webp");
+    assert.equal(asset.width, width);
+    assert.equal(asset.height, height);
+    assert.equal(asset.hasAlpha, false);
+  }
 });
 
 test("all supplied map links are safe HTTPS destinations", () => {
