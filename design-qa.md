@@ -1,6 +1,38 @@
 # Design QA
 
-## Verification pass — Pastel Letter feedback refinement
+## Accepted pass — Pastel script overlay, continuous watercolor, private guestbook, and opt-in music
+
+### Source and implementation evidence
+
+- Script source: `C:\Users\enmso\AppData\Local\Temp\codex-clipboard-afa74bd9-0c52-4bf9-98cd-8e93847e741a.png`.
+- Script implementation capture: `artifacts/qa/pastel-hero-script-390.png`, CSS viewport 390 × 844, `devicePixelRatio: 1`, `?variant=pastel&capture=1`.
+- Focused script comparison inspected as one image: `artifacts/qa/pastel-script-reference-comparison.png`.
+- Calendar seam source: `C:\Users\enmso\AppData\Local\Temp\codex-clipboard-01ed0016-ff59-4c41-833f-5c38d9582124.png`.
+- Calendar implementation capture: `artifacts/qa/pastel-calendar-seam-390.png`, CSS viewport 390 × 844, `devicePixelRatio: 1`, scrolled invitation state.
+- Focused seam comparison inspected as one image: `artifacts/qa/pastel-calendar-seam-comparison.png`.
+
+### Findings and fixes
+
+- Initial script mismatch: Dancing Script was round and casual, stayed too close to the photo interior, and used only a mild diagonal. Fix: self-hosted Allura, exact two-line `Our Wedding` / `Day`, `-15deg` rotation, a larger fluid size, and a second-line offset. At 390px its bounds were `6.09..282.19px` inside the `0..390px` invitation while extending left of the `27.30px` photo edge; there was no clipping or horizontal overflow.
+- Initial seam mismatch: three isolated placements of the 1200 × 400 watercolor source left visually separate coverage bands around the calendar. Fix: one full-height watercolor layer at `310% 100%`, four overlapping distributed blue/blush washes, one unchanged paper-grain layer, and transparent sections. The focused calendar composite shows no hard horizontal boundary between family copy, `WEDDING DAY`, the heading, and the calendar grid.
+- Music is a compact 44px fixed play/pause control with no autoplay and `preload="none"`. Live browser evidence was paused at `currentTime: 0`, played only after a click (`currentTime: 0.491`, `paused: false`), and returned to `paused: true`. Footer credit identifies Kevin MacLeod and links CC BY 4.0.
+- The public guestbook renders name/password/message fields but no message list or admin link. The author receives and can copy an opaque edit receipt after creation; the receipt is also stored on the same device. Missing API/storage returns an explicit message that nothing was sent.
+- `/admin/guestbook` is a separate couple-only surface. The Worker list endpoint fails closed without D1 and trusted upstream identity; no client-side administrator secret is present.
+
+### Responsive and accessibility evidence
+
+- Both Quiet and Pastel passed live checks at 360, 390, 430, 768, and 1440px: zero horizontal overflow, invitation capped at 430px above mobile widths, minimum tested control height 44px, and capture-mode sections immediately visible.
+- Pastel script bounds stayed inside the invitation at every required width. Quiet had no visual regression.
+- Keyboard focus showed a 2px solid outline on the variant control. Reduced-motion/capture behavior remains covered by the passing UI suite.
+- `npm run lint` passed; UI tests passed 34/34; Sites and private guestbook tests passed 10/10; design build and D1 migration packaging passed.
+
+### Remaining production activation boundary
+
+- Visual implementation is accepted. Production guestbook activation remains blocked until a real D1 database is provisioned, the migration is applied, and Sites Sign in with ChatGPT or an equivalent trusted identity gateway supplies an exact couple email allowlist. A distributed create/unlock/update rate limit is also required before public enablement.
+
+final result: passed
+
+## Superseded pass — Pastel Letter feedback refinement
 
 ### Implemented outcome
 

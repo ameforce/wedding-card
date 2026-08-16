@@ -10,7 +10,10 @@ import {
   Check,
   Copy,
   MapPin,
+  MusicNote,
   NavigationArrow,
+  Pause,
+  Play,
   Phone,
   ShareNetwork,
   Train,
@@ -19,6 +22,7 @@ import {
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import { getCalendarMonth, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
+import { createGuestbookEntry, getAdminGuestbookEntries, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
 import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
 
 const VARIANTS = {
@@ -549,6 +553,205 @@ function BottomActions({ notify, pastel = false }) {
   );
 }
 
+const GUESTBOOK_RECEIPT_KEY = "wedding-guestbook-entry-id";
+
+function MusicControl({ notify }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+
+  const togglePlayback = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+      return;
+    }
+    try {
+      await audio.play();
+      setPlaying(true);
+    } catch {
+      notify("음악을 재생하지 못했습니다. 브라우저 설정을 확인해 주세요.", "error");
+    }
+  };
+
+  return (
+    <div className="music-control">
+      <button type="button" onClick={togglePlayback} aria-pressed={playing} aria-label={playing ? "배경 음악 멈춤" : "배경 음악 재생"}>
+        {playing ? <Pause aria-hidden="true" weight="fill" /> : <Play aria-hidden="true" weight="fill" />}
+        <span>{playing ? "음악 멈춤" : "음악 재생"}</span>
+      </button>
+      <audio
+        ref={audioRef}
+        src="/assets/audio/touching-moments-one-pulse.mp3"
+        preload="none"
+        loop
+        onPause={() => setPlaying(false)}
+        onPlay={() => setPlaying(true)}
+      />
+    </div>
+  );
+}
+
+function MusicCredit() {
+  return (
+    <p className="music-credit">
+      BGM: Touching Moments One · Pulse — Kevin MacLeod · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>
+    </p>
+  );
+}
+
+function GuestbookSection({ notify }) {
+  const [mode, setMode] = useState("write");
+  const [entryId, setEntryId] = useState(() => window.localStorage.getItem(GUESTBOOK_RECEIPT_KEY) || "");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [receipt, setReceipt] = useState("");
+
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
+    setPassword("");
+    setUnlocked(false);
+    if (nextMode === "write") {
+      setName("");
+      setMessage("");
+    }
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      if (mode === "write") {
+        const result = await createGuestbookEntry({ name, password, message });
+        window.localStorage.setItem(GUESTBOOK_RECEIPT_KEY, result.id);
+        setEntryId(result.id);
+        setReceipt(result.id);
+        setName("");
+        setPassword("");
+        setMessage("");
+        notify("축하 메시지를 안전하게 전했습니다.");
+      } else if (!unlocked) {
+        const result = await unlockGuestbookEntry(entryId, { name, password });
+        setName(result.entry.name);
+        setMessage(result.entry.message);
+        setUnlocked(true);
+        notify("내 메시지를 불러왔습니다.");
+      } else {
+        await updateGuestbookEntry(entryId, { name, password, message });
+        setPassword("");
+        setUnlocked(false);
+        notify("축하 메시지를 수정했습니다.");
+      }
+    } catch (error) {
+      notify(error.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="guestbook-section section-pad" aria-labelledby="guestbook-title">
+      <div className="section-heading">
+        <p className="eyebrow">PRIVATE GUESTBOOK</p>
+        <h2 id="guestbook-title">마음을 전해 주세요</h2>
+      </div>
+      <p className="guestbook-privacy">메시지는 공개되지 않으며 신랑·신부만 확인할 수 있습니다.</p>
+      {receipt && (
+        <div className="guestbook-receipt" role="status">
+          <span>수정용 접수 번호</span>
+          <code>{receipt}</code>
+          <button type="button" onClick={async () => {
+            try {
+              await copyText(receipt);
+              notify("수정용 접수 번호를 복사했습니다.");
+            } catch {
+              notify("접수 번호를 복사하지 못했습니다.", "error");
+            }
+          }}><Copy aria-hidden="true" weight="light" /> 번호 복사</button>
+          <small>이 기기에는 자동 저장됩니다. 다른 기기에서 수정하려면 번호를 보관해 주세요.</small>
+        </div>
+      )}
+      <div className="guestbook-tabs" role="group" aria-label="방명록 기능">
+        <button type="button" className={mode === "write" ? "is-active" : ""} aria-pressed={mode === "write"} onClick={() => switchMode("write")}>새 메시지</button>
+        <button type="button" className={mode === "edit" ? "is-active" : ""} aria-pressed={mode === "edit"} onClick={() => switchMode("edit")}>내 글 수정</button>
+      </div>
+      <form className="guestbook-form" onSubmit={submit}>
+        {mode === "edit" && (
+          <label>
+            <span>접수 번호</span>
+            <input value={entryId} onChange={(event) => setEntryId(event.target.value)} required autoComplete="off" readOnly={unlocked} />
+          </label>
+        )}
+        <label>
+          <span>이름</span>
+          <input value={name} onChange={(event) => setName(event.target.value)} required maxLength={30} autoComplete="name" readOnly={unlocked} />
+        </label>
+        <label>
+          <span>비밀번호</span>
+          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={8} maxLength={72} autoComplete={mode === "write" ? "new-password" : "current-password"} />
+          <small>8자 이상 · 서버에서 단방향 해시로만 보관합니다.</small>
+        </label>
+        {(mode === "write" || unlocked) && (
+          <label>
+            <span>축하 메시지</span>
+            <textarea value={message} onChange={(event) => setMessage(event.target.value)} required minLength={1} maxLength={500} rows={5} />
+          </label>
+        )}
+        <button className="guestbook-submit" type="submit" disabled={busy}>
+          {busy ? "처리 중…" : mode === "write" ? "비공개로 전하기" : unlocked ? "수정 저장" : "내 글 불러오기"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function GuestbookAdmin() {
+  const [state, setState] = useState({ status: "idle", entries: [], message: "" });
+  const loadEntries = async () => {
+    setState({ status: "loading", entries: [], message: "" });
+    try {
+      const result = await getAdminGuestbookEntries();
+      setState({ status: "ready", entries: result.entries, message: "" });
+    } catch (error) {
+      setState({
+        status: "error",
+        entries: [],
+        message: error.status === 503
+          ? "관리자 인증 공급자와 저장소가 아직 연결되지 않았습니다. 연결 전에는 어떤 메시지도 조회할 수 없습니다."
+          : "신랑·신부 계정 인증이 필요합니다.",
+      });
+    }
+  };
+
+  return (
+    <main className="guestbook-admin-shell">
+      <section className="guestbook-admin" aria-labelledby="admin-title">
+        <MusicNote aria-hidden="true" weight="light" />
+        <p className="eyebrow">COUPLE ONLY</p>
+        <h1 id="admin-title">비공개 방명록</h1>
+        <p>인증된 신랑·신부 계정에서만 메시지를 조회할 수 있습니다.</p>
+        <button type="button" onClick={loadEntries} disabled={state.status === "loading"}>인증 확인 후 불러오기</button>
+        {state.message && <p className="admin-message" role="status">{state.message}</p>}
+        {state.status === "ready" && (
+          <ul className="admin-entry-list">
+            {state.entries.map((entry) => (
+              <li key={entry.id}>
+                <strong>{entry.name}</strong>
+                <time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleString("ko-KR")}</time>
+                <p>{entry.message}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function QuietInvitation({ notify }) {
   const photos = [WEDDING_PHOTOS.quiet.hero, ...WEDDING_PHOTOS.quiet.gallery];
   const gallery = usePhotoGallery();
@@ -583,7 +786,9 @@ function QuietInvitation({ notify }) {
       </ScrollReveal>
       <ScrollReveal><Location notify={notify} compact /></ScrollReveal>
       <ScrollReveal><ContactSection /></ScrollReveal>
+      <ScrollReveal><GuestbookSection notify={notify} /></ScrollReveal>
       <ScrollReveal><BottomActions notify={notify} /></ScrollReveal>
+      <MusicCredit />
       {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="quiet" />}
     </article>
   );
@@ -655,8 +860,9 @@ function PastelInvitation({ notify }) {
       </ScrollReveal>
       <ScrollReveal><Location notify={notify} /></ScrollReveal>
       <ScrollReveal><ContactSection pastel notify={notify} /></ScrollReveal>
+      <ScrollReveal><GuestbookSection notify={notify} /></ScrollReveal>
       <ScrollReveal><BottomActions notify={notify} pastel /></ScrollReveal>
-      <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.</footer>
+      <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.<MusicCredit /></footer>
       {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="pastel" />}
     </article>
   );
@@ -684,7 +890,7 @@ function VariantSwitcher({ variant, onChange }) {
   );
 }
 
-export function App() {
+function WeddingApp() {
   const [variant, setVariant] = useState(getVariant);
   const [toast, setToast] = useState({ message: "", tone: "success" });
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
@@ -709,6 +915,7 @@ export function App() {
       <div className="invitation-stage">
         {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
       </div>
+      {!captureMode && <MusicControl notify={notify} />}
       <div className={`toast is-${toast.tone} ${toast.message ? "is-visible" : ""}`} role="status" aria-live="polite">
         {toast.tone === "error" ? <WarningCircle aria-hidden="true" weight="bold" /> : <Check aria-hidden="true" weight="bold" />}
         <span>{toast.message}</span>
@@ -727,4 +934,8 @@ export function App() {
       )}
     </main>
   );
+}
+
+export function App() {
+  return window.location.pathname === "/admin/guestbook" ? <GuestbookAdmin /> : <WeddingApp />;
 }

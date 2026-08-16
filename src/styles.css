@@ -1,5 +1,5 @@
 @import "@fontsource-variable/cormorant-garamond";
-@import "@fontsource/dancing-script/latin-500.css";
+@import "@fontsource/allura/400.css";
 @import "@fontsource-variable/noto-serif-kr";
 @import "@fontsource-variable/noto-sans-kr";
 
@@ -265,14 +265,14 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-invitation::before {
   background-image:
     url("/assets/design/pastel-watercolor-wash.webp"),
-    url("/assets/design/pastel-watercolor-wash.webp"),
-    url("/assets/design/pastel-watercolor-wash.webp"),
-    radial-gradient(ellipse at 6% 26%, rgba(207, 226, 241, .24), transparent 23%),
-    radial-gradient(ellipse at 93% 58%, rgba(244, 214, 220, .23), transparent 25%);
-  background-position: 50% 0, 14% 39%, 86% 78%, 0 0, 0 0;
+    radial-gradient(ellipse at 5% 19%, rgba(202, 225, 241, .32), transparent 24%),
+    radial-gradient(ellipse at 96% 44%, rgba(246, 211, 218, .29), transparent 25%),
+    radial-gradient(ellipse at 8% 67%, rgba(212, 229, 241, .25), transparent 25%),
+    radial-gradient(ellipse at 91% 88%, rgba(244, 213, 220, .24), transparent 24%);
+  background-position: 50% 0, 0 0, 0 0, 0 0, 0 0;
   background-repeat: no-repeat;
-  background-size: 250% auto, 270% auto, 265% auto, 100% 100%, 100% 100%;
-  opacity: .78;
+  background-size: 310% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+  opacity: .82;
 }
 .pastel-invitation::after {
   background: url("/assets/design/pastel-paper-grain.svg") 0 0 / 180px 180px repeat;
@@ -286,20 +286,20 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-hero-photo { width: 86%; aspect-ratio: 4 / 5; margin: 0 auto clamp(32px, 8vw, 40px); overflow: visible; border-radius: 50% 50% 18px 18px / 20% 20% 18px 18px; }
 .pastel-hero-photo img { border-radius: inherit; filter: saturate(.88) contrast(.96) brightness(1.02); }
 .pastel-hero-photo .photo-overlay-label {
-  --hero-label-rotation: -8deg;
-  top: 14%;
-  left: -17px;
+  --hero-label-rotation: -15deg;
+  top: 10%;
+  left: clamp(-22px, -4vw, -14px);
   display: grid;
   justify-items: start;
   color: rgba(255, 253, 248, .98);
-  font-family: "Dancing Script", cursive;
-  font-size: clamp(39px, 12vw, 50px);
-  font-weight: 500;
-  line-height: .72;
-  letter-spacing: -.025em;
+  font-family: "Allura", cursive;
+  font-size: clamp(50px, 15.2vw, 65px);
+  font-weight: 400;
+  line-height: .62;
+  letter-spacing: -.035em;
   text-shadow: 0 2px 16px rgba(25, 38, 48, .52);
 }
-.pastel-hero-photo .photo-overlay-label-line.is-day { margin-left: 47px; }
+.pastel-hero-photo .photo-overlay-label-line.is-day { margin-top: .08em; margin-left: clamp(84px, 26vw, 112px); }
 .pastel-hero-copy { position: relative; display: flex; padding: 0 30px; flex-direction: column; align-items: center; justify-content: center; background: transparent; text-align: center; }
 .pastel-hero h1 { margin: 0; font-family: "Noto Serif KR Variable", serif; font-size: 29px; font-weight: 430; letter-spacing: .12em; }
 .pastel-hero h1 b { font-weight: 300; }
@@ -373,6 +373,61 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .bottom-actions.is-pastel { grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding: 12px 18px; background: rgba(229, 239, 247, .45); border-top: 0; }
 .bottom-actions.is-pastel .action-button { min-height: 62px; padding: 7px 4px; flex-direction: column; gap: 5px; background: #e5eff7; border-radius: 12px; font-size: 13px; }
 .bottom-actions.is-pastel .action-button + .action-button::before { display: none; }
+
+.guestbook-section { padding-top: 28px; padding-bottom: 28px; }
+.guestbook-section .section-heading { margin-bottom: 8px; text-align: center; }
+.guestbook-section .section-heading .eyebrow { margin-bottom: 5px; color: #81766d; }
+.guestbook-privacy { margin: 0 auto 16px; color: #746d67; font-family: "Noto Serif KR Variable", serif; font-size: 13px; line-height: 1.65; text-align: center; }
+.guestbook-receipt { display: grid; margin-bottom: 14px; padding: 12px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 10px; color: #5f5954; background: rgba(255, 255, 255, .56); border: 1px solid rgba(91, 82, 73, .14); border-radius: 12px; font-size: 12px; }
+.guestbook-receipt > span { grid-column: 1 / -1; font-weight: 650; }
+.guestbook-receipt code { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.guestbook-receipt button { display: inline-flex; min-height: 44px; padding: 0 10px; align-items: center; gap: 5px; color: inherit; background: rgba(255, 255, 255, .7); border: 1px solid rgba(91, 82, 73, .14); border-radius: 9px; cursor: pointer; font: inherit; }
+.guestbook-receipt button svg { width: 15px; height: 15px; }
+.guestbook-receipt small { grid-column: 1 / -1; color: #817a74; font-size: 12px; line-height: 1.5; }
+.guestbook-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 12px; }
+.guestbook-tabs button { min-height: 44px; color: inherit; background: rgba(255, 255, 255, .4); border: 1px solid rgba(91, 82, 73, .14); border-radius: 10px; cursor: pointer; font-size: 13px; }
+.guestbook-tabs button.is-active { background: rgba(196, 146, 119, .14); border-color: rgba(143, 99, 76, .36); font-weight: 650; }
+.guestbook-form { display: grid; gap: 11px; }
+.guestbook-form label { display: grid; gap: 5px; color: #5f5954; font-size: 13px; }
+.guestbook-form input,
+.guestbook-form textarea { width: 100%; min-height: 44px; padding: 10px 12px; color: #33312f; background: rgba(255, 255, 255, .66); border: 1px solid rgba(91, 82, 73, .18); border-radius: 10px; font: inherit; }
+.guestbook-form textarea { min-height: 120px; resize: vertical; line-height: 1.65; }
+.guestbook-form small { color: #817a74; font-size: 12px; line-height: 1.5; }
+.guestbook-submit { min-height: 48px; margin-top: 3px; color: #fff; background: #6d625a; border: 0; border-radius: 12px; cursor: pointer; font: inherit; font-size: 14px; font-weight: 650; }
+.guestbook-submit:disabled { cursor: wait; opacity: .58; }
+
+.music-control { position: fixed; z-index: 24; top: calc(96px + env(safe-area-inset-top)); right: max(16px, calc((100vw - 430px) / 2 + 16px)); }
+.music-control button { display: grid; width: 44px; height: 44px; padding: 0; place-items: center; color: #415a79; background: rgba(255, 255, 255, .86); border: 1px solid rgba(71, 98, 127, .16); border-radius: 50%; cursor: pointer; box-shadow: 0 8px 22px rgba(42, 59, 77, .12); backdrop-filter: blur(10px); }
+.music-control button svg { width: 17px; height: 17px; }
+.music-control button span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.music-credit { margin: 0; padding: 9px 20px 14px; color: #817a74; font-size: 12px; line-height: 1.55; text-align: center; }
+.music-credit a { color: inherit; }
+
+.pastel-invitation .guestbook-section .section-heading .eyebrow,
+.pastel-invitation .music-control .eyebrow { color: #8091a5; }
+.pastel-invitation .guestbook-privacy,
+.pastel-invitation .guestbook-form label,
+.pastel-invitation .guestbook-form small { color: #6d7d8c; }
+.pastel-invitation .guestbook-tabs button,
+.pastel-invitation .guestbook-receipt,
+.pastel-invitation .guestbook-form input,
+.pastel-invitation .guestbook-form textarea { color: #294765; background: rgba(255, 255, 255, .48); border-color: rgba(71, 98, 127, .14); }
+.pastel-invitation .guestbook-tabs button.is-active { background: rgba(213, 229, 241, .66); border-color: rgba(96, 127, 158, .3); }
+.pastel-invitation .guestbook-submit { background: #6f8aa6; }
+.pastel-invitation .music-credit { color: #74869a; }
+
+.guestbook-admin-shell { min-height: 100vh; padding: 40px 20px; color: #233d60; background: #f8f7f2; }
+.guestbook-admin { width: min(100%, 720px); margin: 0 auto; padding: clamp(28px, 7vw, 54px); background: #fff; border: 1px solid rgba(71, 98, 127, .12); border-radius: 18px; box-shadow: 0 24px 70px rgba(38, 58, 78, .1); }
+.guestbook-admin > svg { width: 28px; height: 28px; }
+.guestbook-admin h1 { margin: 8px 0 10px; font-family: "Noto Serif KR Variable", serif; font-size: 30px; font-weight: 520; }
+.guestbook-admin > p:not(.eyebrow) { color: #617386; line-height: 1.7; }
+.guestbook-admin > button { min-height: 46px; padding: 0 16px; color: #fff; background: #516f8e; border: 0; border-radius: 10px; cursor: pointer; font: inherit; }
+.guestbook-admin > button:disabled { cursor: wait; opacity: .6; }
+.guestbook-admin .admin-message { padding: 12px; background: #f6ecec; border-radius: 10px; font-size: 13px; }
+.admin-entry-list { display: grid; margin: 24px 0 0; padding: 0; gap: 12px; list-style: none; }
+.admin-entry-list li { padding: 16px; background: #f5f8fa; border-radius: 12px; }
+.admin-entry-list time { margin-left: 8px; color: #718196; font-size: 12px; }
+.admin-entry-list p { margin: 9px 0 0; line-height: 1.7; white-space: pre-wrap; }
 .pastel-footer { padding: 17px 24px 22px; color: #60768f; font-family: "Noto Serif KR Variable", serif; font-size: 13px; line-height: 1.7; text-align: center; }
 
 .gallery-lightbox { --lightbox-bg: rgba(248, 245, 238, .96); --lightbox-ink: #3f3933; --lightbox-control: rgba(255, 255, 255, .76); --lightbox-border: rgba(91, 82, 73, .14); position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: calc(64px + env(safe-area-inset-top)) 56px calc(64px + env(safe-area-inset-bottom)); color: var(--lightbox-ink); background: var(--lightbox-bg); backdrop-filter: blur(16px); touch-action: pan-y; }

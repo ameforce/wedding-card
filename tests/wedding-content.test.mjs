@@ -8,6 +8,7 @@ import { getCalendarMonth, WEDDING_PHOTOS, weddingContent } from "../src/content
 
 const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+const guestbookApi = await readFile(new URL("../src/guestbook-api.js", import.meta.url), "utf8");
 
 test("user-confirmed wedding facts are represented without filling unknown fields", () => {
   assert.deepEqual(weddingContent.couple, { groom: "김종인", bride: "유지혜" });
@@ -191,21 +192,36 @@ test("Pastel hero uses a breathing-room inset photo frame without a heavy treatm
   assert.match(app, /className="photo-overlay-label"/);
   const overlay = css.match(/\.pastel-hero-photo \.photo-overlay-label\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.match(css, /\.photo-overlay-label\s*\{[^}]*position:\s*absolute/);
-  assert.match(overlay, /font-family:\s*"Dancing Script", cursive/);
-  assert.match(overlay, /left:\s*-17px/);
-  assert.match(overlay, /--hero-label-rotation:\s*-8deg/);
+  assert.match(overlay, /font-family:\s*"Allura", cursive/);
+  assert.match(overlay, /left:\s*clamp\(-22px,\s*-4vw,\s*-14px\)/);
+  assert.match(overlay, /--hero-label-rotation:\s*-15deg/);
   assert.match(css, /\.pastel-hero-photo\s*\{[^}]*overflow:\s*visible/);
-  assert.match(css, /\.pastel-hero-photo \.photo-overlay-label-line\.is-day\s*\{[^}]*margin-left:\s*47px/);
+  assert.match(css, /\.pastel-hero-photo \.photo-overlay-label-line\.is-day\s*\{[^}]*margin-left:\s*clamp\(84px,\s*26vw,\s*112px\)/);
 });
 
-test("Pastel distributes its watercolor and paper texture beyond the hero without adding an unlicensed audio control", () => {
+test("Pastel uses one continuous watercolor surface and an opt-in licensed audio control", () => {
   assert.ok(existsSync(new URL("../public/assets/design/pastel-paper-grain.svg", import.meta.url)));
-  assert.match(css, /@import "@fontsource\/dancing-script\/latin-500\.css"/);
+  assert.ok(existsSync(new URL("../public/assets/audio/touching-moments-one-pulse.mp3", import.meta.url)));
+  assert.ok(existsSync(new URL("../docs/audio-license.md", import.meta.url)));
+  assert.match(css, /@import "@fontsource\/allura\/400\.css"/);
   assert.match(css, /\.pastel-invitation\s*\{[^}]*isolation:\s*isolate/);
-  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*?background-position:\s*50% 0, 14% 39%, 86% 78%/);
+  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*?background-size:\s*310% 100%/);
   assert.match(css, /\.pastel-invitation::after\s*\{[^}]*pastel-paper-grain\.svg/);
   assert.match(css, /\.pastel-invitation > \*\s*\{[^}]*z-index:\s*1/);
-  assert.doesNotMatch(app, /<audio\b|<Audio\b/);
+  assert.match(app, /<audio[\s\S]*preload="none"[\s\S]*loop/);
+  assert.doesNotMatch(app, /autoPlay|autoplay/);
+  assert.match(app, /Touching Moments One · Pulse/);
+  assert.match(app, /Kevin MacLeod/);
+  assert.match(app, /creativecommons\.org\/licenses\/by\/4\.0/);
+});
+
+test("private guestbook gives the author a recoverable opaque receipt for later edits", () => {
+  assert.match(app, /GUESTBOOK_RECEIPT_KEY/);
+  assert.match(app, /window\.localStorage\.setItem\(GUESTBOOK_RECEIPT_KEY, result\.id\)/);
+  assert.match(app, /수정용 접수 번호/);
+  assert.match(app, /copyText\(receipt\)/);
+  assert.match(app, /다른 기기에서 수정하려면 번호를 보관해 주세요/);
+  assert.match(guestbookApi, /메시지는 전송되지 않았습니다/);
 });
 
 test("section spacing and reveal motion remain subtle and reduced-motion safe", () => {
