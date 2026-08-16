@@ -1,5 +1,56 @@
 # Design QA
 
+## Current pass — Pastel gallery and readability redesign
+
+This pass supersedes the earlier Pastel layout notes below. The older sections remain as implementation history only.
+
+### Comparison targets
+
+- Source visual truth: `C:/Users/enmso/.codex/visualizations/2026/08/12/019ff501-f8d7-7280-b3f3-9fed0fbb6140/09-pastel-letter-album.png`, with the user-approved deviations to remove the redundant timeline, enlarge real photographs, make the story full-width, and remove coupon-like utility separators.
+- Implementation screenshot: `artifacts/qa/pastel-redesign-390-stitched.png`.
+- Combined comparison input: `artifacts/qa/pastel-redesign-source-comparison.png`.
+- Focused interaction evidence: `artifacts/qa/pastel-redesign-390-gallery.png`, `artifacts/qa/pastel-redesign-390-lightbox.png`, and `artifacts/qa/pastel-redesign-390-venue.png`.
+- Source pixels: 390 × 1040. Implementation pixels: 390 × 2050. Both use a 390px CSS width at device scale factor 1; the implementation is intentionally taller because readable type, full-height photographs, a real map, and larger touch controls replace the source mock's microtype and compact placeholders.
+- CSS viewport for browser captures: 390 × 844 at device scale factor 1.
+- State: `?variant=pastel`, default invitation plus the first-photo lightbox state.
+
+### Full-view and focused comparison evidence
+
+- The warm-white paper, powder-blue/blush watercolor hero, navy Korean serif hierarchy, centered invitation rhythm, album character, map section, and soft-blue utilities remain faithful to the selected Pastel target.
+- The approved product change intentionally replaces the source's tiny 94px photo strips with four 3:4 real-photo buttons and removes the duplicate timeline. `우리의 이야기` now spans the full content width.
+- All four supplied studio photographs are sharp, use their approved focal positions, and remain recognizable without AI alteration. No placeholder art, generated people, or CSS image substitute is present.
+- The real Kakao map image and visible attribution replace the target's fictional line map.
+- Focused review was required because interaction controls and image crops were too small to judge in the full-view comparison. The gallery, lightbox, and venue/action captures show these areas at the actual 390px viewport.
+
+### Comparison history for this pass
+
+1. Earlier audit findings: fixed 94px gallery rows cropped most of each portrait; photos were non-interactive; `우리의 하루` rendered two unconfirmed `시간 미정` entries beside a very narrow story column; boxed route and footer separators read like a coupon. Result: blocked with P1 gallery usability and P2 wrapping/action-surface findings.
+   Before evidence: `artifacts/qa/pastel-review-02-mobile-top.png`, `artifacts/qa/pastel-review-03-mobile-gallery-story.png`, and `artifacts/qa/pastel-review-04-mobile-venue.png`.
+2. Implementation fix: removed the timeline data and column, joined the existing story into one full-width paragraph, changed the gallery to four 3:4 buttons, and added a portal lightbox with close/previous/next controls, body scroll lock, Escape and arrow keys, focus containment/restoration, swipe navigation, reduced-motion compatibility, and safe-area offsets.
+3. First post-fix browser pass: the layout and lightbox passed, but `네이버 지도` wrapped while adjacent route labels stayed on one line. Fix: the visible label is now `네이버` with the full accessible label `네이버 지도에서 길찾기`.
+4. Final post-fix evidence: no actionable P0, P1, or P2 finding remains. At 360/390/430px, route and footer action labels remain single-line; the story uses 15px text with 30px line-height and wraps naturally to 3/2/2 lines.
+
+### Responsive, behavior, and accessibility evidence
+
+- Browser widths checked for both Quiet and Pastel: 360, 390, 430, 768, and 1440px.
+- At all ten variant/width combinations, document width equaled viewport width, failed-image count was zero, and the Browser console produced no error events.
+- Pastel rendered four gallery buttons at every width. Opening a photo set `aria-modal="true"`, moved focus to the close button, locked body scrolling, and restored focus to the originating photo after closing.
+- Runtime controls passed: right arrow advanced the caption, Escape closed the dialog, the last focusable control cycled back to the close control, and a leftward mobile drag advanced from photo 1 to photo 2.
+- Keyboard and touch checks support this component-level result; this report does not claim full-site accessibility conformance.
+
+### Required fidelity surfaces
+
+- Fonts and typography: Noto Serif KR retains the selected editorial tone. The story is 15px/30px rather than mockup microtype; action labels remain readable and untruncated across the required widths.
+- Spacing and layout rhythm: save cards stack below 600px, the gallery uses a balanced 2 × 2 portrait grid, the story is centered at full width, and venue/actions use independent soft surfaces without divider rows.
+- Colors and visual tokens: the selected ivory, navy, powder-blue, blush, and low-contrast gray palette is preserved.
+- Image quality and asset fidelity: all four approved studio assets render through responsive `srcset`; crops were visually checked at 390px and in the contain-mode lightbox.
+- Copy and content: the redundant timeline and its unconfirmed entries are absent. Confirmed names, date, time, venue, address, and map destinations remain unchanged.
+- Icons and controls: existing Phosphor icons remain optically centered; lightbox controls are 48 × 48px and route/footer controls meet the existing mobile touch-target contract.
+
+### Follow-up polish
+
+- P3: the fixed design-review switcher and unconfirmed-content badge remain preview-only review chrome. They are not part of the selected invitation art direction and must be handled separately before public release.
+
 ## Comparison targets
 
 ### Quiet Editorial

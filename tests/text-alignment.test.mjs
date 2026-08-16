@@ -26,6 +26,14 @@ test("Pastel save-card titles share one horizontal action alignment", () => {
   assert.match(rule(".save-cards .save-calendar-action"), /display:\s*grid/);
 });
 
+test("Pastel actions use independent soft controls without coupon separators", () => {
+  assert.match(rule(".save-cards"), /gap:\s*10px/);
+  assert.match(rule(".save-cards .action-button"), /border-radius:\s*14px/);
+  assert.match(rule(".bottom-actions.is-pastel"), /gap:\s*8px/);
+  assert.match(rule(".bottom-actions.is-pastel .action-button + .action-button::before"), /display:\s*none/);
+  assert.match(app, /ariaLabel="네이버 지도에서 길찾기">네이버</);
+});
+
 test("Quiet date line uses a single Korean-capable serif family", () => {
   const dateLine = rule(".date-line");
   assert.match(dateLine, /font-family:\s*"Noto Serif KR Variable", serif/);

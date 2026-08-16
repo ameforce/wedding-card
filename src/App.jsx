@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
   Bus,
   CalendarBlank,
   CaretRight,
@@ -12,7 +14,9 @@ import {
   ShareNetwork,
   Train,
   WarningCircle,
+  X,
 } from "@phosphor-icons/react";
+import { createPortal } from "react-dom";
 import { DESIGN_ASSETS, getCalendarMonth, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
 import { copyText, downloadCalendar, eventSummaryText, shareInvitation } from "./invitation-actions.js";
 
@@ -172,7 +176,7 @@ function VenueMap() {
   );
 }
 
-function ActionButton({ icon: Icon, trailingIcon: TrailingIcon, children, href, onClick, className = "" }) {
+function ActionButton({ icon: Icon, trailingIcon: TrailingIcon, children, href, onClick, className = "", ariaLabel }) {
   const content = (
     <>
       <Icon className="action-icon" aria-hidden="true" weight="light" />
@@ -182,10 +186,10 @@ function ActionButton({ icon: Icon, trailingIcon: TrailingIcon, children, href, 
   );
 
   if (href) {
-    return <a className={`action-button ${className}`} href={href} target="_blank" rel="noreferrer" onClick={onClick}>{content}</a>;
+    return <a className={`action-button ${className}`} href={href} target="_blank" rel="noreferrer" onClick={onClick} aria-label={ariaLabel}>{content}</a>;
   }
 
-  return <button className={`action-button ${className}`} type="button" onClick={onClick}>{content}</button>;
+  return <button className={`action-button ${className}`} type="button" onClick={onClick} aria-label={ariaLabel}>{content}</button>;
 }
 
 function Location({ notify, compact = false }) {
@@ -213,7 +217,7 @@ function Location({ notify, compact = false }) {
         </button>
       </div>
       <div className="route-actions" aria-label="길찾기 서비스">
-        <ActionButton icon={MapPin} href={weddingContent.venue.mapLinks.naver} onClick={() => openMap("네이버 지도")}>네이버 지도</ActionButton>
+        <ActionButton icon={MapPin} href={weddingContent.venue.mapLinks.naver} onClick={() => openMap("네이버 지도")} ariaLabel="네이버 지도에서 길찾기">네이버</ActionButton>
         <ActionButton icon={NavigationArrow} href={weddingContent.venue.mapLinks.kakao} onClick={() => openMap("카카오맵")}>카카오맵</ActionButton>
         <ActionButton icon={NavigationArrow} href={weddingContent.venue.mapLinks.tmap} onClick={() => openMap("T map")}>T map</ActionButton>
       </div>
@@ -310,6 +314,163 @@ function SaveCards({ notify }) {
   );
 }
 
+function PastelGallery() {
+  const [activeIndex, setActiveIndex] = useState(null);
+  const lightboxRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const triggerRefs = useRef([]);
+  const openerIndexRef = useRef(null);
+  const pointerStartXRef = useRef(null);
+  const isOpen = activeIndex !== null;
+  const photos = WEDDING_PHOTOS.pastel.gallery;
+
+  const openPhoto = (index) => {
+    openerIndexRef.current = index;
+    setActiveIndex(index);
+  };
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const galleryTriggers = triggerRefs.current;
+    document.body.style.overflow = "hidden";
+    window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      galleryTriggers[openerIndexRef.current]?.focus();
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setActiveIndex(null);
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setActiveIndex((index) => (index - 1 + photos.length) % photos.length);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setActiveIndex((index) => (index + 1) % photos.length);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = [...lightboxRef.current.querySelectorAll("button")];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, photos.length]);
+
+  const activePhoto = isOpen ? photos[activeIndex] : null;
+
+  return (
+    <>
+      <section className="pastel-gallery-section section-pad" aria-labelledby="pastel-gallery-title">
+        <div className="pastel-section-heading">
+          <p className="eyebrow">OUR MOMENTS</p>
+          <h2 id="pastel-gallery-title">우리의 순간</h2>
+        </div>
+        <div className="pastel-gallery">
+          {photos.map((photo, index) => (
+            <button
+              className="pastel-gallery-item"
+              type="button"
+              aria-label={`${photos.length}장 중 ${index + 1}번째 사진 크게 보기`}
+              ref={(node) => { triggerRefs.current[index] = node; }}
+              onClick={() => openPhoto(index)}
+              key={photo.src}
+            >
+              <img
+                src={photo.src}
+                srcSet={photo.srcSet}
+                sizes="(min-width: 768px) 169px, calc((100vw - 60px) / 2)"
+                alt={photo.alt}
+                loading="lazy"
+                decoding="async"
+                style={{ objectPosition: photo.position }}
+              />
+              <span aria-hidden="true">크게 보기</span>
+            </button>
+          ))}
+        </div>
+      </section>
+      {isOpen && createPortal(
+        <div
+          className="gallery-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="gallery-lightbox-title"
+          ref={lightboxRef}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setActiveIndex(null);
+          }}
+          onPointerDown={(event) => {
+            pointerStartXRef.current = event.clientX;
+          }}
+          onPointerUp={(event) => {
+            const startX = pointerStartXRef.current;
+            const endX = event.clientX;
+            pointerStartXRef.current = null;
+            if (startX === null || Math.abs(endX - startX) < 48) return;
+            setActiveIndex((index) => (
+              endX < startX
+                ? (index + 1) % photos.length
+                : (index - 1 + photos.length) % photos.length
+            ));
+          }}
+          onPointerCancel={() => { pointerStartXRef.current = null; }}
+        >
+          <h2 className="sr-only" id="gallery-lightbox-title">웨딩 사진 크게 보기</h2>
+          <button
+            className="lightbox-close"
+            type="button"
+            aria-label="갤러리 닫기"
+            ref={closeButtonRef}
+            onClick={() => setActiveIndex(null)}
+          >
+            <X aria-hidden="true" weight="light" />
+          </button>
+          <figure className="lightbox-figure">
+            <img
+              src={activePhoto.src}
+              srcSet={activePhoto.srcSet}
+              sizes="min(88vw, 760px)"
+              alt={activePhoto.alt}
+              style={{ objectPosition: activePhoto.position }}
+            />
+            <figcaption aria-live="polite">{photos.length}장 중 {activeIndex + 1}번째 사진</figcaption>
+          </figure>
+          <button className="lightbox-control is-previous" type="button" aria-label="이전 사진" onClick={() => setActiveIndex((index) => (index - 1 + photos.length) % photos.length)}>
+            <ArrowLeft aria-hidden="true" weight="light" />
+          </button>
+          <button className="lightbox-control is-next" type="button" aria-label="다음 사진" onClick={() => setActiveIndex((index) => (index + 1) % photos.length)}>
+            <ArrowRight aria-hidden="true" weight="light" />
+          </button>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
 function PastelInvitation({ notify }) {
   return (
     <article className="invitation pastel-invitation" data-variant="pastel">
@@ -327,23 +488,13 @@ function PastelInvitation({ notify }) {
       </header>
       <Greeting />
       <SaveCards notify={notify} />
-      <section className="pastel-gallery section-pad" aria-label="웨딩 사진 갤러리">
-        <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[0]} className="pastel-photo blue-wide" />
-        <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[1]} className="pastel-photo blush" />
-        <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[2]} className="pastel-photo neutral" />
-        <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[3]} className="pastel-photo pale" />
-      </section>
-      <section className="story-grid section-pad" aria-label="예식 일정과 두 사람의 이야기">
-        <div>
-          <h2>우리의 하루</h2>
-          {weddingContent.timeline.map((item) => (
-            <p className="timeline-item" key={item.label}><span>{item.label}</span><small>{item.time}</small></p>
-          ))}
+      <PastelGallery />
+      <section className="pastel-story section-pad" aria-labelledby="pastel-story-title">
+        <div className="pastel-section-heading">
+          <p className="eyebrow">OUR STORY</p>
+          <h2 id="pastel-story-title">우리의 이야기</h2>
         </div>
-        <div>
-          <h2>우리의 이야기</h2>
-          {weddingContent.story.map((line) => <p key={line}>{line}</p>)}
-        </div>
+        <p>{weddingContent.story.join(" ")}</p>
       </section>
       <Location notify={notify} />
       <BottomActions notify={notify} pastel />

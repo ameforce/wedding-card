@@ -97,11 +97,6 @@ export const weddingContent = {
     day: 27,
     weekdays: ["일", "월", "화", "수", "목", "금", "토"],
   },
-  timeline: [
-    { label: "예식 안내", time: "오후 3시" },
-    { label: "식사 안내", time: "시간 미정" },
-    { label: "연회 및 축가", time: "시간 미정" },
-  ],
   story: [
     "처음 만난 순간부터",
     "서로의 하루가 되어주었고,",

@@ -76,3 +76,32 @@ test("venue map can render only the supplied real local asset with its attributi
   assert.match(pastelLocation, /grid-template-columns:\s*1fr/);
   assert.match(pastelMap, /grid-column:\s*1/);
 });
+
+test("Pastel removes the redundant timeline and presents one full-width story", () => {
+  assert.doesNotMatch(app, /weddingContent\.timeline|timeline-item|우리의 하루/);
+  assert.match(app, /className="pastel-story section-pad"/);
+  assert.match(app, /weddingContent\.story\.join\(" "\)/);
+
+  const pastelStory = css.match(/\.pastel-story\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.doesNotMatch(pastelStory, /grid-template-columns/);
+  assert.match(pastelStory, /text-align:\s*center/);
+});
+
+test("Pastel gallery uses portrait media and an accessible lightbox", () => {
+  assert.match(app, /className="pastel-gallery-item"/);
+  assert.match(app, /role="dialog"/);
+  assert.match(app, /aria-modal="true"/);
+  assert.match(app, /aria-label="갤러리 닫기"/);
+  assert.match(app, /aria-label="이전 사진"/);
+  assert.match(app, /aria-label="다음 사진"/);
+  assert.match(app, /event\.key === "Escape"/);
+  assert.match(app, /event\.key === "ArrowLeft"/);
+  assert.match(app, /event\.key === "ArrowRight"/);
+  assert.match(app, /onPointerDown=/);
+  assert.match(app, /onPointerUp=/);
+  assert.match(app, /onPointerCancel=/);
+  assert.match(app, /Math\.abs\(endX - startX\) < 48/);
+
+  const galleryItem = css.match(/\.pastel-gallery-item\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.match(galleryItem, /aspect-ratio:\s*3\s*\/\s*4/);
+});
