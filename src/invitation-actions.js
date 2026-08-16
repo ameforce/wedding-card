@@ -86,22 +86,75 @@ export function downloadCalendar(content) {
   window.setTimeout(() => URL.revokeObjectURL(href), 0);
 }
 
-export async function shareInvitation(content, url) {
+function calendarFilename(content) {
+  return `${content.event.isoDate}-${content.couple.groom}-${content.couple.bride}.ics`;
+}
+
+function createCalendarShareFile(content) {
+  if (typeof File !== "function") return null;
+  return new File(
+    [createCalendarFile(content)],
+    calendarFilename(content),
+    { type: "text/calendar;charset=utf-8" },
+  );
+}
+
+export async function saveCalendar(content, platform = navigator, fallback = downloadCalendar) {
+  const file = createCalendarShareFile(content);
+  const payload = file
+    ? { title: `${content.couple.groom} · ${content.couple.bride} 결혼식 일정`, files: [file] }
+    : null;
+
+  // There is no cross-platform browser API that inserts an event into the
+  // user's default calendar. When the current browser/OS explicitly reports
+  // that it can share an iCalendar file, hand the file to its native chooser.
+  if (payload && platform.share && platform.canShare) {
+    let canShareCalendar = false;
+    try {
+      canShareCalendar = platform.canShare(payload);
+    } catch {
+      canShareCalendar = false;
+    }
+
+    if (canShareCalendar) {
+      try {
+        await platform.share(payload);
+        return "shared-file";
+      } catch (error) {
+        if (error?.name === "AbortError") return "cancelled";
+      }
+    }
+  }
+
+  fallback(content);
+  return "downloaded";
+}
+
+export async function shareInvitation(content, url, platform = navigator, fallback = copyText) {
   const payload = {
     title: `${content.couple.groom} · ${content.couple.bride} 결혼식`,
     text: eventSummaryText(content),
     url,
   };
 
-  if (navigator.share) {
+  let canSharePayload = Boolean(platform.share);
+  if (canSharePayload && typeof platform.canShare === "function") {
     try {
-      await navigator.share(payload);
+      canSharePayload = platform.canShare(payload);
+    } catch {
+      canSharePayload = false;
+    }
+  }
+
+  if (canSharePayload) {
+    try {
+      await platform.share(payload);
       return "shared";
     } catch (error) {
       if (error?.name === "AbortError") return "cancelled";
     }
   }
 
-  await copyText(`${payload.text}\n${url}`);
+  await fallback(`${payload.text}\n${url}`);
   return "copied";
 }

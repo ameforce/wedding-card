@@ -65,7 +65,7 @@ test("venue map can render only the supplied real local asset with its attributi
   assert.ok(existsSync(new URL("../public/assets/map/venue-map.webp", import.meta.url)));
   assert.ok(!existsSync(new URL("../public/assets/design/abstract-map.webp", import.meta.url)));
   assert.match(app, /<img src=\{map\.localAssetPath\} alt=\{map\.alt\}/);
-  assert.match(app, /지도 출처: \{map\.sourceAttribution\}/);
+  assert.match(app, /<strong>\{map\.sourceAttribution\}<\/strong> 제공/);
   assert.doesNotMatch(app, /DESIGN MAP|abstract-map|map-pin/);
   assert.match(css, /\.map-frame > img \{[^}]*aspect-ratio:\s*2\s*\/\s*1/);
   const caption = css.match(/\.map-frame figcaption\s*\{([^}]+)\}/)?.[1] ?? "";
@@ -104,4 +104,12 @@ test("Pastel gallery uses portrait media and an accessible lightbox", () => {
 
   const galleryItem = css.match(/\.pastel-gallery-item\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.match(galleryItem, /aspect-ratio:\s*3\s*\/\s*4/);
+});
+
+test("Quiet photos use the same accessible lightbox contract", () => {
+  assert.match(app, /const photos = \[WEDDING_PHOTOS\.quiet\.hero, \.\.\.WEDDING_PHOTOS\.quiet\.gallery\]/);
+  assert.match(app, /<PhotoButton photo=\{photos\[0\]\}/);
+  assert.match(app, /<PhotoLightbox photos=\{photos\} gallery=\{gallery\} tone="quiet"/);
+  assert.match(css, /\.gallery-lightbox\.is-pastel/);
+  assert.doesNotMatch(css, /background:\s*rgba\(18,\s*27,\s*38/);
 });

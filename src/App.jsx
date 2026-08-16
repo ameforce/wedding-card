@@ -18,7 +18,7 @@ import {
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import { DESIGN_ASSETS, getCalendarMonth, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
-import { copyText, downloadCalendar, eventSummaryText, shareInvitation } from "./invitation-actions.js";
+import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
 
 const VARIANTS = {
   quiet: {
@@ -36,28 +36,144 @@ function getVariant() {
   return value === "pastel" ? "pastel" : "quiet";
 }
 
-function ImageSlot({ asset, className = "", crop, label = "실제 사진으로 교체될 디자인 자리", priority = false }) {
+function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes }) {
   const broken = new URLSearchParams(window.location.search).get("brokenAsset") === "1";
   const [failed, setFailed] = useState(false);
-  const source = asset ?? { src: DESIGN_ASSETS.quietLight, alt: "", position: crop ?? "center" };
   return (
-    <figure className={`image-slot ${asset ? "has-photo" : ""} ${className} ${failed ? "is-fallback" : ""}`}>
+    <button
+      className={`photo-button ${className} ${failed ? "is-fallback" : ""}`}
+      type="button"
+      aria-label={`${index + 1}번째 사진 크게 보기`}
+      ref={(node) => registerTrigger(index, node)}
+      onClick={() => openPhoto(index)}
+    >
       {!failed && (
         <img
-          src={broken ? "/assets/design/missing-image.png" : source.src}
-          srcSet={broken ? undefined : source.srcSet}
-          sizes={source.sizes}
-          alt={source.alt}
+          src={broken ? "/assets/design/missing-image.png" : photo.src}
+          srcSet={broken ? undefined : photo.srcSet}
+          sizes={sizes ?? photo.sizes}
+          alt={photo.alt}
           loading={priority ? "eager" : "lazy"}
           decoding="async"
           fetchPriority={priority ? "high" : "auto"}
-          style={{ objectPosition: crop ?? source.position }}
+          style={{ objectPosition: photo.position }}
           onError={() => setFailed(true)}
         />
       )}
-      {!asset && <figcaption className="sr-only">{label}</figcaption>}
-      {!asset && <span className="crop-mark" aria-hidden="true" />}
-    </figure>
+      <span className="sr-only">사진 크게 보기</span>
+    </button>
+  );
+}
+
+function usePhotoGallery() {
+  const [activeIndex, setActiveIndex] = useState(null);
+  const triggerRefs = useRef([]);
+  const openerIndexRef = useRef(null);
+  const openPhoto = (index) => {
+    openerIndexRef.current = index;
+    setActiveIndex(index);
+  };
+  const registerTrigger = (index, node) => {
+    triggerRefs.current[index] = node;
+  };
+  return { activeIndex, setActiveIndex, triggerRefs, openerIndexRef, openPhoto, registerTrigger };
+}
+
+function PhotoLightbox({ photos, gallery, tone }) {
+  const lightboxRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const pointerStartXRef = useRef(null);
+  const { activeIndex, setActiveIndex, triggerRefs, openerIndexRef } = gallery;
+  const activePhoto = photos[activeIndex];
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const galleryTriggers = triggerRefs.current;
+    const openerIndex = openerIndexRef.current;
+    document.body.style.overflow = "hidden";
+    window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      galleryTriggers[openerIndex]?.focus();
+    };
+  }, [openerIndexRef, triggerRefs]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setActiveIndex(null);
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setActiveIndex((index) => (index - 1 + photos.length) % photos.length);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setActiveIndex((index) => (index + 1) % photos.length);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = [...lightboxRef.current.querySelectorAll("button")];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [photos.length, setActiveIndex]);
+
+  return createPortal(
+    <div
+      className={`gallery-lightbox is-${tone}`}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="gallery-lightbox-title"
+      ref={lightboxRef}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) setActiveIndex(null);
+      }}
+      onPointerDown={(event) => { pointerStartXRef.current = event.clientX; }}
+      onPointerUp={(event) => {
+        const startX = pointerStartXRef.current;
+        const endX = event.clientX;
+        pointerStartXRef.current = null;
+        if (startX === null || Math.abs(endX - startX) < 48) return;
+        setActiveIndex((index) => (
+          endX < startX
+            ? (index + 1) % photos.length
+            : (index - 1 + photos.length) % photos.length
+        ));
+      }}
+      onPointerCancel={() => { pointerStartXRef.current = null; }}
+    >
+      <h2 className="sr-only" id="gallery-lightbox-title">웨딩 사진 크게 보기</h2>
+      <button className="lightbox-close" type="button" aria-label="갤러리 닫기" ref={closeButtonRef} onClick={() => setActiveIndex(null)}>
+        <X aria-hidden="true" weight="light" />
+      </button>
+      <figure className="lightbox-figure">
+        <img src={activePhoto.src} srcSet={activePhoto.srcSet} sizes="min(88vw, 760px)" alt={activePhoto.alt} style={{ objectPosition: activePhoto.position }} />
+        <figcaption aria-live="polite">{photos.length}장 중 {activeIndex + 1}번째 사진</figcaption>
+      </figure>
+      <button className="lightbox-control is-previous" type="button" aria-label="이전 사진" onClick={() => setActiveIndex((index) => (index - 1 + photos.length) % photos.length)}>
+        <ArrowLeft aria-hidden="true" weight="light" />
+      </button>
+      <button className="lightbox-control is-next" type="button" aria-label="다음 사진" onClick={() => setActiveIndex((index) => (index + 1) % photos.length)}>
+        <ArrowRight aria-hidden="true" weight="light" />
+      </button>
+    </div>,
+    document.body,
   );
 }
 
@@ -171,7 +287,7 @@ function VenueMap() {
   return (
     <figure className="map-frame">
       <img src={map.localAssetPath} alt={map.alt} loading="lazy" decoding="async" onError={() => setFailed(true)} />
-      <figcaption>지도 출처: {map.sourceAttribution}</figcaption>
+      <figcaption><strong>{map.sourceAttribution}</strong> 제공</figcaption>
     </figure>
   );
 }
@@ -232,14 +348,15 @@ function Location({ notify, compact = false }) {
   );
 }
 
-function BottomActions({ notify, pastel = false }) {
+function BottomActions({ notify, pastel = false, showCalendar = true }) {
   const unavailable = (label) => notify(`‘${label}’ 기능은 실제 정보 확정 후 활성화됩니다.`);
-  const saveCalendar = () => {
+  const saveDate = async () => {
     try {
-      downloadCalendar(weddingContent);
-      notify("캘린더 파일을 저장했습니다.");
+      const result = await saveCalendar(weddingContent);
+      if (result === "shared-file") notify("일정 파일을 시스템 공유 메뉴로 전달했습니다.");
+      if (result === "downloaded") notify("일정 파일을 저장했습니다. 파일을 열어 캘린더에 추가해 주세요.");
     } catch {
-      notify("캘린더 파일을 저장하지 못했습니다.", "error");
+      notify("일정을 준비하지 못했습니다.", "error");
     }
   };
   const share = async () => {
@@ -254,19 +371,21 @@ function BottomActions({ notify, pastel = false }) {
   return (
     <nav className={`bottom-actions ${pastel ? "is-pastel" : ""}`} aria-label="청첩장 주요 기능">
       <ActionButton icon={Phone} onClick={() => unavailable("연락하기")}>연락하기</ActionButton>
-      <ActionButton icon={CalendarBlank} onClick={saveCalendar}>일정 저장하기</ActionButton>
+      {showCalendar && <ActionButton icon={CalendarBlank} onClick={saveDate}>일정 저장하기</ActionButton>}
       <ActionButton icon={ShareNetwork} onClick={share}>공유하기</ActionButton>
     </nav>
   );
 }
 
 function QuietInvitation({ notify }) {
+  const photos = [WEDDING_PHOTOS.quiet.hero, ...WEDDING_PHOTOS.quiet.gallery];
+  const gallery = usePhotoGallery();
   return (
     <article className="invitation quiet-invitation" data-variant="quiet">
       <PlaceholderBadge />
       <header className="quiet-hero section-pad">
         <p className="display-title" lang="en">OUR DAY</p>
-        <ImageSlot asset={WEDDING_PHOTOS.quiet.hero} className="hero-photo is-arched" priority />
+        <PhotoButton photo={photos[0]} index={0} openPhoto={gallery.openPhoto} registerTrigger={gallery.registerTrigger} className="hero-photo is-arched" priority sizes="198px" />
         <h1>{weddingContent.couple.groom} <i aria-hidden="true">&amp;</i> {weddingContent.couple.bride}</h1>
         <EventDate className="date-line" />
         <p className="venue-line">{weddingContent.venue.name}</p>
@@ -274,112 +393,48 @@ function QuietInvitation({ notify }) {
       <Greeting />
       <CalendarPattern />
       <section className="quiet-gallery section-pad" aria-label="웨딩 사진 갤러리">
-        <ImageSlot asset={WEDDING_PHOTOS.quiet.gallery[0]} className="quiet-photo photo-one" />
-        <ImageSlot asset={WEDDING_PHOTOS.quiet.gallery[1]} className="quiet-photo photo-two" />
-        <ImageSlot asset={WEDDING_PHOTOS.quiet.gallery[2]} className="quiet-photo photo-three" />
+        {photos.slice(1).map((photo, index) => (
+          <PhotoButton
+            photo={photo}
+            index={index + 1}
+            openPhoto={gallery.openPhoto}
+            registerTrigger={gallery.registerTrigger}
+            className={`quiet-photo photo-${["one", "two", "three"][index]}`}
+            sizes="185px"
+            key={photo.src}
+          />
+        ))}
         <SesangCameo asset={SESANG_STICKERS.left} side="left" />
       </section>
       <Location notify={notify} compact />
       <BottomActions notify={notify} />
+      {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="quiet" />}
     </article>
   );
 }
 
-function SaveCards({ notify }) {
-  const copyEventDetails = async () => {
+function CalendarAction({ notify }) {
+  const saveDate = async () => {
     try {
-      await copyText(eventSummaryText(weddingContent));
-      notify("예식 날짜와 장소를 복사했습니다.");
+      const result = await saveCalendar(weddingContent);
+      if (result === "shared-file") notify("일정 파일을 시스템 공유 메뉴로 전달했습니다.");
+      if (result === "downloaded") notify("일정 파일을 저장했습니다. 파일을 열어 캘린더에 추가해 주세요.");
     } catch {
-      notify("예식 정보를 복사하지 못했습니다.", "error");
-    }
-  };
-  const saveCalendar = () => {
-    try {
-      downloadCalendar(weddingContent);
-      notify("캘린더 파일을 저장했습니다.");
-    } catch {
-      notify("캘린더 파일을 저장하지 못했습니다.", "error");
+      notify("일정을 준비하지 못했습니다.", "error");
     }
   };
   return (
-    <section className="save-cards section-pad" aria-label="날짜와 캘린더 저장">
-      <ActionButton icon={Copy} className="save-date-action" onClick={copyEventDetails}>
-        <strong>예식 정보 복사</strong><small>날짜와 장소를 복사합니다.</small>
-      </ActionButton>
-      <ActionButton icon={CalendarBlank} trailingIcon={CaretRight} className="save-calendar-action" onClick={saveCalendar}>
-        <strong>캘린더에 저장하기</strong><small>예식 시작 시각으로 저장</small>
+    <section className="save-cards section-pad" aria-label="캘린더 저장">
+      <ActionButton icon={CalendarBlank} trailingIcon={CaretRight} className="save-calendar-action" onClick={saveDate}>
+        <strong>캘린더에 추가하기</strong><small>기기 환경에 따라 파일로 저장돼요</small>
       </ActionButton>
     </section>
   );
 }
 
 function PastelGallery() {
-  const [activeIndex, setActiveIndex] = useState(null);
-  const lightboxRef = useRef(null);
-  const closeButtonRef = useRef(null);
-  const triggerRefs = useRef([]);
-  const openerIndexRef = useRef(null);
-  const pointerStartXRef = useRef(null);
-  const isOpen = activeIndex !== null;
+  const gallery = usePhotoGallery();
   const photos = WEDDING_PHOTOS.pastel.gallery;
-
-  const openPhoto = (index) => {
-    openerIndexRef.current = index;
-    setActiveIndex(index);
-  };
-  useEffect(() => {
-    if (!isOpen) return undefined;
-
-    const previousOverflow = document.body.style.overflow;
-    const galleryTriggers = triggerRefs.current;
-    document.body.style.overflow = "hidden";
-    window.requestAnimationFrame(() => closeButtonRef.current?.focus());
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      galleryTriggers[openerIndexRef.current]?.focus();
-    };
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return undefined;
-
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setActiveIndex(null);
-        return;
-      }
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        setActiveIndex((index) => (index - 1 + photos.length) % photos.length);
-        return;
-      }
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        setActiveIndex((index) => (index + 1) % photos.length);
-        return;
-      }
-      if (event.key !== "Tab") return;
-
-      const focusable = [...lightboxRef.current.querySelectorAll("button")];
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, photos.length]);
-
-  const activePhoto = isOpen ? photos[activeIndex] : null;
 
   return (
     <>
@@ -394,8 +449,8 @@ function PastelGallery() {
               className="pastel-gallery-item"
               type="button"
               aria-label={`${photos.length}장 중 ${index + 1}번째 사진 크게 보기`}
-              ref={(node) => { triggerRefs.current[index] = node; }}
-              onClick={() => openPhoto(index)}
+              ref={(node) => gallery.registerTrigger(index, node)}
+              onClick={() => gallery.openPhoto(index)}
               key={photo.src}
             >
               <img
@@ -412,61 +467,7 @@ function PastelGallery() {
           ))}
         </div>
       </section>
-      {isOpen && createPortal(
-        <div
-          className="gallery-lightbox"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="gallery-lightbox-title"
-          ref={lightboxRef}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setActiveIndex(null);
-          }}
-          onPointerDown={(event) => {
-            pointerStartXRef.current = event.clientX;
-          }}
-          onPointerUp={(event) => {
-            const startX = pointerStartXRef.current;
-            const endX = event.clientX;
-            pointerStartXRef.current = null;
-            if (startX === null || Math.abs(endX - startX) < 48) return;
-            setActiveIndex((index) => (
-              endX < startX
-                ? (index + 1) % photos.length
-                : (index - 1 + photos.length) % photos.length
-            ));
-          }}
-          onPointerCancel={() => { pointerStartXRef.current = null; }}
-        >
-          <h2 className="sr-only" id="gallery-lightbox-title">웨딩 사진 크게 보기</h2>
-          <button
-            className="lightbox-close"
-            type="button"
-            aria-label="갤러리 닫기"
-            ref={closeButtonRef}
-            onClick={() => setActiveIndex(null)}
-          >
-            <X aria-hidden="true" weight="light" />
-          </button>
-          <figure className="lightbox-figure">
-            <img
-              src={activePhoto.src}
-              srcSet={activePhoto.srcSet}
-              sizes="min(88vw, 760px)"
-              alt={activePhoto.alt}
-              style={{ objectPosition: activePhoto.position }}
-            />
-            <figcaption aria-live="polite">{photos.length}장 중 {activeIndex + 1}번째 사진</figcaption>
-          </figure>
-          <button className="lightbox-control is-previous" type="button" aria-label="이전 사진" onClick={() => setActiveIndex((index) => (index - 1 + photos.length) % photos.length)}>
-            <ArrowLeft aria-hidden="true" weight="light" />
-          </button>
-          <button className="lightbox-control is-next" type="button" aria-label="다음 사진" onClick={() => setActiveIndex((index) => (index + 1) % photos.length)}>
-            <ArrowRight aria-hidden="true" weight="light" />
-          </button>
-        </div>,
-        document.body,
-      )}
+      {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="pastel" />}
     </>
   );
 }
@@ -487,7 +488,7 @@ function PastelInvitation({ notify }) {
         </div>
       </header>
       <Greeting />
-      <SaveCards notify={notify} />
+      <CalendarAction notify={notify} />
       <PastelGallery />
       <section className="pastel-story section-pad" aria-labelledby="pastel-story-title">
         <div className="pastel-section-heading">
@@ -497,7 +498,7 @@ function PastelInvitation({ notify }) {
         <p>{weddingContent.story.join(" ")}</p>
       </section>
       <Location notify={notify} />
-      <BottomActions notify={notify} pastel />
+      <BottomActions notify={notify} pastel showCalendar={false} />
       <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.</footer>
     </article>
   );

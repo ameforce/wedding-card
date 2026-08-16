@@ -19,11 +19,12 @@ function fontSize(selector) {
   return Number(match[1]);
 }
 
-test("Pastel save-card titles share one horizontal action alignment", () => {
+test("Pastel keeps one horizontally aligned calendar action", () => {
   assert.match(rule(".action-button"), /align-items:\s*center/);
-  assert.match(rule(".save-cards .save-date-action"), /flex-direction:\s*row/);
-  assert.match(rule(".save-cards .save-date-action span"), /text-align:\s*left/);
   assert.match(rule(".save-cards .save-calendar-action"), /display:\s*grid/);
+  assert.doesNotMatch(app, /예식 정보 복사|save-date-action/);
+  assert.equal((app.match(/<CalendarAction/g) ?? []).length, 1);
+  assert.match(app, /showCalendar=\{false\}/);
 });
 
 test("Pastel actions use independent soft controls without coupon separators", () => {
