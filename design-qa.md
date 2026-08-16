@@ -28,7 +28,7 @@ Both source references and both implementation screenshots were opened in one co
 - Pastel preserves the powder-blue/blush watercolor opening, centered Korean serif title, two save cards, 2×2 album rhythm, two-column timeline/story, side-by-side map/transit guidance, route row, pale-blue utility footer, and closing message.
 - The approved real photographs replace only the former abstract photo surfaces. Original people, facial features, clothing, and studio lighting were not AI-edited; browser crops use `object-position` only.
 - Three 세상이 cameos create intentional extra vertical rhythm. Their left/right/left sequence is a user-approved extension, so the added full-page height is not design drift.
-- Peeking stickers are clipped inside reserved cameo rows and do not cover gallery subjects, labels, controls, or map actions. The compact sleeping sticker stays clear of the footer actions.
+- Peeking stickers clip only their lower bodies inside reserved cameo rows; animated top and side edges retain internal clearance and do not cover gallery subjects, labels, controls, or map actions. The compact sleeping sticker stays clear of the footer actions.
 
 Focused region crops were not required because the 390px full-page captures keep every changed photo crop, sticker edge, icon, and control clearly readable at original resolution.
 
@@ -51,6 +51,13 @@ Focused region crops were not required because the 390px full-page captures keep
 - Pastel: 390 × 1353, no horizontal overflow, four real photos and three sticker assets loaded.
 - Post-fix comparison shows no photo subject, copy, icon, button, or map control obscured.
 - No actionable P0, P1, or P2 visual mismatch remains.
+
+### Sesang motion and matte correction
+
+- RCA confirmed that a 96px-wide image was animated inside a 96 × 108px `overflow: hidden` mask. The `translateY(-4px) rotate(-1.2deg)` apex pushed real top and side pixels outside that mask, while an added 8px/11px drop shadow made the bright sticker outline read as a floating matte.
+- Fix: the mask is now 108 × 108px with 6px internal padding. The rendered cat remains 96px wide and keeps the same final edge-peek position through the compensating `-16px` wrapper offset. The CSS drop shadow is removed; sticker alpha and source artwork are unchanged.
+- At the 390px animation apex, both variants retain at least 1.01px top clearance and 4.25px side clearance for both peeking stickers. Reduced-motion remains static.
+- Visual evidence: `artifacts/qa/sesang-motion-fix-quiet-390.png` and `artifacts/qa/sesang-motion-fix-pastel-390.png`.
 
 ## Responsive and interaction verification
 
