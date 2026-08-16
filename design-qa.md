@@ -1,5 +1,40 @@
 # Design QA
 
+## Accepted pass — unified Pastel Hero and Letter B content audit
+
+### Source and rendered evidence
+
+- Source visual truth is a deliberate three-part composite: the live public Letter B sample at `https://salondeletter.com/w/sample1_2` establishes the real-photo-first hierarchy; `artifacts/qa/pastel-inset-frame-390.png` preserves the previously approved 86% arched inset treatment; the approved project contract fixes the final order as introduction → photo → identity on one watercolor surface with no slash or rule.
+- Live Letter B captures were made on 2026-08-17 without opening the contact or account accordions: `artifacts/qa/letter-b-sample-top-2026-08-17-390.png`, `artifacts/qa/letter-b-sample-family-2026-08-17-390.png`, `artifacts/qa/letter-b-sample-schedule-2026-08-17-390.png`, `artifacts/qa/letter-b-sample-calendar-2026-08-17-390.png`, `artifacts/qa/letter-b-sample-countdown-2026-08-17-390.png`, and `artifacts/qa/letter-b-sample-private-sections-2026-08-17-390.png`.
+- Implementation screenshot: `artifacts/qa/pastel-hero-unified-390.png` — 390 × 900 pixels, CSS viewport 390 × 900, `devicePixelRatio: 1`, `?variant=pastel&capture=1`, top-of-page state, lightbox closed.
+- Full-view combined input: `artifacts/qa/pastel-hero-unified-comparison-390.png` — 1170 × 844 pixels. Left is the current Letter B structural source, middle is the previous accepted inset implementation, and right is the revised implementation, each normalized to a 390 × 844 panel.
+- Focused comparison uses the same combined input because the complete Hero anatomy and the former slash/rule remain readable at native mobile density; a separate crop would not expose additional fidelity information.
+
+### Findings and comparison history
+
+- Initial P2: the previous implementation put the photo before the introduction and isolated the copy on a lower watercolor panel with a rotated slash and horizontal rule. Fix: moved the introduction above the single inset photo, applied the watercolor asset to the whole Hero, made the identity block transparent, and removed both divider elements and styles.
+- Post-fix evidence: the 390px comparison shows introduction → photo → names/date/place with uninterrupted paper/watercolor around the image. Computed checks at 360, 390, 430, 768, and 1440px report the same order, an exact `0.86` photo-to-invitation width ratio, no horizontal overflow, no failed images, zero divider nodes, a watercolor Hero background, and a transparent identity block without border or shadow.
+- Fonts and typography: `Noto Serif KR Variable` remains consistent through the introduction, names, date, and venue; mixed Korean/numeric lines remain centered and readable at 360px.
+- Spacing and layout rhythm: the intro-to-photo gap and photo-to-identity gap are balanced without restoring a separate panel. The 430px invitation cap remains intact at desktop widths.
+- Colors and visual tokens: the existing `#fcfbf4` paper and supplied watercolor raster now form one Hero surface; no new dark surface, border, rule, or shadow was introduced.
+- Image quality and asset fidelity: the approved real photograph is unchanged and remains cover-cropped inside the 86% softly arched frame. No person, likeness, or photo pixels were AI-edited.
+- Copy and content: only existing confirmed project copy and facts render. Letter B people, family relations, phone numbers, accounts, and private wording were not copied.
+- Browser interaction: at 390px the Hero opened the shared lightbox, focused `갤러리 닫기`, locked body scroll, advanced from photo 1 to photo 2 with ArrowRight, closed with Escape, and restored focus to the Hero. Browser console warnings/errors were empty.
+- Reduced motion: emulated `prefers-reduced-motion: reduce` reduced Pastel image transition duration effectively to zero; Quiet's cat motion computed to `animation-name: none`.
+- Quiet regression: at all five required widths there was no overflow or failed image, visible controls remained at least 44px high, and exactly one calendar plus one share action rendered.
+
+### Letter B section classification and next content contract
+
+- Implementable from confirmed facts now: the existing names, start date/time, venue, address, map, transit/parking guidance, December calendar in Quiet, and start-only iCalendar action. Pastel already exposes the same event facts in its Hero and the shared footer calendar action.
+- Optional presentation using confirmed facts: a dedicated Pastel `예식 안내` block or derived countdown. This is a product-choice question, not a missing-data blocker; it must not duplicate the existing footer calendar action, and a separate event timeline remains intentionally excluded.
+- Requires exact user facts and a public-scope decision: family relations; couple or parent contact controls; and account sections, including side, bank, holder, number, disclosure text, and whether the data is always visible or collapsed. None may be inferred from Letter B.
+- Other optional Letter B modules requiring separate product/content decisions: wedding interview, relationship timeline, guest-snap upload, notice carousel, RSVP, guestbook, and music. They are useful patterns, not current project requirements.
+- Highest-value next question: Which family/contact/account items, for which people, should be public, and what are the exact approved values?
+
+### Final result
+
+`passed`
+
 ## Accepted pass — Pastel inset photo frame composite target
 
 ### Comparison target and normalization

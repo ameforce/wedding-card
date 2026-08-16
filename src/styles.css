@@ -180,16 +180,15 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .bottom-actions .action-button + .action-button::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 1px; background: rgba(62,59,56,.1); }
 
 .pastel-invitation { --paper: #fcfbf4; --ink: #233d60; --blue: #d9e7f3; --blush: #f2dcdf; background: var(--paper); color: var(--ink); word-break: keep-all; }
-.pastel-hero { position: relative; padding: clamp(22px, 6vw, 30px) 0 0; overflow: hidden; background: var(--paper); }
-.pastel-hero-photo { width: 86%; aspect-ratio: 4 / 5; margin: 0 auto clamp(20px, 5vw, 26px); border-radius: 50% 50% 18px 18px / 20% 20% 18px 18px; }
+.pastel-hero { position: relative; padding: clamp(26px, 7vw, 34px) 0 clamp(30px, 8vw, 38px); overflow: hidden; background: var(--paper) url("/assets/design/pastel-watercolor-wash.webp") center / cover no-repeat; }
+.pastel-hero-intro { padding: 0 30px clamp(22px, 6vw, 28px); font-family: "Noto Serif KR Variable", serif; font-size: 14px; line-height: 1.8; text-align: center; }
+.pastel-hero-intro p { margin: 0; }
+.pastel-hero-photo { width: 86%; aspect-ratio: 4 / 5; margin: 0 auto clamp(24px, 6vw, 30px); border-radius: 50% 50% 18px 18px / 20% 20% 18px 18px; }
 .pastel-hero-photo img { filter: saturate(.88) contrast(.96) brightness(1.02); }
-.pastel-hero-copy { position: relative; display: flex; min-height: 258px; padding: 30px 30px 26px; flex-direction: column; align-items: center; justify-content: center; background: var(--paper) url("/assets/design/pastel-watercolor-wash.webp") center / cover no-repeat; text-align: center; }
-.pastel-hero-copy > p:first-child { margin: 0; font-family: "Noto Serif KR Variable", serif; font-size: 14px; line-height: 1.8; }
-.tiny-divider { width: 1px; height: 18px; margin: 8px 0 12px; background: #aebaca; transform: rotate(28deg); }
+.pastel-hero-copy { position: relative; display: flex; padding: 0 30px; flex-direction: column; align-items: center; justify-content: center; background: transparent; text-align: center; }
 .pastel-hero h1 { margin: 0; font-family: "Noto Serif KR Variable", serif; font-size: 29px; font-weight: 430; letter-spacing: .12em; }
 .pastel-hero h1 b { font-weight: 300; }
-.name-divider { width: 20px; height: 1px; margin: 12px 0; background: #aab6c4; }
-.pastel-hero .date-line { margin: 11px 0 0; color: #415a79; font-family: "Noto Serif KR Variable", serif; line-height: 1.55; }
+.pastel-hero .date-line { margin: 15px 0 0; color: #415a79; font-family: "Noto Serif KR Variable", serif; line-height: 1.55; }
 .pastel-hero .event-date-primary { font-size: 16px; }
 .pastel-hero .event-date-secondary { font-size: 13px; }
 .pastel-venue-line { margin: 7px 0 0; font-family: "Noto Serif KR Variable", serif; font-size: 14px; }

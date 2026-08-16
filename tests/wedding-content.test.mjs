@@ -109,10 +109,17 @@ test("Pastel gallery uses portrait media and an accessible lightbox", () => {
 test("Pastel hero uses a breathing-room inset photo frame without a heavy treatment", () => {
   const pastelHero = css.match(/\.pastel-hero\s*\{([^}]+)\}/)?.[1] ?? "";
   const pastelHeroPhoto = css.match(/\.pastel-hero-photo\s*\{([^}]+)\}/)?.[1] ?? "";
+  const pastelHeroCopy = css.match(/\.pastel-hero-copy\s*\{([^}]+)\}/)?.[1] ?? "";
+  const pastelHeroMarkup = app.match(/<header className="pastel-hero">([\s\S]*?)<\/header>/)?.[1] ?? "";
 
-  assert.match(pastelHero, /padding:\s*clamp\(22px,\s*6vw,\s*30px\)\s*0\s*0/);
+  assert.ok(pastelHeroMarkup.indexOf("pastel-hero-intro") < pastelHeroMarkup.indexOf("<PhotoButton"));
+  assert.ok(pastelHeroMarkup.indexOf("<PhotoButton") < pastelHeroMarkup.indexOf("pastel-hero-copy"));
+  assert.doesNotMatch(pastelHeroMarkup, /tiny-divider|name-divider/);
+  assert.match(pastelHero, /pastel-watercolor-wash\.webp/);
+  assert.match(pastelHeroCopy, /background:\s*transparent/);
+  assert.doesNotMatch(pastelHeroCopy, /pastel-watercolor-wash|border|box-shadow/);
   assert.match(pastelHeroPhoto, /width:\s*86%/);
-  assert.match(pastelHeroPhoto, /margin:\s*0\s+auto\s+clamp\(20px,\s*5vw,\s*26px\)/);
+  assert.match(pastelHeroPhoto, /margin:\s*0\s+auto\s+clamp\(24px,\s*6vw,\s*30px\)/);
   assert.match(pastelHeroPhoto, /border-radius:\s*50%\s+50%\s+18px\s+18px\s*\/\s*20%\s+20%\s+18px\s+18px/);
   assert.doesNotMatch(pastelHeroPhoto, /(?:border|box-shadow)\s*:/);
 });

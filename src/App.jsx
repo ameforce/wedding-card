@@ -453,6 +453,9 @@ function PastelInvitation({ notify }) {
     <article className="invitation pastel-invitation" data-variant="pastel">
       <PlaceholderBadge />
       <header className="pastel-hero">
+        <div className="pastel-hero-intro">
+          <p>저희 두 사람<br />새로운 시작을 함께합니다</p>
+        </div>
         <PhotoButton
           photo={photos[0]}
           index={0}
@@ -463,10 +466,7 @@ function PastelInvitation({ notify }) {
           sizes="(min-width: 768px) 370px, 86vw"
         />
         <div className="pastel-hero-copy">
-          <p>저희 두 사람<br />새로운 시작을 함께합니다</p>
-          <span className="tiny-divider" aria-hidden="true" />
           <h1>{weddingContent.couple.groom} <b aria-hidden="true">·</b> {weddingContent.couple.bride}</h1>
-          <span className="name-divider" aria-hidden="true" />
           <EventDate className="date-line" />
           <p className="pastel-venue-line">{weddingContent.venue.name}</p>
         </div>
