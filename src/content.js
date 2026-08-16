@@ -1,8 +1,24 @@
 export const DESIGN_ASSETS = {
   quietLight: "/assets/design/quiet-light-study.webp",
   pastelWash: "/assets/design/pastel-watercolor-wash.webp",
-  map: "/assets/design/abstract-map.webp",
 };
+
+export function getCalendarMonth({ year, month, day }) {
+  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const cellCount = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+
+  return Array.from({ length: cellCount }, (_, index) => {
+    const date = index - firstWeekday + 1;
+    if (date < 1 || date > daysInMonth) return null;
+
+    return {
+      date,
+      weekday: index % 7,
+      isEvent: date === day,
+    };
+  });
+}
 
 const photo = (name, alt, position) => ({
   src: `/assets/photos/${name}-480.webp`,
@@ -51,7 +67,6 @@ export const weddingContent = {
     time: "오후 3시",
     startTime24h: "15:00",
     timezone: {
-      label: "KST",
       iana: "Asia/Seoul",
       utcOffset: "+09:00",
     },
@@ -64,6 +79,11 @@ export const weddingContent = {
       kakao: "https://place.map.kakao.com/518455120",
       tmap: "https://tmap.life/03fe38e6",
     },
+    map: {
+      localAssetPath: "/assets/map/venue-map.webp",
+      alt: "더 바실리움 주변 실제 지도와 위치 핀",
+      sourceAttribution: "카카오맵",
+    },
   },
   message: [
     "서로를 아끼며 믿음으로",
@@ -75,7 +95,7 @@ export const weddingContent = {
     year: 2026,
     month: 12,
     day: 27,
-    weekdays: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
+    weekdays: ["일", "월", "화", "수", "목", "금", "토"],
   },
   timeline: [
     { label: "예식 안내", time: "오후 3시" },

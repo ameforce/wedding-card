@@ -13,7 +13,7 @@ import {
   Train,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { DESIGN_ASSETS, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
+import { DESIGN_ASSETS, getCalendarMonth, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
 import { copyText, downloadCalendar, eventSummaryText, shareInvitation } from "./invitation-actions.js";
 
 const VARIANTS = {
@@ -57,7 +57,7 @@ function ImageSlot({ asset, className = "", crop, label = "실제 사진으로 �
   );
 }
 
-function SesangCameo({ asset, side, variant = "peek" }) {
+function SesangCameo({ asset, side }) {
   const nodeRef = useRef(null);
   const [visible, setVisible] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
@@ -77,7 +77,7 @@ function SesangCameo({ asset, side, variant = "peek" }) {
 
   return (
     <div
-      className={`sesang-cameo is-${side} is-${variant} ${visible ? "is-visible" : ""}`}
+      className={`sesang-cameo is-${side} ${visible ? "is-visible" : ""}`}
       ref={nodeRef}
       aria-hidden="true"
     >
@@ -97,21 +97,36 @@ function PlaceholderBadge() {
 }
 
 function CalendarPattern() {
-  const { year, month, day, weekdays } = weddingContent.calendar;
-  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const eventIndex = firstWeekday + day - 1;
-  const cellCount = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+  const { year, month, weekdays } = weddingContent.calendar;
+  const calendarDays = getCalendarMonth(weddingContent.calendar);
+  const monthLabel = `${year}년 ${month}월`;
 
   return (
-    <section className="calendar-pattern" aria-label={`${year}년 ${month}월 ${day}일 ${weddingContent.event.day} 예식 캘린더`}>
-      <div className="weekday-row" aria-hidden="true">
+    <section className="calendar-pattern" aria-label={`${monthLabel} 예식 캘린더`}>
+      <div className="calendar-heading">
+        <p>{monthLabel}</p>
+        <span>{weddingContent.calendar.day}일 · {weddingContent.event.time} 예식</span>
+      </div>
+      <div className="weekday-row">
         {weekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}
       </div>
-      <div className="date-dots" aria-hidden="true">
-        {Array.from({ length: cellCount }, (_, index) => (
-          <span className={index === eventIndex ? "is-event" : ""} key={index} />
-        ))}
+      <div className="calendar-days">
+        {calendarDays.map((calendarDay, index) => {
+          if (!calendarDay) return <span className="calendar-day is-empty" aria-hidden="true" key={`empty-${index}`} />;
+
+          const isEvent = calendarDay.isEvent;
+          const label = `${month}월 ${calendarDay.date}일 ${weekdays[calendarDay.weekday]}요일${isEvent ? `, ${weddingContent.event.time} 예식` : ""}`;
+          return (
+            <time
+              className={`calendar-day ${calendarDay.weekday === 0 ? "is-sunday" : ""} ${isEvent ? "is-event" : ""}`}
+              dateTime={`${year}-${String(month).padStart(2, "0")}-${String(calendarDay.date).padStart(2, "0")}`}
+              aria-label={label}
+              key={calendarDay.date}
+            >
+              {calendarDay.date}
+            </time>
+          );
+        })}
       </div>
     </section>
   );
@@ -131,8 +146,29 @@ function EventDate({ className = "" }) {
   return (
     <time className={`event-date ${className}`} dateTime={dateTime}>
       <span className="event-date-primary">{weddingContent.event.dateLabel}</span>
-      <span className="event-date-secondary">{weddingContent.event.day} · {weddingContent.event.time} · {weddingContent.event.timezone.label}</span>
+      <span className="event-date-secondary">{weddingContent.event.day} · {weddingContent.event.time}</span>
     </time>
+  );
+}
+
+function VenueMap() {
+  const [failed, setFailed] = useState(false);
+  const map = weddingContent.venue.map;
+  const canRenderMap = Boolean(map.localAssetPath && map.sourceAttribution && map.alt) && !failed;
+
+  if (!canRenderMap) {
+    return (
+      <div className="map-frame is-pending" role="note">
+        <span>실제 예식장 지도 이미지를 준비하고 있습니다.</span>
+      </div>
+    );
+  }
+
+  return (
+    <figure className="map-frame">
+      <img src={map.localAssetPath} alt={map.alt} loading="lazy" decoding="async" onError={() => setFailed(true)} />
+      <figcaption>지도 출처: {map.sourceAttribution}</figcaption>
+    </figure>
   );
 }
 
@@ -168,11 +204,7 @@ function Location({ notify, compact = false }) {
         <p className="eyebrow">LOCATION</p>
         <h2 id="location-title">오시는 길</h2>
       </div>
-      <div className="map-frame">
-        <img src={DESIGN_ASSETS.map} alt="실제 주소가 아닌 디자인용 추상 지도" loading="lazy" decoding="async" />
-        <MapPin className="map-pin" aria-hidden="true" weight="fill" />
-        <span className="map-label">DESIGN MAP</span>
-      </div>
+      <VenueMap />
       <div className="venue-copy">
         <strong>{weddingContent.venue.name}</strong>
         <span>{weddingContent.venue.address}</span>
@@ -236,16 +268,14 @@ function QuietInvitation({ notify }) {
         <p className="venue-line">{weddingContent.venue.name}</p>
       </header>
       <Greeting />
-      <SesangCameo asset={SESANG_STICKERS.left} side="left" />
       <CalendarPattern />
       <section className="quiet-gallery section-pad" aria-label="웨딩 사진 갤러리">
         <ImageSlot asset={WEDDING_PHOTOS.quiet.gallery[0]} className="quiet-photo photo-one" />
         <ImageSlot asset={WEDDING_PHOTOS.quiet.gallery[1]} className="quiet-photo photo-two" />
         <ImageSlot asset={WEDDING_PHOTOS.quiet.gallery[2]} className="quiet-photo photo-three" />
+        <SesangCameo asset={SESANG_STICKERS.left} side="left" />
       </section>
-      <SesangCameo asset={SESANG_STICKERS.right} side="right" />
       <Location notify={notify} compact />
-      <SesangCameo asset={SESANG_STICKERS.sleep} side="left" variant="sleep" />
       <BottomActions notify={notify} />
     </article>
   );
@@ -274,7 +304,7 @@ function SaveCards({ notify }) {
         <strong>예식 정보 복사</strong><small>날짜와 장소를 복사합니다.</small>
       </ActionButton>
       <ActionButton icon={CalendarBlank} trailingIcon={CaretRight} className="save-calendar-action" onClick={saveCalendar}>
-        <strong>캘린더에 저장하기</strong><small>{weddingContent.event.timezone.label} 시작 시각으로 저장</small>
+        <strong>캘린더에 저장하기</strong><small>예식 시작 시각으로 저장</small>
       </ActionButton>
     </section>
   );
@@ -297,14 +327,12 @@ function PastelInvitation({ notify }) {
       </header>
       <Greeting />
       <SaveCards notify={notify} />
-      <SesangCameo asset={SESANG_STICKERS.left} side="left" />
       <section className="pastel-gallery section-pad" aria-label="웨딩 사진 갤러리">
         <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[0]} className="pastel-photo blue-wide" />
         <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[1]} className="pastel-photo blush" />
         <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[2]} className="pastel-photo neutral" />
         <ImageSlot asset={WEDDING_PHOTOS.pastel.gallery[3]} className="pastel-photo pale" />
       </section>
-      <SesangCameo asset={SESANG_STICKERS.right} side="right" />
       <section className="story-grid section-pad" aria-label="예식 일정과 두 사람의 이야기">
         <div>
           <h2>우리의 하루</h2>
@@ -318,7 +346,6 @@ function PastelInvitation({ notify }) {
         </div>
       </section>
       <Location notify={notify} />
-      <SesangCameo asset={SESANG_STICKERS.sleep} side="left" variant="sleep" />
       <BottomActions notify={notify} pastel />
       <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.</footer>
     </article>

@@ -20,7 +20,7 @@ function formatUtcStamp(date) {
 
 export function createCalendarFile(content, now = new Date()) {
   const summary = `${content.couple.groom} · ${content.couple.bride} 결혼식`;
-  const description = `${content.event.dateLabel} ${content.event.day} ${content.event.time} ${content.event.timezone.label}`;
+  const description = `${content.event.dateLabel} ${content.event.day} ${content.event.time}`;
   const uidDate = compactDate(content.event.isoDate);
 
   return [
@@ -46,7 +46,7 @@ export function createCalendarFile(content, now = new Date()) {
 export function eventSummaryText(content) {
   return [
     `${content.couple.groom} · ${content.couple.bride} 결혼식`,
-    `${content.event.dateLabel} ${content.event.day} ${content.event.time} ${content.event.timezone.label}`,
+    `${content.event.dateLabel} ${content.event.day} ${content.event.time}`,
     `${content.venue.name} · ${content.venue.address}`,
   ].join("\n");
 }

@@ -17,10 +17,10 @@
 - 한 개의 기능·섹션 컴포넌트 트리: `src/App.jsx`
 - 시안별 토큰과 배치: `[data-variant="quiet"]`, `[data-variant="pastel"]`
 - URL 선택: `?variant=quiet`, `?variant=pastel`; 알 수 없는 값은 `quiet`
-- 공통 기능: 디자인 전환, 공식 길찾기, 주소·예식 정보 복사, KST 시작 시각 iCalendar 저장, Web Share와 링크 복사 fallback, 이미지 오류 fallback
+- 공통 기능: 디자인 전환, 공식 길찾기, 주소·예식 정보 복사, `Asia/Seoul` 시작 시각 iCalendar 저장, Web Share와 링크 복사 fallback, 이미지 오류 fallback
 - 연락하기는 확인된 연락처가 없어 안내 상태로 유지
 - 실제 스튜디오 사진은 변형 없이 WebP 파생본과 variant별 focal point만 사용
-- 세상이 스티커는 실제 사진의 턱시도 무늬를 기준으로 만든 투명 자산이며 좌우 교대 진입, 일회성 노출, `prefers-reduced-motion` 정지 상태를 공유
+- 세상이 스티커는 실제 사진의 턱시도 무늬를 기준으로 만든 투명 자산이며, 필요한 한 개만 갤러리의 자연스러운 여백 가장자리에 절대 배치한다. `prefers-reduced-motion`에서는 정지 상태를 유지한다.
 - 44px 이상 터치 영역, 키보드 포커스, `prefers-reduced-motion`
 
 ## Content gate
@@ -28,7 +28,7 @@
 현재 확인된 값:
 
 - 신랑 김종인, 신부 유지혜
-- 2026년 12월 27일 일요일 오후 3시, KST (`Asia/Seoul`)
+- 2026년 12월 27일 일요일 오후 3시 (`Asia/Seoul` 내부 시간대)
 - 더 바실리움, 경기 성남시 분당구 양현로 322
 - 네이버 지도·카카오맵·T map 길찾기 링크
 
@@ -48,7 +48,7 @@
 
 - `quiet-light-study.webp`: 실제 사진이 공급되기 전의 비인물 추상 자산
 - `pastel-watercolor-wash.webp`: Pastel Letter의 비인물 수채 워시
-- `abstract-map.webp`: 실제 지리정보가 없는 디자인용 추상 지도
+- 실제 예식장 지도: `public/assets/map/venue-map.webp`와 `카카오맵` 출처를 함께 보존한다. 이 자산을 읽지 못하면 지도를 렌더링하지 않고 길찾기 링크만 제공한다.
 - `photos/*.webp`: 사용자가 지정한 수정본에서 만든 480/960px 반응형 파생본. 실제 인물은 AI 편집하지 않는다.
 - `stickers/sesang-*.webp`: 사용자가 제공한 실제 세상이 사진을 identity reference로 사용한 투명 스티커 자산. 원본 고양이 사진은 저장소에 복사하지 않는다. 홍채는 황록색을 주색으로 유지하면서 청록 반사만 3 RGB level 안팎으로 제한 보정했으며, 털·동공·테두리·alpha는 바꾸지 않았다.
 - 원본 PNG는 로컬 `artifacts/source-assets/`에 보존하며 배포물에는 포함하지 않는다.

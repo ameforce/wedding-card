@@ -3,12 +3,20 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+const actions = await readFile(new URL("../src/invitation-actions.js", import.meta.url), "utf8");
 
 function rule(selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]+)\\}`));
   assert.ok(match, `Missing CSS rule: ${selector}`);
   return match[1];
+}
+
+function fontSize(selector) {
+  const match = rule(selector).match(/font-size:\s*([\d.]+)px/);
+  assert.ok(match, `Missing font size for ${selector}`);
+  return Number(match[1]);
 }
 
 test("Pastel save-card titles share one horizontal action alignment", () => {
@@ -26,4 +34,34 @@ test("Quiet date line uses a single Korean-capable serif family", () => {
 
 test("Quiet ampersand is optically raised to the names' centerline", () => {
   assert.match(rule(".quiet-hero h1 i"), /vertical-align:\s*\.08em/);
+});
+
+test("invitation type scale keeps key information readable on a phone", () => {
+  const readableContract = [
+    [".event-date-primary", 16],
+    [".event-date-secondary", 13],
+    [".venue-line", 13],
+    [".greeting p:not(.eyebrow)", 14],
+    [".calendar-day", 13],
+    [".venue-copy strong", 15],
+    [".venue-copy span", 13],
+    [".route-actions .action-button", 13],
+    [".bottom-actions .action-button", 13],
+    [".save-cards strong", 13],
+    [".save-cards small", 12],
+    [".transit-list span", 12],
+  ];
+
+  for (const [selector, minimum] of readableContract) {
+    assert.ok(fontSize(selector) >= minimum, `${selector} must be at least ${minimum}px`);
+  }
+
+  const allDeclaredFontSizes = [...css.matchAll(/font-size:\s*([\d.]+)px/g)].map((match) => Number(match[1]));
+  assert.ok(Math.min(...allDeclaredFontSizes) >= 12, "No visible text may drop below the 12px secondary-text floor");
+});
+
+test("visible invitation, copied and shared copy omit KST while calendar semantics remain internal", () => {
+  assert.doesNotMatch(app, /KST|timezone\.label/);
+  assert.doesNotMatch(actions, /KST|timezone\.label/);
+  assert.match(actions, /DTSTART;TZID=\$\{content\.event\.timezone\.iana\}/);
 });

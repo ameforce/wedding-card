@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { weddingContent } from "../src/content.js";
+import { getCalendarMonth, weddingContent } from "../src/content.js";
+
+const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
 test("user-confirmed wedding facts are represented without filling unknown fields", () => {
   assert.deepEqual(weddingContent.couple, { groom: "김종인", bride: "유지혜" });
@@ -12,7 +17,6 @@ test("user-confirmed wedding facts are represented without filling unknown field
     time: "오후 3시",
     startTime24h: "15:00",
     timezone: {
-      label: "KST",
       iana: "Asia/Seoul",
       utcOffset: "+09:00",
     },
@@ -34,12 +38,41 @@ test("all supplied map links are safe HTTPS destinations", () => {
   }
 });
 
-test("the event dot aligns to Sunday, December 27, 2026", () => {
-  const { year, month, day } = weddingContent.calendar;
-  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
-  const eventWeekday = new Date(`${weddingContent.event.isoDate}T00:00:00Z`).getUTCDay();
-  const eventIndex = firstWeekday + day - 1;
+test("December 2026 calendar has all real dates and emphasizes Sunday the 27th", () => {
+  const calendarDays = getCalendarMonth(weddingContent.calendar);
+  const eventIndex = calendarDays.findIndex((calendarDay) => calendarDay?.isEvent);
+  const eventDay = calendarDays[eventIndex];
 
-  assert.equal(eventWeekday, 0);
+  assert.deepEqual(weddingContent.calendar.weekdays, ["일", "월", "화", "수", "목", "금", "토"]);
+  assert.equal(calendarDays.length, 35);
+  assert.equal(calendarDays[2].date, 1);
+  assert.equal(calendarDays[32].date, 31);
   assert.equal(eventIndex, 28);
+  assert.deepEqual(eventDay, { date: 27, weekday: 0, isEvent: true });
+  assert.match(app, /className="calendar-heading"/);
+  assert.match(app, /className="weekday-row"/);
+  assert.match(app, /className="calendar-days"/);
+  assert.match(app, /weddingContent\.event\.time} 예식/);
+  assert.doesNotMatch(app, /date-dots/);
+});
+
+test("venue map can render only the supplied real local asset with its attribution", () => {
+  assert.deepEqual(weddingContent.venue.map, {
+    localAssetPath: "/assets/map/venue-map.webp",
+    alt: "더 바실리움 주변 실제 지도와 위치 핀",
+    sourceAttribution: "카카오맵",
+  });
+  assert.ok(existsSync(new URL("../public/assets/map/venue-map.webp", import.meta.url)));
+  assert.ok(!existsSync(new URL("../public/assets/design/abstract-map.webp", import.meta.url)));
+  assert.match(app, /<img src=\{map\.localAssetPath\} alt=\{map\.alt\}/);
+  assert.match(app, /지도 출처: \{map\.sourceAttribution\}/);
+  assert.doesNotMatch(app, /DESIGN MAP|abstract-map|map-pin/);
+  assert.match(css, /\.map-frame > img \{[^}]*aspect-ratio:\s*2\s*\/\s*1/);
+  const caption = css.match(/\.map-frame figcaption\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.doesNotMatch(caption, /position\s*:\s*absolute/);
+
+  const pastelLocation = css.match(/\.pastel-invitation \.location-section\s*\{([^}]+)\}/)?.[1] ?? "";
+  const pastelMap = css.match(/\.pastel-invitation \.map-frame\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.match(pastelLocation, /grid-template-columns:\s*1fr/);
+  assert.match(pastelMap, /grid-column:\s*1/);
 });
