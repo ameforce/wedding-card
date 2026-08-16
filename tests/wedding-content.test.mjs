@@ -7,12 +7,18 @@ test("user-confirmed wedding facts are represented without filling unknown field
   assert.deepEqual(weddingContent.event, {
     isoDate: "2026-12-27",
     date: "2026.12.27",
+    dateLabel: "2026년 12월 27일",
     day: "일요일",
     time: "오후 3시",
-    timezone: null,
+    startTime24h: "15:00",
+    timezone: {
+      label: "KST",
+      iana: "Asia/Seoul",
+      utcOffset: "+09:00",
+    },
   });
   assert.equal(weddingContent.venue.name, "더 바실리움");
-  assert.equal(weddingContent.venue.address, "실제 주소 입력 예정");
+  assert.equal(weddingContent.venue.address, "경기 성남시 분당구 양현로 322");
   assert.equal(weddingContent.isDesignPlaceholder, true);
 });
 

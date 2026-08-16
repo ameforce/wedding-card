@@ -46,13 +46,19 @@ export const weddingContent = {
   event: {
     isoDate: "2026-12-27",
     date: "2026.12.27",
+    dateLabel: "2026년 12월 27일",
     day: "일요일",
     time: "오후 3시",
-    timezone: null,
+    startTime24h: "15:00",
+    timezone: {
+      label: "KST",
+      iana: "Asia/Seoul",
+      utcOffset: "+09:00",
+    },
   },
   venue: {
     name: "더 바실리움",
-    address: "실제 주소 입력 예정",
+    address: "경기 성남시 분당구 양현로 322",
     mapLinks: {
       naver: "https://naver.me/GOPesFwZ",
       kakao: "https://place.map.kakao.com/518455120",

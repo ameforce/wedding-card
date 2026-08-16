@@ -11,8 +11,10 @@ import {
   Phone,
   ShareNetwork,
   Train,
+  WarningCircle,
 } from "@phosphor-icons/react";
 import { DESIGN_ASSETS, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
+import { copyText, downloadCalendar, eventSummaryText, shareInvitation } from "./invitation-actions.js";
 
 const VARIANTS = {
   quiet: {
@@ -124,6 +126,16 @@ function Greeting() {
   );
 }
 
+function EventDate({ className = "" }) {
+  const dateTime = `${weddingContent.event.isoDate}T${weddingContent.event.startTime24h}:00${weddingContent.event.timezone.utcOffset}`;
+  return (
+    <time className={`event-date ${className}`} dateTime={dateTime}>
+      <span className="event-date-primary">{weddingContent.event.dateLabel}</span>
+      <span className="event-date-secondary">{weddingContent.event.day} · {weddingContent.event.time} · {weddingContent.event.timezone.label}</span>
+    </time>
+  );
+}
+
 function ActionButton({ icon: Icon, trailingIcon: TrailingIcon, children, href, onClick, className = "" }) {
   const content = (
     <>
@@ -142,6 +154,14 @@ function ActionButton({ icon: Icon, trailingIcon: TrailingIcon, children, href, 
 
 function Location({ notify, compact = false }) {
   const openMap = (label) => notify(`${label}에서 ${weddingContent.venue.name}을 엽니다.`);
+  const copyAddress = async () => {
+    try {
+      await copyText(weddingContent.venue.address);
+      notify("예식장 주소를 복사했습니다.");
+    } catch {
+      notify("주소를 복사하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
+    }
+  };
   return (
     <section className={`location-section section-pad ${compact ? "is-compact" : ""}`} aria-labelledby="location-title">
       <div className="section-heading">
@@ -156,6 +176,9 @@ function Location({ notify, compact = false }) {
       <div className="venue-copy">
         <strong>{weddingContent.venue.name}</strong>
         <span>{weddingContent.venue.address}</span>
+        <button className="address-copy" type="button" onClick={copyAddress}>
+          <Copy aria-hidden="true" weight="light" /> 주소 복사
+        </button>
       </div>
       <div className="route-actions" aria-label="길찾기 서비스">
         <ActionButton icon={MapPin} href={weddingContent.venue.mapLinks.naver} onClick={() => openMap("네이버 지도")}>네이버 지도</ActionButton>
@@ -175,11 +198,28 @@ function Location({ notify, compact = false }) {
 
 function BottomActions({ notify, pastel = false }) {
   const unavailable = (label) => notify(`‘${label}’ 기능은 실제 정보 확정 후 활성화됩니다.`);
+  const saveCalendar = () => {
+    try {
+      downloadCalendar(weddingContent);
+      notify("캘린더 파일을 저장했습니다.");
+    } catch {
+      notify("캘린더 파일을 저장하지 못했습니다.", "error");
+    }
+  };
+  const share = async () => {
+    try {
+      const result = await shareInvitation(weddingContent, window.location.href);
+      if (result === "shared") notify("청첩장을 공유했습니다.");
+      if (result === "copied") notify("공유할 내용과 링크를 복사했습니다.");
+    } catch {
+      notify("청첩장을 공유하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
+    }
+  };
   return (
     <nav className={`bottom-actions ${pastel ? "is-pastel" : ""}`} aria-label="청첩장 주요 기능">
       <ActionButton icon={Phone} onClick={() => unavailable("연락하기")}>연락하기</ActionButton>
-      <ActionButton icon={CalendarBlank} onClick={() => unavailable("일정 저장")}>일정 저장하기</ActionButton>
-      <ActionButton icon={ShareNetwork} onClick={() => unavailable("공유")}>공유하기</ActionButton>
+      <ActionButton icon={CalendarBlank} onClick={saveCalendar}>일정 저장하기</ActionButton>
+      <ActionButton icon={ShareNetwork} onClick={share}>공유하기</ActionButton>
     </nav>
   );
 }
@@ -192,7 +232,7 @@ function QuietInvitation({ notify }) {
         <p className="display-title" lang="en">OUR DAY</p>
         <ImageSlot asset={WEDDING_PHOTOS.quiet.hero} className="hero-photo is-arched" priority />
         <h1>{weddingContent.couple.groom} <i aria-hidden="true">&amp;</i> {weddingContent.couple.bride}</h1>
-        <p className="date-line">{weddingContent.event.date} · {weddingContent.event.day} {weddingContent.event.time}</p>
+        <EventDate className="date-line" />
         <p className="venue-line">{weddingContent.venue.name}</p>
       </header>
       <Greeting />
@@ -212,14 +252,29 @@ function QuietInvitation({ notify }) {
 }
 
 function SaveCards({ notify }) {
-  const pendingCalendarDetails = "타임존과 예식 종료 시각 확정 후 일정 저장을 활성화할 수 있어요.";
+  const copyEventDetails = async () => {
+    try {
+      await copyText(eventSummaryText(weddingContent));
+      notify("예식 날짜와 장소를 복사했습니다.");
+    } catch {
+      notify("예식 정보를 복사하지 못했습니다.", "error");
+    }
+  };
+  const saveCalendar = () => {
+    try {
+      downloadCalendar(weddingContent);
+      notify("캘린더 파일을 저장했습니다.");
+    } catch {
+      notify("캘린더 파일을 저장하지 못했습니다.", "error");
+    }
+  };
   return (
     <section className="save-cards section-pad" aria-label="날짜와 캘린더 저장">
-      <ActionButton icon={CalendarBlank} className="save-date-action" onClick={() => notify(pendingCalendarDetails)}>
-        <strong>날짜 기억하기</strong><small>소중한 날을 기억해 주세요.</small>
+      <ActionButton icon={Copy} className="save-date-action" onClick={copyEventDetails}>
+        <strong>예식 정보 복사</strong><small>날짜와 장소를 복사합니다.</small>
       </ActionButton>
-      <ActionButton icon={CalendarBlank} trailingIcon={CaretRight} className="save-calendar-action" onClick={() => notify(pendingCalendarDetails)}>
-        <strong>캘린더에 저장하기</strong><small>iCalendar 파일 준비 예정</small>
+      <ActionButton icon={CalendarBlank} trailingIcon={CaretRight} className="save-calendar-action" onClick={saveCalendar}>
+        <strong>캘린더에 저장하기</strong><small>{weddingContent.event.timezone.label} 시작 시각으로 저장</small>
       </ActionButton>
     </section>
   );
@@ -236,7 +291,8 @@ function PastelInvitation({ notify }) {
           <span className="tiny-divider" aria-hidden="true" />
           <h1>{weddingContent.couple.groom} <b aria-hidden="true">·</b> {weddingContent.couple.bride}</h1>
           <span className="name-divider" aria-hidden="true" />
-          <p className="date-line">{weddingContent.event.date}<br />{weddingContent.event.day} {weddingContent.event.time}<br />{weddingContent.venue.name}</p>
+          <EventDate className="date-line" />
+          <p className="pastel-venue-line">{weddingContent.venue.name}</p>
         </div>
       </header>
       <Greeting />
@@ -293,7 +349,7 @@ function VariantSwitcher({ variant, onChange }) {
 
 export function App() {
   const [variant, setVariant] = useState(getVariant);
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState({ message: "", tone: "success" });
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
 
   useEffect(() => {
@@ -304,10 +360,10 @@ export function App() {
     window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
   }, [variant]);
 
-  const notify = (message) => {
-    setToast(message);
+  const notify = (message, tone = "success") => {
+    setToast({ message, tone });
     window.clearTimeout(window.__weddingToastTimer);
-    window.__weddingToastTimer = window.setTimeout(() => setToast(""), 2800);
+    window.__weddingToastTimer = window.setTimeout(() => setToast({ message: "", tone: "success" }), 2800);
   };
 
   return (
@@ -316,14 +372,18 @@ export function App() {
       <div className="invitation-stage">
         {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
       </div>
-      <div className={`toast ${toast ? "is-visible" : ""}`} role="status" aria-live="polite">
-        <Check aria-hidden="true" weight="bold" />
-        <span>{toast}</span>
+      <div className={`toast is-${toast.tone} ${toast.message ? "is-visible" : ""}`} role="status" aria-live="polite">
+        {toast.tone === "error" ? <WarningCircle aria-hidden="true" weight="bold" /> : <Check aria-hidden="true" weight="bold" />}
+        <span>{toast.message}</span>
       </div>
       {!captureMode && (
         <button className="copy-review-link" type="button" onClick={async () => {
-          await navigator.clipboard?.writeText(window.location.href);
-          notify("현재 시안 링크를 복사했습니다.");
+          try {
+            await copyText(window.location.href);
+            notify("현재 시안 링크를 복사했습니다.");
+          } catch {
+            notify("현재 시안 링크를 복사하지 못했습니다.", "error");
+          }
         }}>
           <Copy aria-hidden="true" /> 현재 시안 링크 복사
         </button>

@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 const content = readFileSync(new URL("../src/content.js", import.meta.url), "utf8");
 const markers = [
   "isDesignPlaceholder: true",
-  "실제 주소 입력 예정",
   "시간 미정",
   "정보 입력 예정",
 ];
