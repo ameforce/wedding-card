@@ -140,8 +140,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .quiet-hero .hero-photo { width: 46%; aspect-ratio: 4 / 5; margin: 0 auto 9px; }
 .is-arched { border-radius: 50% 50% 0 0 / 32% 32% 0 0; }
 .quiet-hero h1 { margin: 0; font-family: "Noto Serif KR Variable", serif; font-size: 19px; font-weight: 430; letter-spacing: .16em; }
-.quiet-hero h1 i { margin: 0 4px; color: var(--accent); font-family: "Cormorant Garamond Variable", serif; font-size: 25px; font-weight: 400; }
-.date-line { color: var(--accent); font-family: "Cormorant Garamond Variable", serif; font-size: 13px; letter-spacing: .09em; }
+.quiet-hero h1 i { margin: 0 4px; color: var(--accent); font-family: "Cormorant Garamond Variable", serif; font-size: 25px; font-weight: 400; vertical-align: .08em; }
+.date-line { color: var(--accent); font-family: "Noto Serif KR Variable", serif; font-size: 13px; line-height: 1.45; letter-spacing: .09em; }
 .venue-line { margin: 5px 0 0; color: #7b746d; font-family: "Noto Serif KR Variable", serif; font-size: 10px; }
 .greeting { padding-top: 11px; padding-bottom: 7px; text-align: center; }
 .eyebrow { margin: 0 0 10px; font-size: 8px; font-weight: 650; letter-spacing: .25em; }
@@ -193,8 +193,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .save-cards .action-button { min-height: 73px; padding: 10px 9px; color: #294765; border: 1px solid #edf0f2; }
 .save-cards .action-button:nth-child(2) { background: var(--blue); }
 .save-cards .action-button span { display: grid; gap: 4px; text-align: left; }
-.save-cards .save-date-action { flex-direction: column; gap: 5px; }
-.save-cards .save-date-action span { text-align: center; }
+.save-cards .save-date-action { flex-direction: row; }
+.save-cards .save-date-action span { text-align: left; }
 .save-cards .save-calendar-action { display: grid; grid-template-columns: 16px minmax(0, 1fr) 12px; justify-content: stretch; column-gap: 7px; }
 .save-cards .save-calendar-action .action-trailing-icon { width: 12px; height: 12px; }
 .save-cards strong { font-family: "Noto Serif KR Variable", serif; font-size: 8px; font-weight: 550; }

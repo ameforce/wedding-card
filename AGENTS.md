@@ -9,6 +9,7 @@
 - Never generate people or likeness substitutes. Photo slots use non-person abstract design assets until supplied real photographs are approved.
 - Approved real studio photographs may be cropped and responsively optimized, but people must never be AI-edited. Use actual 세상이 references only for the alternating left/right tuxedo-cat sticker cameos and provide a motion-free reduced-motion state. Preserve 세상이의 dominant yellow-green irises with only a close-inspection-level blue/cyan reflection.
 - Preserve the stickers' genuine transparent alpha and intentional horizontal edge peeking. Their float motion must not clip nontransparent top or side edges at any phase, and CSS must not add a drop shadow or matte halo that makes the sticker background appear detached.
+- Treat typography alignment as acceptance-critical: verify mixed Korean/Latin baselines, optical alignment of decorative separators, and matching title/icon centerlines in repeated controls at every required viewport.
 - Validate both variants at 360, 390, 430, 768, and 1440px widths, including keyboard focus and reduced motion.
 
 Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.

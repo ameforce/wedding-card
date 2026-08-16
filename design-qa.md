@@ -87,6 +87,13 @@ Focused region crops were not required because the 390px full-page captures keep
 - P3: retune a focal point only if the couple prefers a different face position after reviewing the live page.
 - P3: recheck final line breaks after names, date, venue, and greeting are supplied.
 
+## Typography alignment correction
+
+- Current-run screenshots reproduced a 10.5px title centerline mismatch between the two Pastel save cards at 360, 390, and 430px. Both cards now use the same horizontal icon/text alignment, with title and icon centerline deltas reduced to 0px at 360, 390, 430, 768, and 1440px.
+- Quiet's mixed date line now uses one Korean-capable serif family with an explicit line-height. The decorative ampersand is optically raised so its bottom baseline matches both names.
+- At all ten variant/viewport combinations, route and footer icon/label centerline deltas remain 0px, every image loads, and `scrollWidth` equals the viewport width.
+- Accepted before/after evidence: `artifacts/qa/text-alignment-before-quiet-live-390.png`, `artifacts/qa/text-alignment-after-quiet-live-390.png`, `artifacts/qa/text-alignment-before-pastel-live-390.png`, and `artifacts/qa/text-alignment-after-pastel-live-390.png`.
+
 ## 세상이 iris fidelity correction
 
 - Magnified comparison: `artifacts/qa/sesang-eye-refinement-before-after.png` (left column before, right column after; first row left cameo, second row right cameo).
