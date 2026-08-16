@@ -39,8 +39,18 @@ test("contact disclosure stays readable and touchable on narrow phones", () => {
   assert.match(rule(".contact-actions a"), /height:\s*44px/);
   assert.match(rule(".contact-person small"), /font-size:\s*13px/);
   assert.match(rule(".contact-section"), /scroll-margin-top:\s*104px/);
-  assert.match(app, /<details className="contact-group"/);
+  assert.match(app, /<details className=\{`contact-group/);
   assert.match(app, /<summary>/);
+});
+
+test("Pastel account disclosures keep compact copy controls alongside readable account details", () => {
+  assert.match(rule(".account-row"), /grid-template-columns:\s*minmax\(0, 1fr\) auto/);
+  assert.match(rule(".account-copy"), /min-height:\s*44px/);
+  assert.match(rule(".account-details strong"), /font-size:\s*15px/);
+  assert.match(app, /function AccountGroups/);
+  assert.match(app, /copyText\(account\.number\)/);
+  assert.match(app, /aria-label=\{`\$\{account\.label\} 계좌번호 복사`\}/);
+  assert.match(app, /<ContactSection pastel notify=\{notify\} \/>/);
 });
 
 test("Quiet date line uses a single Korean-capable serif family", () => {

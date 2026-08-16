@@ -57,7 +57,9 @@ export const weddingContent = {
   },
   familyContacts: {
     groom: {
+      key: "groom",
       label: "신랑 측",
+      emoji: "🤵",
       parents: ["김웅기", "홍정화"],
       childRole: "장남",
       childName: "김종인",
@@ -68,7 +70,9 @@ export const weddingContent = {
       ],
     },
     bride: {
+      key: "bride",
       label: "신부 측",
+      emoji: "👰",
       parents: ["유효상", "정소은"],
       childRole: "장녀",
       childName: "유지혜",
@@ -77,6 +81,24 @@ export const weddingContent = {
         { relation: "아버지", name: "유효상", phone: "010-8903-9679" },
         { relation: "어머니", name: "정소은", phone: "010-5161-6841" },
       ],
+    },
+  },
+  accounts: {
+    groom: {
+      key: "groom",
+      label: "신랑 측",
+      emoji: "🤵",
+      bank: "기업은행",
+      number: "12306556901011",
+      holder: "김종인",
+    },
+    bride: {
+      key: "bride",
+      label: "신부 측",
+      emoji: "👰",
+      bank: "국민",
+      number: "64970201592781",
+      holder: "유지혜",
     },
   },
   event: {

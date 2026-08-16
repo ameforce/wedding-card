@@ -1,5 +1,34 @@
 # Design QA
 
+## Verification pass — Pastel Letter feedback refinement
+
+### Implemented outcome
+
+- The Pastel-only hero label now uses the self-hosted Latin `Dancing Script` webfont as a lightweight, diagonal two-line `Our Wedding` / `Day` composition. It extends slightly beyond the left photo edge while remaining inside the invitation; the approved 86% arched frame and `50% 58%` photo focal position are unchanged.
+- The supplied watercolor wash is distributed through the full Pastel invitation at three natural positions, with low-opacity blue/blush support washes and a local procedural paper-grain asset behind content. It is no longer visually concentrated only at the hero's upper edge.
+- Pastel inter-section reveal gaps increase from 14px to 28px and its internal section padding is more generous, without adding spacer sections or changing Quiet spacing.
+- Pastel contact and account disclosures are independently collapsed by default. Groom/bride emoji markers appear on all four summary titles; each account has an accessible copy control. Account values are modeled once in source and intentionally omitted from tests, logs, and this QA record.
+- Background music is not rendered yet: no actual audio file, public playback license, or approved source path was supplied, so no arbitrary track or broken player was added. The remaining input contract is a licensed audio asset/source, applicable public-use credit or rights terms, and intended loop/trim behavior; playback will start off when that source is approved.
+
+### Live browser evidence
+
+- At 360, 390, 430, 768, and 1440px, Pastel had no horizontal overflow or loaded-image failures. The hero stayed at a 0.86 photo-to-invitation ratio; the label used `Dancing Script`, crossed the photo's left edge, and stayed within the invitation.
+- The two Pastel account disclosures were initially closed, the two copy controls remained at least 44px tall, and a copy click produced the expected success feedback without exposing the value in QA evidence.
+- The shared Pastel lightbox opened from the hero with focus on `갤러리 닫기`; Escape closed it and restored focus to the hero trigger. Under emulated reduced motion, the label animation was disabled while its static diagonal stayed intact, and reveal sections rendered opaque with no transform.
+- Quiet regression at the same five widths found no overflow or loaded-image failures, exactly four photo triggers, no account disclosure, and one calendar plus one share action. Its lightbox kept the same keyboard focus restoration behavior.
+
+### Automated verification
+
+- `npm run lint`: passed.
+- `npm run test:ui`: 33/33 passed.
+- `npm run build:design`: passed and prepared the Sites output.
+- `npm run test:sites`: 4/4 passed.
+- Plain `npm run build` remains intentionally blocked by the existing design-placeholder guard, not by this change.
+
+### Final result
+
+`passed` for the implementable Pastel feedback. Background music remains explicitly blocked on the licensed source contract above.
+
 ## Accepted pass — hero label, restrained motion, and spacing
 
 - Pastel hero uses the exact `Our Wedding Day` label at the approved photo's upper-left without changing its crop or adding a card treatment.

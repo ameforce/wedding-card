@@ -37,12 +37,29 @@ test("confirmed family contacts are modeled once and exposed through accessible 
   assert.deepEqual(sides.map((side) => side.contacts.length), [3, 3]);
   assert.ok(contacts.every((contact) => /^010-\d{4}-\d{4}$/.test(contact.phone)));
   assert.match(app, /function FamilyIntroduction\(\)/);
-  assert.match(app, /function ContactSection\(\)/);
+  assert.match(app, /function ContactSection\(/);
   assert.match(app, /href=\{`tel:\$\{phone\}`\}/);
   assert.match(app, /href=\{`sms:\$\{phone\}`\}/);
   assert.match(app, /aria-label=\{`\$\{contact\.relation\} \$\{contact\.name\}에게 전화하기`\}/);
   assert.match(app, /aria-label=\{`\$\{contact\.relation\} \$\{contact\.name\}에게 문자 보내기`\}/);
   assert.match(app, /<ActionButton icon=\{Phone\} href="#contact">연락하기<\/ActionButton>/);
+});
+
+test("confirmed account details are modeled once for initially collapsed Pastel-only copy disclosures", () => {
+  const accounts = Object.values(weddingContent.accounts);
+
+  assert.equal(accounts.length, 2);
+  assert.deepEqual(accounts.map((account) => account.key), ["groom", "bride"]);
+  assert.deepEqual(accounts.map((account) => account.holder), ["김종인", "유지혜"]);
+  assert.ok(accounts.every((account) => account.bank.length > 0 && /^\d+$/.test(account.number)));
+  assert.match(app, /function AccountGroups/);
+  assert.match(app, /<details className=\{`contact-group account-group is-\$\{account\.key\}`\}/);
+  assert.match(app, /copyText\(account\.number\)/);
+  assert.match(app, /<ContactSection pastel notify=\{notify\} \/>/);
+  assert.match(app, /<ScrollReveal><ContactSection \/><\/ScrollReveal>/);
+
+  const accountGroups = app.match(/function AccountGroups\([\s\S]*?function ContactSection/)?.[0] ?? "";
+  assert.doesNotMatch(accountGroups, /<details[^>]*\sopen(?:=|\s)/);
 });
 
 test("Pastel hero uses the approved local photo derivatives without reusing a gallery selection", async () => {
@@ -159,19 +176,36 @@ test("Pastel hero uses a breathing-room inset photo frame without a heavy treatm
   assert.ok(pastelHeroMarkup.indexOf("pastel-hero-intro") < pastelHeroMarkup.indexOf("<PhotoButton"));
   assert.ok(pastelHeroMarkup.indexOf("<PhotoButton") < pastelHeroMarkup.indexOf("pastel-hero-copy"));
   assert.doesNotMatch(pastelHeroMarkup, /tiny-divider|name-divider/);
-  assert.match(pastelHero, /pastel-watercolor-wash\.webp/);
+  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*pastel-watercolor-wash\.webp/);
+  assert.match(pastelHero, /overflow:\s*visible/);
+  assert.match(pastelHero, /background:\s*transparent/);
   assert.match(pastelHeroCopy, /background:\s*transparent/);
   assert.doesNotMatch(pastelHeroCopy, /pastel-watercolor-wash|border|box-shadow/);
   assert.match(pastelHeroPhoto, /width:\s*86%/);
-  assert.match(pastelHeroPhoto, /margin:\s*0\s+auto\s+clamp\(24px,\s*6vw,\s*30px\)/);
+  assert.match(pastelHeroPhoto, /margin:\s*0\s+auto\s+clamp\(32px,\s*8vw,\s*40px\)/);
   assert.match(pastelHeroPhoto, /border-radius:\s*50%\s+50%\s+18px\s+18px\s*\/\s*20%\s+20%\s+18px\s+18px/);
   assert.doesNotMatch(pastelHeroPhoto, /(?:border|box-shadow)\s*:/);
-  assert.match(app, /overlayLabel="Our Wedding Day"/);
+  assert.match(app, /overlayLabel=\{PASTEL_HERO_LABEL\}/);
+  assert.match(app, /<span className="photo-overlay-label-line">Our Wedding<\/span>/);
+  assert.match(app, /<span className="photo-overlay-label-line is-day">Day<\/span>/);
   assert.match(app, /className="photo-overlay-label"/);
-  const overlay = css.match(/\.photo-overlay-label\s*\{([^}]+)\}/)?.[1] ?? "";
-  assert.match(overlay, /position:\s*absolute/);
-  assert.match(overlay, /top:\s*clamp/);
-  assert.match(overlay, /left:\s*clamp/);
+  const overlay = css.match(/\.pastel-hero-photo \.photo-overlay-label\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.match(css, /\.photo-overlay-label\s*\{[^}]*position:\s*absolute/);
+  assert.match(overlay, /font-family:\s*"Dancing Script", cursive/);
+  assert.match(overlay, /left:\s*-17px/);
+  assert.match(overlay, /--hero-label-rotation:\s*-8deg/);
+  assert.match(css, /\.pastel-hero-photo\s*\{[^}]*overflow:\s*visible/);
+  assert.match(css, /\.pastel-hero-photo \.photo-overlay-label-line\.is-day\s*\{[^}]*margin-left:\s*47px/);
+});
+
+test("Pastel distributes its watercolor and paper texture beyond the hero without adding an unlicensed audio control", () => {
+  assert.ok(existsSync(new URL("../public/assets/design/pastel-paper-grain.svg", import.meta.url)));
+  assert.match(css, /@import "@fontsource\/dancing-script\/latin-500\.css"/);
+  assert.match(css, /\.pastel-invitation\s*\{[^}]*isolation:\s*isolate/);
+  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*?background-position:\s*50% 0, 14% 39%, 86% 78%/);
+  assert.match(css, /\.pastel-invitation::after\s*\{[^}]*pastel-paper-grain\.svg/);
+  assert.match(css, /\.pastel-invitation > \*\s*\{[^}]*z-index:\s*1/);
+  assert.doesNotMatch(app, /<audio\b|<Audio\b/);
 });
 
 test("section spacing and reveal motion remain subtle and reduced-motion safe", () => {
@@ -179,7 +213,7 @@ test("section spacing and reveal motion remain subtle and reduced-motion safe", 
   assert.match(app, /new IntersectionObserver/);
   assert.match(app, /prefers-reduced-motion: reduce/);
   assert.match(css, /\.section-reveal\s*\{[^}]*opacity:\s*0[^}]*translateY\(14px\)/);
-  assert.match(css, /\.pastel-invitation > \.section-reveal \+ \.section-reveal\s*\{[^}]*margin-top:\s*14px/);
+  assert.match(css, /\.pastel-invitation > \.section-reveal \+ \.section-reveal\s*\{[^}]*margin-top:\s*28px/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.section-reveal/);
 });
 

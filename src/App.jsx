@@ -32,6 +32,13 @@ const VARIANTS = {
   },
 };
 
+const PASTEL_HERO_LABEL = (
+  <>
+    <span className="photo-overlay-label-line">Our Wedding</span>
+    <span className="photo-overlay-label-line is-day">Day</span>
+  </>
+);
+
 function getVariant() {
   const value = new URLSearchParams(window.location.search).get("variant");
   return value === "pastel" ? "pastel" : "quiet";
@@ -377,7 +384,46 @@ function digitsOnly(phone) {
   return phone.replace(/\D/g, "");
 }
 
-function ContactSection() {
+function AccountGroups({ notify }) {
+  const copyAccount = async (account) => {
+    try {
+      await copyText(account.number);
+      notify(`${account.label} 계좌번호를 복사했습니다.`);
+    } catch {
+      notify("계좌번호를 복사하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
+    }
+  };
+
+  return (
+    <div className="account-groups" aria-label="계좌 안내">
+      {Object.values(weddingContent.accounts).map((account) => (
+        <details className={`contact-group account-group is-${account.key}`} key={account.key}>
+          <summary>
+            <span className="group-summary-label">
+              <span className="side-emoji" aria-hidden="true">{account.emoji}</span>
+              <span>{account.label} 계좌</span>
+            </span>
+            <CaretDown aria-hidden="true" weight="light" />
+          </summary>
+          <div className="account-list">
+            <div className="account-row">
+              <div className="account-details">
+                <strong>{account.bank} {account.number}</strong>
+                <small>예금주 {account.holder}</small>
+              </div>
+              <button className="account-copy" type="button" onClick={() => copyAccount(account)} aria-label={`${account.label} 계좌번호 복사`}>
+                <Copy aria-hidden="true" weight="light" />
+                <span>복사</span>
+              </button>
+            </div>
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+function ContactSection({ pastel = false, notify }) {
   return (
     <section className="contact-section section-pad" id="contact" aria-labelledby="contact-title">
       <div className="section-heading">
@@ -387,9 +433,12 @@ function ContactSection() {
       <p className="contact-intro">축하의 마음을 전하실 분께 연락해 주세요.</p>
       <div className="contact-groups">
         {Object.values(weddingContent.familyContacts).map((side) => (
-          <details className="contact-group" key={side.label}>
+          <details className={`contact-group ${pastel ? `is-${side.key}` : ""}`.trim()} key={side.label}>
             <summary>
-              <span>{side.label} 연락처</span>
+              <span className="group-summary-label">
+                {pastel && <span className="side-emoji" aria-hidden="true">{side.emoji}</span>}
+                <span>{side.label} 연락처</span>
+              </span>
               <CaretDown aria-hidden="true" weight="light" />
             </summary>
             <div className="contact-list">
@@ -417,6 +466,7 @@ function ContactSection() {
           </details>
         ))}
       </div>
+      {pastel && <AccountGroups notify={notify} />}
     </section>
   );
 }
@@ -582,7 +632,7 @@ function PastelInvitation({ notify }) {
           className="pastel-hero-photo is-inset-frame"
           priority
           sizes="(min-width: 768px) 370px, 86vw"
-          overlayLabel="Our Wedding Day"
+          overlayLabel={PASTEL_HERO_LABEL}
         />
         <div className="pastel-hero-copy">
           <h1>{weddingContent.couple.groom} <b aria-hidden="true">·</b> {weddingContent.couple.bride}</h1>
@@ -604,7 +654,7 @@ function PastelInvitation({ notify }) {
         </section>
       </ScrollReveal>
       <ScrollReveal><Location notify={notify} /></ScrollReveal>
-      <ScrollReveal><ContactSection /></ScrollReveal>
+      <ScrollReveal><ContactSection pastel notify={notify} /></ScrollReveal>
       <ScrollReveal><BottomActions notify={notify} pastel /></ScrollReveal>
       <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.</footer>
       {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="pastel" />}
