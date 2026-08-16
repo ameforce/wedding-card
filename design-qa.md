@@ -1,5 +1,18 @@
 # Design QA
 
+## Accepted pass — hero label, restrained motion, and spacing
+
+- Pastel hero uses the exact `Our Wedding Day` label at the approved photo's upper-left without changing its crop or adding a card treatment.
+- Shared content sections receive an intersection-based opacity/14px vertical reveal. Capture mode and reduced-motion users receive the final static state immediately.
+- Natural inter-section spacing increases by 10px in Quiet and 14px in Pastel without inserting empty spacer sections.
+- Browser verification at 360, 390, 430, 768, and 1440px found zero horizontal overflow and zero failed images in both variants. The label remained entirely inside the approved photo at every width.
+- Normal-motion canary showed the label settling from 8px/transparent to its final position and sections revealing after scroll. Reduced-motion canary rendered the label and all sections immediately with no transform.
+- Account guidance and RSVP remain intentionally absent until exact public values, fields, destination, consent, and retention rules are confirmed.
+
+### Final result
+
+`passed` for the confirmed hero-label, motion, and spacing subset. Account and RSVP remain blocked on user-supplied facts.
+
 ## Accepted pass — compact Pastel calendar heading
 
 - Pastel now groups `2026년 12월` directly with `27일 일요일 · 오후 3시 예식` in a centered two-line heading with a 2px internal gap.

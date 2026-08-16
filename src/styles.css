@@ -96,10 +96,42 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .image-slot { position: relative; margin: 0; overflow: hidden; background: #d8d2cb; }
 .image-slot img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .image-slot.is-fallback { background: #d9d4ce; }
-.photo-button { display: block; padding: 0; overflow: hidden; background: #d8d2cb; border: 0; cursor: zoom-in; }
+.photo-button { position: relative; display: block; padding: 0; overflow: hidden; background: #d8d2cb; border: 0; cursor: zoom-in; }
 .photo-button img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .3s ease, filter .3s ease; }
 .photo-button:hover img, .photo-button:focus-visible img { filter: saturate(.94) contrast(.98); transform: scale(1.025); }
 .photo-button.is-fallback { background: #d9d4ce; cursor: default; }
+.photo-overlay-label {
+  position: absolute;
+  z-index: 2;
+  top: clamp(16px, 5vw, 22px);
+  left: clamp(17px, 5vw, 23px);
+  color: rgba(255, 255, 255, .96);
+  font-family: "Cormorant Garamond Variable", serif;
+  font-size: clamp(21px, 6.4vw, 27px);
+  font-weight: 450;
+  line-height: 1;
+  letter-spacing: .035em;
+  pointer-events: none;
+  text-shadow: 0 2px 14px rgba(25, 38, 48, .5);
+  animation: hero-label-enter .72s cubic-bezier(.22, .72, .26, 1) .28s both;
+}
+
+.section-reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity .64s ease, transform .72s cubic-bezier(.22, .72, .26, 1);
+}
+.section-reveal.is-visible,
+.is-capture .section-reveal { opacity: 1; transform: none; }
+.quiet-invitation > header + .section-reveal { margin-top: 10px; }
+.quiet-invitation > .section-reveal + .section-reveal { margin-top: 10px; }
+.pastel-invitation > header + .section-reveal { margin-top: 14px; }
+.pastel-invitation > .section-reveal + .section-reveal { margin-top: 14px; }
+
+@keyframes hero-label-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
 .crop-mark { position: absolute; right: 7px; bottom: 7px; width: 8px; height: 8px; border-right: 1px solid rgba(255,255,255,.65); border-bottom: 1px solid rgba(255,255,255,.65); }
 
 .sesang-cameo { position: absolute; z-index: 4; pointer-events: none; }
@@ -346,6 +378,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .section-reveal, .photo-overlay-label { opacity: 1 !important; transform: none !important; transition: none !important; }
   .sesang-sticker-motion { opacity: 1 !important; transform: none !important; transition: none !important; }
   .sesang-cameo img { animation: none !important; }
 }

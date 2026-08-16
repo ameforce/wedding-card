@@ -37,7 +37,7 @@ function getVariant() {
   return value === "pastel" ? "pastel" : "quiet";
 }
 
-function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes }) {
+function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes, overlayLabel }) {
   const broken = new URLSearchParams(window.location.search).get("brokenAsset") === "1";
   const [failed, setFailed] = useState(false);
   return (
@@ -61,6 +61,7 @@ function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "",
           onError={() => setFailed(true)}
         />
       )}
+      {overlayLabel && <span className="photo-overlay-label" aria-hidden="true">{overlayLabel}</span>}
       <span className="sr-only">사진 크게 보기</span>
     </button>
   );
@@ -213,6 +214,34 @@ function PlaceholderBadge() {
   return (
     <div className="placeholder-badge" role="note">
       DESIGN REVIEW · 일부 예식 정보 미확정
+    </div>
+  );
+}
+
+function ScrollReveal({ children, className = "" }) {
+  const nodeRef = useRef(null);
+  const [visible, setVisible] = useState(() => (
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    || new URLSearchParams(window.location.search).get("capture") === "1"
+    || !("IntersectionObserver" in window)
+  ));
+
+  useEffect(() => {
+    if (visible) return undefined;
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      setVisible(true);
+      observer.disconnect();
+    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+
+    if (nodeRef.current) observer.observe(nodeRef.current);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  return (
+    <div ref={nodeRef} className={`section-reveal ${visible ? "is-visible" : ""} ${className}`.trim()}>
+      {children}
     </div>
   );
 }
@@ -483,26 +512,28 @@ function QuietInvitation({ notify }) {
         <EventDate className="date-line" />
         <p className="venue-line">{weddingContent.venue.name}</p>
       </header>
-      <Greeting />
-      <FamilyIntroduction />
-      <CalendarPattern />
-      <section className="quiet-gallery section-pad" aria-label="웨딩 사진 갤러리">
-        {photos.slice(1).map((photo, index) => (
-          <PhotoButton
-            photo={photo}
-            index={index + 1}
-            openPhoto={gallery.openPhoto}
-            registerTrigger={gallery.registerTrigger}
-            className={`quiet-photo photo-${["one", "two", "three"][index]}`}
-            sizes="185px"
-            key={photo.src}
-          />
-        ))}
-        <SesangCameo asset={SESANG_STICKERS.left} side="left" />
-      </section>
-      <Location notify={notify} compact />
-      <ContactSection />
-      <BottomActions notify={notify} />
+      <ScrollReveal><Greeting /></ScrollReveal>
+      <ScrollReveal><FamilyIntroduction /></ScrollReveal>
+      <ScrollReveal><CalendarPattern /></ScrollReveal>
+      <ScrollReveal>
+        <section className="quiet-gallery section-pad" aria-label="웨딩 사진 갤러리">
+          {photos.slice(1).map((photo, index) => (
+            <PhotoButton
+              photo={photo}
+              index={index + 1}
+              openPhoto={gallery.openPhoto}
+              registerTrigger={gallery.registerTrigger}
+              className={`quiet-photo photo-${["one", "two", "three"][index]}`}
+              sizes="185px"
+              key={photo.src}
+            />
+          ))}
+          <SesangCameo asset={SESANG_STICKERS.left} side="left" />
+        </section>
+      </ScrollReveal>
+      <ScrollReveal><Location notify={notify} compact /></ScrollReveal>
+      <ScrollReveal><ContactSection /></ScrollReveal>
+      <ScrollReveal><BottomActions notify={notify} /></ScrollReveal>
       {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="quiet" />}
     </article>
   );
@@ -551,6 +582,7 @@ function PastelInvitation({ notify }) {
           className="pastel-hero-photo is-inset-frame"
           priority
           sizes="(min-width: 768px) 370px, 86vw"
+          overlayLabel="Our Wedding Day"
         />
         <div className="pastel-hero-copy">
           <h1>{weddingContent.couple.groom} <b aria-hidden="true">·</b> {weddingContent.couple.bride}</h1>
@@ -558,20 +590,22 @@ function PastelInvitation({ notify }) {
           <p className="pastel-venue-line">{weddingContent.venue.name}</p>
         </div>
       </header>
-      <Greeting />
-      <FamilyIntroduction />
-      <PastelSchedule />
-      <PastelGallery gallery={gallery} photos={WEDDING_PHOTOS.pastel.gallery} />
-      <section className="pastel-story section-pad" aria-labelledby="pastel-story-title">
-        <div className="pastel-section-heading">
-          <p className="eyebrow">OUR STORY</p>
-          <h2 id="pastel-story-title">우리의 이야기</h2>
-        </div>
-        <p>{weddingContent.story.join(" ")}</p>
-      </section>
-      <Location notify={notify} />
-      <ContactSection />
-      <BottomActions notify={notify} pastel />
+      <ScrollReveal><Greeting /></ScrollReveal>
+      <ScrollReveal><FamilyIntroduction /></ScrollReveal>
+      <ScrollReveal><PastelSchedule /></ScrollReveal>
+      <ScrollReveal><PastelGallery gallery={gallery} photos={WEDDING_PHOTOS.pastel.gallery} /></ScrollReveal>
+      <ScrollReveal>
+        <section className="pastel-story section-pad" aria-labelledby="pastel-story-title">
+          <div className="pastel-section-heading">
+            <p className="eyebrow">OUR STORY</p>
+            <h2 id="pastel-story-title">우리의 이야기</h2>
+          </div>
+          <p>{weddingContent.story.join(" ")}</p>
+        </section>
+      </ScrollReveal>
+      <ScrollReveal><Location notify={notify} /></ScrollReveal>
+      <ScrollReveal><ContactSection /></ScrollReveal>
+      <ScrollReveal><BottomActions notify={notify} pastel /></ScrollReveal>
       <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.</footer>
       {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="pastel" />}
     </article>

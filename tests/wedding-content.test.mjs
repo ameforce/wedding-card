@@ -166,6 +166,21 @@ test("Pastel hero uses a breathing-room inset photo frame without a heavy treatm
   assert.match(pastelHeroPhoto, /margin:\s*0\s+auto\s+clamp\(24px,\s*6vw,\s*30px\)/);
   assert.match(pastelHeroPhoto, /border-radius:\s*50%\s+50%\s+18px\s+18px\s*\/\s*20%\s+20%\s+18px\s+18px/);
   assert.doesNotMatch(pastelHeroPhoto, /(?:border|box-shadow)\s*:/);
+  assert.match(app, /overlayLabel="Our Wedding Day"/);
+  assert.match(app, /className="photo-overlay-label"/);
+  const overlay = css.match(/\.photo-overlay-label\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.match(overlay, /position:\s*absolute/);
+  assert.match(overlay, /top:\s*clamp/);
+  assert.match(overlay, /left:\s*clamp/);
+});
+
+test("section spacing and reveal motion remain subtle and reduced-motion safe", () => {
+  assert.match(app, /function ScrollReveal/);
+  assert.match(app, /new IntersectionObserver/);
+  assert.match(app, /prefers-reduced-motion: reduce/);
+  assert.match(css, /\.section-reveal\s*\{[^}]*opacity:\s*0[^}]*translateY\(14px\)/);
+  assert.match(css, /\.pastel-invitation > \.section-reveal \+ \.section-reveal\s*\{[^}]*margin-top:\s*14px/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.section-reveal/);
 });
 
 test("confirmed subway, shuttle and parking guidance is represented verbatim", () => {
