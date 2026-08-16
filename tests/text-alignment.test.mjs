@@ -33,6 +33,16 @@ test("Pastel actions use independent soft controls without coupon separators", (
   assert.match(app, /ariaLabel="네이버 지도에서 길찾기">네이버</);
 });
 
+test("contact disclosure stays readable and touchable on narrow phones", () => {
+  assert.match(rule(".contact-row"), /grid-template-columns:\s*minmax\(0, 1fr\) auto/);
+  assert.match(rule(".contact-actions a"), /width:\s*44px/);
+  assert.match(rule(".contact-actions a"), /height:\s*44px/);
+  assert.match(rule(".contact-person small"), /font-size:\s*13px/);
+  assert.match(rule(".contact-section"), /scroll-margin-top:\s*104px/);
+  assert.match(app, /<details className="contact-group"/);
+  assert.match(app, /<summary>/);
+});
+
 test("Quiet date line uses a single Korean-capable serif family", () => {
   const dateLine = rule(".date-line");
   assert.match(dateLine, /font-family:\s*"Noto Serif KR Variable", serif/);

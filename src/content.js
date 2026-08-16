@@ -55,6 +55,30 @@ export const weddingContent = {
     groom: "김종인",
     bride: "유지혜",
   },
+  familyContacts: {
+    groom: {
+      label: "신랑 측",
+      parents: ["김웅기", "홍정화"],
+      childRole: "아들",
+      childName: "김종인",
+      contacts: [
+        { relation: "신랑", name: "김종인", phone: "010-7322-2473" },
+        { relation: "아버지", name: "김웅기", phone: "010-2511-2473" },
+        { relation: "어머니", name: "홍정화", phone: "010-7422-2473" },
+      ],
+    },
+    bride: {
+      label: "신부 측",
+      parents: ["유효상", "정소은"],
+      childRole: "딸",
+      childName: "유지혜",
+      contacts: [
+        { relation: "신부", name: "유지혜", phone: "010-6803-6841" },
+        { relation: "아버지", name: "유효상", phone: "010-8903-9679" },
+        { relation: "어머니", name: "정소은", phone: "010-5161-6841" },
+      ],
+    },
+  },
   event: {
     isoDate: "2026-12-27",
     date: "2026.12.27",

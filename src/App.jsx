@@ -4,7 +4,9 @@ import {
   ArrowRight,
   Bus,
   CalendarBlank,
+  CaretDown,
   Car,
+  ChatText,
   Check,
   Copy,
   MapPin,
@@ -260,6 +262,30 @@ function Greeting() {
   );
 }
 
+function FamilyIntroduction() {
+  return (
+    <section className="family-introduction section-pad" aria-label="양가 가족 소개">
+      {Object.values(weddingContent.familyContacts).map((side) => (
+        <p key={side.label}>
+          <span>{side.parents.join(" · ")}</span>의 {side.childRole} <strong>{side.childName}</strong>
+        </p>
+      ))}
+    </section>
+  );
+}
+
+function PastelSchedule() {
+  return (
+    <section className="pastel-schedule section-pad" aria-labelledby="pastel-schedule-title">
+      <div className="pastel-section-heading">
+        <p className="eyebrow">WEDDING DAY</p>
+        <h2 id="pastel-schedule-title">예식 일정</h2>
+      </div>
+      <CalendarPattern />
+    </section>
+  );
+}
+
 function EventDate({ className = "" }) {
   const dateTime = `${weddingContent.event.isoDate}T${weddingContent.event.startTime24h}:00${weddingContent.event.timezone.utcOffset}`;
   return (
@@ -300,10 +326,70 @@ function ActionButton({ icon: Icon, trailingIcon: TrailingIcon, children, href, 
   );
 
   if (href) {
-    return <a className={`action-button ${className}`} href={href} target="_blank" rel="noreferrer" onClick={onClick} aria-label={ariaLabel}>{content}</a>;
+    const opensExternalPage = /^https?:/i.test(href);
+    return (
+      <a
+        className={`action-button ${className}`}
+        href={href}
+        target={opensExternalPage ? "_blank" : undefined}
+        rel={opensExternalPage ? "noreferrer" : undefined}
+        onClick={onClick}
+        aria-label={ariaLabel}
+      >
+        {content}
+      </a>
+    );
   }
 
   return <button className={`action-button ${className}`} type="button" onClick={onClick} aria-label={ariaLabel}>{content}</button>;
+}
+
+function digitsOnly(phone) {
+  return phone.replace(/\D/g, "");
+}
+
+function ContactSection() {
+  return (
+    <section className="contact-section section-pad" id="contact" aria-labelledby="contact-title">
+      <div className="section-heading">
+        <p className="eyebrow">CONTACT</p>
+        <h2 id="contact-title">연락하기</h2>
+      </div>
+      <p className="contact-intro">축하의 마음을 전하실 분께 연락해 주세요.</p>
+      <div className="contact-groups">
+        {Object.values(weddingContent.familyContacts).map((side) => (
+          <details className="contact-group" key={side.label}>
+            <summary>
+              <span>{side.label} 연락처</span>
+              <CaretDown aria-hidden="true" weight="light" />
+            </summary>
+            <div className="contact-list">
+              {side.contacts.map((contact) => {
+                const phone = digitsOnly(contact.phone);
+                return (
+                  <div className="contact-row" key={`${side.label}-${contact.relation}`}>
+                    <div className="contact-person">
+                      <span>{contact.relation}</span>
+                      <strong>{contact.name}</strong>
+                      <small>{contact.phone}</small>
+                    </div>
+                    <div className="contact-actions">
+                      <a href={`tel:${phone}`} aria-label={`${contact.relation} ${contact.name}에게 전화하기`}>
+                        <Phone aria-hidden="true" weight="light" />
+                      </a>
+                      <a href={`sms:${phone}`} aria-label={`${contact.relation} ${contact.name}에게 문자 보내기`}>
+                        <ChatText aria-hidden="true" weight="light" />
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function Location({ notify, compact = false }) {
@@ -353,7 +439,6 @@ function Location({ notify, compact = false }) {
 }
 
 function BottomActions({ notify, pastel = false }) {
-  const unavailable = (label) => notify(`‘${label}’ 기능은 실제 정보 확정 후 활성화됩니다.`);
   const saveDate = async () => {
     try {
       const result = await saveCalendar(weddingContent);
@@ -378,7 +463,7 @@ function BottomActions({ notify, pastel = false }) {
   };
   return (
     <nav className={`bottom-actions ${pastel ? "is-pastel" : ""}`} aria-label="청첩장 주요 기능">
-      <ActionButton icon={Phone} onClick={() => unavailable("연락하기")}>연락하기</ActionButton>
+      <ActionButton icon={Phone} href="#contact">연락하기</ActionButton>
       <ActionButton icon={CalendarBlank} onClick={saveDate}>캘린더 추가</ActionButton>
       <ActionButton icon={ShareNetwork} onClick={share}>공유하기</ActionButton>
     </nav>
@@ -399,6 +484,7 @@ function QuietInvitation({ notify }) {
         <p className="venue-line">{weddingContent.venue.name}</p>
       </header>
       <Greeting />
+      <FamilyIntroduction />
       <CalendarPattern />
       <section className="quiet-gallery section-pad" aria-label="웨딩 사진 갤러리">
         {photos.slice(1).map((photo, index) => (
@@ -415,6 +501,7 @@ function QuietInvitation({ notify }) {
         <SesangCameo asset={SESANG_STICKERS.left} side="left" />
       </section>
       <Location notify={notify} compact />
+      <ContactSection />
       <BottomActions notify={notify} />
       {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="quiet" />}
     </article>
@@ -472,6 +559,8 @@ function PastelInvitation({ notify }) {
         </div>
       </header>
       <Greeting />
+      <FamilyIntroduction />
+      <PastelSchedule />
       <PastelGallery gallery={gallery} photos={WEDDING_PHOTOS.pastel.gallery} />
       <section className="pastel-story section-pad" aria-labelledby="pastel-story-title">
         <div className="pastel-section-heading">
@@ -481,6 +570,7 @@ function PastelInvitation({ notify }) {
         <p>{weddingContent.story.join(" ")}</p>
       </section>
       <Location notify={notify} />
+      <ContactSection />
       <BottomActions notify={notify} pastel />
       <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.</footer>
       {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="pastel" />}

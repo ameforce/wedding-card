@@ -26,6 +26,23 @@ test("user-confirmed wedding facts are represented without filling unknown field
   assert.equal(weddingContent.isDesignPlaceholder, true);
 });
 
+test("confirmed family contacts are modeled once and exposed through accessible call and text actions", () => {
+  const sides = Object.values(weddingContent.familyContacts);
+  const contacts = sides.flatMap((side) => side.contacts);
+
+  assert.equal(sides.length, 2);
+  assert.deepEqual(sides.map((side) => side.childRole), ["아들", "딸"]);
+  assert.deepEqual(sides.map((side) => side.contacts.length), [3, 3]);
+  assert.ok(contacts.every((contact) => /^010-\d{4}-\d{4}$/.test(contact.phone)));
+  assert.match(app, /function FamilyIntroduction\(\)/);
+  assert.match(app, /function ContactSection\(\)/);
+  assert.match(app, /href=\{`tel:\$\{phone\}`\}/);
+  assert.match(app, /href=\{`sms:\$\{phone\}`\}/);
+  assert.match(app, /aria-label=\{`\$\{contact\.relation\} \$\{contact\.name\}에게 전화하기`\}/);
+  assert.match(app, /aria-label=\{`\$\{contact\.relation\} \$\{contact\.name\}에게 문자 보내기`\}/);
+  assert.match(app, /<ActionButton icon=\{Phone\} href="#contact">연락하기<\/ActionButton>/);
+});
+
 test("all supplied map links are safe HTTPS destinations", () => {
   assert.deepEqual(weddingContent.venue.mapLinks, {
     naver: "https://naver.me/GOPesFwZ",
@@ -54,6 +71,8 @@ test("December 2026 calendar has all real dates and emphasizes Sunday the 27th",
   assert.match(app, /className="calendar-days"/);
   assert.match(app, /weddingContent\.event\.time} 예식/);
   assert.doesNotMatch(app, /date-dots/);
+  assert.match(app, /className="pastel-schedule section-pad"/);
+  assert.match(app, /id="pastel-schedule-title">예식 일정/);
 });
 
 test("venue map keeps source metadata without a separate visible provider caption", () => {

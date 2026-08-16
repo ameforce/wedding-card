@@ -1,5 +1,37 @@
 # Design QA
 
+## Accepted pass — confirmed family, contact actions, and Pastel schedule
+
+### Source and rendered evidence
+
+- Product structure follows the previously accepted Letter B audit: family attribution sits after the invitation copy, the confirmed event date receives a readable calendar treatment, and contact details use compact side-specific disclosures near the venue utilities. No Letter B private value was copied.
+- Live implementation captures: `artifacts/qa/family-contact-quiet-live-1280.png` and `artifacts/qa/family-contact-pastel-live-1280.png`. Each is a 1280 × 720 browser window containing the real 430px capped invitation at the contact anchor; the screenshots were reopened and visually accepted after capture.
+- The expanded contact state was inspected live but intentionally not persisted as a QA artifact, avoiding an unnecessary second copy of the confirmed phone numbers outside the source content.
+
+### Findings and fixes
+
+- Initial P1: the footer `연락하기` control only displayed an unavailable toast. Fix: it now links to one shared `#contact` section rendered by both variants.
+- Initial P1: the shared link component opened every destination in a new tab. Fix: only `http:` and `https:` destinations receive `_blank`; `#contact`, `tel:`, and `sms:` stay in the current mobile context.
+- Initial P2: the fixed design switcher could cover the contact heading after anchor navigation. Fix: the contact section now uses a 104px scroll margin. Live read-back measured the contact heading below the switcher in both variants.
+- Initial P2: family contact text was too small for the established older-guest readability requirement. Fix: disclosure labels are 15px, names 16px, and relations/numbers 13px while each phone and message target remains 44 × 44px.
+
+### Content, interaction, and accessibility
+
+- Confirmed family attribution renders as `김웅기 · 홍정화의 아들 김종인` and `유효상 · 정소은의 딸 유지혜`. Birth order is not shown because 장남·장녀 was not confirmed.
+- Two native `details` disclosures group groom-side and bride-side contacts. Each confirmed person has a labeled phone action and message action with normalized `tel:` and `sms:` destinations; neither opens a browser tab.
+- Pastel now includes a visible `예식 일정` section with the confirmed December 2026 calendar and Sunday 27 highlighted. The footer still has exactly one calendar action, so no duplicate save control was introduced.
+- Live Browser checks found zero failed images and zero horizontal overflow at the capped 430px layout. The narrow-width CSS contract uses a shrinking `minmax(0, 1fr)` person column beside two fixed 44px actions; static tests cover the 360px-sensitive geometry and the five project breakpoints remain governed by the shared invitation cap.
+- Native summary focus retained a visible browser outline, contact actions have descriptive accessible names, and reduced-motion continues to shorten all transitions and disable the cat motion.
+
+### Privacy boundary
+
+- Confirmed phone numbers are intentionally part of the static invitation content and will be public if the site is published. Collapsed disclosures organize the screen but are not access control.
+- Tests validate contact count, shape, schemes, labels, and touch sizes without repeating literal phone numbers. Account guidance remains absent because no confirmed account data or public-scope approval exists.
+
+### Final result
+
+`passed`
+
 ## Accepted pass — unified Pastel Hero and Letter B content audit
 
 ### Source and rendered evidence

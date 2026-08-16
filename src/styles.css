@@ -141,6 +141,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .greeting { padding-top: 11px; padding-bottom: 7px; text-align: center; }
 .eyebrow { margin: 0 0 10px; font-size: 12px; font-weight: 650; letter-spacing: .18em; }
 .greeting p:not(.eyebrow) { margin: 2px 0; font-family: "Noto Serif KR Variable", serif; font-size: 14px; font-weight: 380; line-height: 1.65; }
+.family-introduction { padding-top: 10px; padding-bottom: 15px; text-align: center; }
+.family-introduction p { margin: 5px 0; color: #625d58; font-family: "Noto Serif KR Variable", serif; font-size: 14px; line-height: 1.7; }
+.family-introduction p > span { color: #47423e; }
+.family-introduction strong { margin-left: 3px; color: var(--ink); font-size: 15px; font-weight: 560; }
 .calendar-pattern { width: min(82%, 330px); margin: 0 auto; padding: 14px 0 17px; }
 .calendar-heading { display: flex; margin-bottom: 10px; padding: 0 1px 8px; align-items: baseline; justify-content: space-between; gap: 10px; border-bottom: 1px solid rgba(108, 96, 85, .24); }
 .calendar-heading p { margin: 0; font-family: "Noto Serif KR Variable", serif; font-size: 16px; font-weight: 520; }
@@ -179,6 +183,26 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .bottom-actions .action-button { position: relative; display: inline-flex; gap: 6px; font-size: 13px; line-height: 1.25; }
 .bottom-actions .action-button + .action-button::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 1px; background: rgba(62,59,56,.1); }
 
+.contact-section { padding-top: 22px; padding-bottom: 16px; scroll-margin-top: 104px; }
+.contact-section .section-heading { margin-bottom: 7px; text-align: center; }
+.contact-section .section-heading .eyebrow { margin-bottom: 5px; color: #81766d; }
+.contact-intro { margin: 0 0 13px; color: #746d67; font-family: "Noto Serif KR Variable", serif; font-size: 14px; line-height: 1.65; text-align: center; }
+.contact-groups { display: grid; gap: 8px; }
+.contact-group { overflow: hidden; background: rgba(255, 255, 255, .34); border: 1px solid rgba(91, 82, 73, .14); border-radius: 12px; }
+.contact-group summary { display: flex; min-height: 52px; padding: 0 15px; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; font-family: "Noto Serif KR Variable", serif; font-size: 15px; font-weight: 520; }
+.contact-group summary::-webkit-details-marker { display: none; }
+.contact-group summary svg { width: 18px; height: 18px; flex: 0 0 auto; transition: transform .2s ease; }
+.contact-group[open] summary svg { transform: rotate(180deg); }
+.contact-list { padding: 0 12px 9px; }
+.contact-row { display: grid; min-height: 64px; padding: 8px 2px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; border-top: 1px solid rgba(91, 82, 73, .11); }
+.contact-person { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 7px; }
+.contact-person span { color: #847b74; font-size: 13px; }
+.contact-person strong { font-family: "Noto Serif KR Variable", serif; font-size: 16px; font-weight: 540; }
+.contact-person small { grid-column: 1 / -1; margin-top: 2px; color: #77716c; font-size: 13px; }
+.contact-actions { display: flex; gap: 6px; }
+.contact-actions a { display: grid; width: 44px; height: 44px; place-items: center; color: inherit; background: rgba(255, 255, 255, .72); border: 1px solid rgba(91, 82, 73, .14); border-radius: 50%; text-decoration: none; }
+.contact-actions svg { width: 18px; height: 18px; }
+
 .pastel-invitation { --paper: #fcfbf4; --ink: #233d60; --blue: #d9e7f3; --blush: #f2dcdf; background: var(--paper); color: var(--ink); word-break: keep-all; }
 .pastel-hero { position: relative; padding: clamp(26px, 7vw, 34px) 0 clamp(30px, 8vw, 38px); overflow: hidden; background: var(--paper) url("/assets/design/pastel-watercolor-wash.webp") center / cover no-repeat; }
 .pastel-hero-intro { padding: 0 30px clamp(22px, 6vw, 28px); font-family: "Noto Serif KR Variable", serif; font-size: 14px; line-height: 1.8; text-align: center; }
@@ -194,6 +218,16 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-venue-line { margin: 7px 0 0; font-family: "Noto Serif KR Variable", serif; font-size: 14px; }
 .pastel-invitation .greeting { padding-top: 14px; padding-bottom: 12px; }
 .pastel-invitation .greeting .eyebrow { color: #8091a5; }
+.pastel-invitation .family-introduction { padding-top: 6px; padding-bottom: 28px; }
+.pastel-invitation .family-introduction p { color: #6c7d90; }
+.pastel-invitation .family-introduction p > span { color: #415a79; }
+.pastel-schedule { padding-top: 8px; padding-bottom: 29px; }
+.pastel-schedule .calendar-pattern { width: 100%; max-width: 330px; padding-bottom: 0; }
+.pastel-schedule .calendar-heading { border-color: rgba(65, 90, 121, .17); }
+.pastel-schedule .calendar-heading span, .pastel-schedule .weekday-row { color: #718196; }
+.pastel-schedule .calendar-day { color: #415a79; }
+.pastel-schedule .calendar-day.is-sunday { color: #b77f89; }
+.pastel-schedule .calendar-day.is-event { color: #fff; background: #7893af; }
 .pastel-gallery-section { padding-top: 0; padding-bottom: 32px; }
 .pastel-section-heading { margin-bottom: 15px; text-align: center; }
 .pastel-section-heading .eyebrow { margin: 0 0 6px; color: #8b9aab; font-size: 12px; font-weight: 600; letter-spacing: .18em; }
@@ -223,6 +257,14 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .transit-list .transit-detail { color: #7e8994; font-size: 12px; }
 .pastel-invitation .route-actions { gap: 8px; margin-top: 14px; }
 .pastel-invitation .route-actions .action-button { min-height: 48px; padding-inline: 8px; background: #f7f8f7; border: 0; border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(71, 98, 127, .1); }
+.pastel-invitation .contact-section { padding-top: 12px; padding-bottom: 25px; }
+.pastel-invitation .contact-section .section-heading .eyebrow { color: #8b9aab; }
+.pastel-invitation .contact-intro { color: #718196; }
+.pastel-invitation .contact-group { background: rgba(229, 239, 247, .42); border-color: rgba(71, 98, 127, .1); }
+.pastel-invitation .contact-group:nth-child(2) { background: rgba(242, 220, 223, .3); }
+.pastel-invitation .contact-row { border-color: rgba(71, 98, 127, .1); }
+.pastel-invitation .contact-person span, .pastel-invitation .contact-person small { color: #718196; }
+.pastel-invitation .contact-actions a { background: rgba(255, 255, 255, .72); border-color: rgba(71, 98, 127, .12); }
 .bottom-actions.is-pastel { grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding: 12px 18px; background: rgba(229, 239, 247, .45); border-top: 0; }
 .bottom-actions.is-pastel .action-button { min-height: 62px; padding: 7px 4px; flex-direction: column; gap: 5px; background: #e5eff7; border-radius: 12px; font-size: 13px; }
 .bottom-actions.is-pastel .action-button + .action-button::before { display: none; }
