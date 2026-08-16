@@ -223,7 +223,17 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-invitation .family-introduction p > span { color: #415a79; }
 .pastel-schedule { padding-top: 8px; padding-bottom: 29px; }
 .pastel-schedule .calendar-pattern { width: 100%; max-width: 330px; padding-bottom: 0; }
-.pastel-schedule .calendar-heading { border-color: rgba(65, 90, 121, .17); }
+.pastel-schedule .calendar-heading {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding-bottom: 10px;
+  border-color: rgba(65, 90, 121, .17);
+  text-align: center;
+}
+.pastel-schedule .calendar-heading p,
+.pastel-schedule .calendar-heading span { line-height: 1.55; }
 .pastel-schedule .calendar-heading span, .pastel-schedule .weekday-row { color: #718196; }
 .pastel-schedule .calendar-day { color: #415a79; }
 .pastel-schedule .calendar-day.is-sunday { color: #b77f89; }

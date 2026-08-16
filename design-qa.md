@@ -1,5 +1,15 @@
 # Design QA
 
+## Accepted pass — compact Pastel calendar heading
+
+- Pastel now groups `2026년 12월` directly with `27일 일요일 · 오후 3시 예식` in a centered two-line heading with a 2px internal gap.
+- The shared calendar still derives every value from confirmed content; no date, weekday, time, or duration was inferred.
+- Quiet keeps its existing horizontal calendar-heading layout while receiving the confirmed weekday in the ceremony label.
+
+### Final result
+
+`passed`
+
 ## Accepted pass — revised Pastel hero source and confirmed family birth order
 
 ### Source, content, and visual contract

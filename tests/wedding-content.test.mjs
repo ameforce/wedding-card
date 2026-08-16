@@ -87,12 +87,17 @@ test("December 2026 calendar has all real dates and emphasizes Sunday the 27th",
   assert.equal(eventIndex, 28);
   assert.deepEqual(eventDay, { date: 27, weekday: 0, isEvent: true });
   assert.match(app, /className="calendar-heading"/);
+  assert.match(app, /weddingContent\.calendar\.day}일 \{weddingContent\.event\.day} · \{weddingContent\.event\.time} 예식/);
   assert.match(app, /className="weekday-row"/);
   assert.match(app, /className="calendar-days"/);
   assert.match(app, /weddingContent\.event\.time} 예식/);
   assert.doesNotMatch(app, /date-dots/);
   assert.match(app, /className="pastel-schedule section-pad"/);
   assert.match(app, /id="pastel-schedule-title">예식 일정/);
+  const pastelCalendarHeading = css.match(/\.pastel-schedule \.calendar-heading\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.match(pastelCalendarHeading, /flex-direction:\s*column/);
+  assert.match(pastelCalendarHeading, /align-items:\s*center/);
+  assert.match(pastelCalendarHeading, /gap:\s*2px/);
 });
 
 test("venue map keeps source metadata without a separate visible provider caption", () => {

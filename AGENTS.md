@@ -18,6 +18,7 @@
 - Pastel Hero is one continuous watercolor surface ordered as introduction copy → one inset real photo → names, date, and venue. Do not add a slash, rule, divider, or separate color panel between those elements.
 - Quiet and Pastel photographs share one accessible lightbox behavior. Keep its backdrop in the active invitation's light paper/pastel tone rather than introducing a dark gallery surface.
 - Pastel uses a real-photo-first hero and one continuous watercolor paper surface without a divider above `INVITATION`. Keep the single calendar action and the single share action together in the footer; do not restore top or duplicate calendar/copy controls.
+- Pastel keeps `2026년 12월` and `27일 일요일 · 오후 3시 예식` as one tight, centered two-line calendar heading. Do not separate them across the row or omit the weekday.
 - The approved Pastel top-hero source is `KSJ_1400.jpg`, served only through optimized `public/assets/photos/pastel-hero-480.webp` and `pastel-hero-960.webp` derivatives. Preserve its 4:5 arched frame and `50% 58%` focal position; do not change Quiet's hero or any Pastel gallery selection when replacing it.
 - A venue-map screenshot may render only from the local real asset contract with descriptive alt text and preserved source attribution. Never restore a fictional design map.
 - Preserve map source metadata and the provider mark already embedded in the supplied map asset, but do not add a separate visible `카카오맵 제공` caption.

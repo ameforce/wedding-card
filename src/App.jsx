@@ -226,7 +226,7 @@ function CalendarPattern() {
     <section className="calendar-pattern" aria-label={`${monthLabel} 예식 캘린더`}>
       <div className="calendar-heading">
         <p>{monthLabel}</p>
-        <span>{weddingContent.calendar.day}일 · {weddingContent.event.time} 예식</span>
+        <span>{weddingContent.calendar.day}일 {weddingContent.event.day} · {weddingContent.event.time} 예식</span>
       </div>
       <div className="weekday-row">
         {weekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}
