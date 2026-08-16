@@ -12,12 +12,13 @@ npm run dev
 - `/?variant=quiet`: Quiet Editorial
 - `/?variant=pastel`: Pastel Letter
 
-실제 인적·예식 정보가 아직 없기 때문에 화면에는 `DESIGN ONLY`가 표시됩니다. `npm run build`는 이 placeholder가 남아 있으면 의도적으로 실패합니다. 디자인 검토용 정적 결과만 만들 때는 `npm run build:design`을 사용합니다.
+신랑·신부 이름, 예식 일시, 예식장명과 지도 링크는 사용자 확인값을 사용합니다. 주소·층/홀·타임존·종료 시각·교통 안내 등은 아직 미확정이므로 화면에는 `DESIGN REVIEW`가 표시되며, `npm run build`는 남은 placeholder 때문에 의도적으로 실패합니다. 디자인 검토용 정적 결과만 만들 때는 `npm run build:design`을 사용합니다.
 
 ## Verification
 
 ```powershell
 npm run lint
+npm run test:ui
 npm run build:design
 npm run test:sites
 ```

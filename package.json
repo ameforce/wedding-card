@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "optimize:assets": "node scripts/optimize-assets.mjs",
     "preview": "vite preview",
-    "test:ui": "node --test tests/sesang-sticker-layout.test.mjs",
+    "test:ui": "node --test tests/sesang-sticker-layout.test.mjs tests/wedding-content.test.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs"
   },
   "dependencies": {

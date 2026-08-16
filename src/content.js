@@ -40,17 +40,24 @@ export const SESANG_STICKERS = {
 export const weddingContent = {
   isDesignPlaceholder: true,
   couple: {
-    groom: "이름",
-    bride: "이름",
+    groom: "김종인",
+    bride: "유지혜",
   },
   event: {
-    date: "YYYY.MM.DD",
-    time: "예식 시간",
+    isoDate: "2026-12-27",
+    date: "2026.12.27",
+    day: "일요일",
+    time: "오후 3시",
     timezone: null,
   },
   venue: {
-    name: "예식장 · 층 · 홀",
+    name: "더 바실리움",
     address: "실제 주소 입력 예정",
+    mapLinks: {
+      naver: "https://naver.me/GOPesFwZ",
+      kakao: "https://place.map.kakao.com/518455120",
+      tmap: "https://tmap.life/03fe38e6",
+    },
   },
   message: [
     "서로를 아끼며 믿음으로",
@@ -59,10 +66,13 @@ export const weddingContent = {
     "더없는 기쁨이 되겠습니다.",
   ],
   calendar: {
+    year: 2026,
+    month: 12,
+    day: 27,
     weekdays: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
   },
   timeline: [
-    { label: "예식 안내", time: "시간 미정" },
+    { label: "예식 안내", time: "오후 3시" },
     { label: "식사 안내", time: "시간 미정" },
     { label: "연회 및 축가", time: "시간 미정" },
   ],

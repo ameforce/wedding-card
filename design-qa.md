@@ -9,7 +9,7 @@
 - Source pixels: 390 × 1187
 - Implementation pixels: 390 × 1521
 - CSS viewport: 390 × 844, device scale factor 1, full-page capture
-- State: `?variant=quiet&capture=1`, real studio photos with design-only event content
+- State: `?variant=quiet&capture=1`, real studio photos with user-confirmed names/date/venue and partial design-only content
 
 ### Pastel Letter
 
@@ -18,7 +18,7 @@
 - Source pixels: 390 × 1040
 - Implementation pixels: 390 × 1353
 - CSS viewport: 390 × 844, device scale factor 1, full-page capture
-- State: `?variant=pastel&capture=1`, real studio photos with design-only event content
+- State: `?variant=pastel&capture=1`, real studio photos with user-confirmed names/date/venue and partial design-only content
 
 ## Full-view comparison evidence
 
@@ -80,7 +80,7 @@ Focused region crops were not required because the 390px full-page captures keep
 - Spacing and layout rhythm: the source section order and density remain intact; the only material height increase comes from three explicit cat cameo rows.
 - Colors and visual tokens: warm ivory/taupe/copper and powder-blue/blush/navy palettes remain unchanged around the newly supplied imagery.
 - Image quality and asset fidelity: studio photos ship as 480/960px WebP `srcset` derivatives; lossless-refined stickers retain alpha, have no visible rectangle, and total about 617KB. All new public raster assets total about 1.69MB.
-- Copy and content: event facts remain visibly design-only. No name, date, venue, contact, family relation, account, or RSVP fact was inferred.
+- Copy and content: 김종인·유지혜, 2026년 12월 27일 일요일 오후 3시, 더 바실리움, and the three map links are user-confirmed. Address, floor/hall, timezone, end time, transit, parking, contact, family relation, account, and RSVP remain explicitly unconfirmed.
 
 ## Follow-up polish
 

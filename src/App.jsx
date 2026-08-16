@@ -89,20 +89,26 @@ function SesangCameo({ asset, side, variant = "peek" }) {
 function PlaceholderBadge() {
   return (
     <div className="placeholder-badge" role="note">
-      DESIGN ONLY · 모든 인적·예식 정보는 미확정
+      DESIGN REVIEW · 일부 예식 정보 미확정
     </div>
   );
 }
 
 function CalendarPattern() {
+  const { year, month, day, weekdays } = weddingContent.calendar;
+  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const eventIndex = firstWeekday + day - 1;
+  const cellCount = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+
   return (
-    <section className="calendar-pattern" aria-label="예식 날짜 캘린더 디자인 자리">
+    <section className="calendar-pattern" aria-label={`${year}년 ${month}월 ${day}일 ${weddingContent.event.day} 예식 캘린더`}>
       <div className="weekday-row" aria-hidden="true">
-        {weddingContent.calendar.weekdays.map((day) => <span key={day}>{day}</span>)}
+        {weekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}
       </div>
       <div className="date-dots" aria-hidden="true">
-        {Array.from({ length: 35 }, (_, index) => (
-          <span className={index === 24 ? "is-event" : ""} key={index} />
+        {Array.from({ length: cellCount }, (_, index) => (
+          <span className={index === eventIndex ? "is-event" : ""} key={index} />
         ))}
       </div>
     </section>
@@ -118,18 +124,24 @@ function Greeting() {
   );
 }
 
-function ActionButton({ icon: Icon, trailingIcon: TrailingIcon, children, onClick, className = "" }) {
-  return (
-    <button className={`action-button ${className}`} type="button" onClick={onClick}>
+function ActionButton({ icon: Icon, trailingIcon: TrailingIcon, children, href, onClick, className = "" }) {
+  const content = (
+    <>
       <Icon className="action-icon" aria-hidden="true" weight="light" />
       <span>{children}</span>
       {TrailingIcon && <TrailingIcon className="action-trailing-icon" aria-hidden="true" weight="light" />}
-    </button>
+    </>
   );
+
+  if (href) {
+    return <a className={`action-button ${className}`} href={href} target="_blank" rel="noreferrer" onClick={onClick}>{content}</a>;
+  }
+
+  return <button className={`action-button ${className}`} type="button" onClick={onClick}>{content}</button>;
 }
 
 function Location({ notify, compact = false }) {
-  const unavailable = (label) => notify(`‘${label}’ 기능은 실제 정보 확정 후 활성화됩니다.`);
+  const openMap = (label) => notify(`${label}에서 ${weddingContent.venue.name}을 엽니다.`);
   return (
     <section className={`location-section section-pad ${compact ? "is-compact" : ""}`} aria-labelledby="location-title">
       <div className="section-heading">
@@ -146,9 +158,9 @@ function Location({ notify, compact = false }) {
         <span>{weddingContent.venue.address}</span>
       </div>
       <div className="route-actions" aria-label="길찾기 서비스">
-        <ActionButton icon={MapPin} onClick={() => unavailable("네이버 지도")}>네이버 지도</ActionButton>
-        <ActionButton icon={NavigationArrow} onClick={() => unavailable("카카오맵")}>카카오맵</ActionButton>
-        <ActionButton icon={NavigationArrow} onClick={() => unavailable("T map")}>T map</ActionButton>
+        <ActionButton icon={MapPin} href={weddingContent.venue.mapLinks.naver} onClick={() => openMap("네이버 지도")}>네이버 지도</ActionButton>
+        <ActionButton icon={NavigationArrow} href={weddingContent.venue.mapLinks.kakao} onClick={() => openMap("카카오맵")}>카카오맵</ActionButton>
+        <ActionButton icon={NavigationArrow} href={weddingContent.venue.mapLinks.tmap} onClick={() => openMap("T map")}>T map</ActionButton>
       </div>
       {!compact && (
         <div className="transit-list">
@@ -180,7 +192,7 @@ function QuietInvitation({ notify }) {
         <p className="display-title" lang="en">OUR DAY</p>
         <ImageSlot asset={WEDDING_PHOTOS.quiet.hero} className="hero-photo is-arched" priority />
         <h1>{weddingContent.couple.groom} <i aria-hidden="true">&amp;</i> {weddingContent.couple.bride}</h1>
-        <p className="date-line">{weddingContent.event.date} · {weddingContent.event.time}</p>
+        <p className="date-line">{weddingContent.event.date} · {weddingContent.event.day} {weddingContent.event.time}</p>
         <p className="venue-line">{weddingContent.venue.name}</p>
       </header>
       <Greeting />
@@ -200,12 +212,13 @@ function QuietInvitation({ notify }) {
 }
 
 function SaveCards({ notify }) {
+  const pendingCalendarDetails = "타임존과 예식 종료 시각 확정 후 일정 저장을 활성화할 수 있어요.";
   return (
     <section className="save-cards section-pad" aria-label="날짜와 캘린더 저장">
-      <ActionButton icon={CalendarBlank} className="save-date-action" onClick={() => notify("실제 예식 날짜가 확정된 후 사용할 수 있어요.")}>
+      <ActionButton icon={CalendarBlank} className="save-date-action" onClick={() => notify(pendingCalendarDetails)}>
         <strong>날짜 기억하기</strong><small>소중한 날을 기억해 주세요.</small>
       </ActionButton>
-      <ActionButton icon={CalendarBlank} trailingIcon={CaretRight} className="save-calendar-action" onClick={() => notify("실제 예식 날짜가 확정된 후 사용할 수 있어요.")}>
+      <ActionButton icon={CalendarBlank} trailingIcon={CaretRight} className="save-calendar-action" onClick={() => notify(pendingCalendarDetails)}>
         <strong>캘린더에 저장하기</strong><small>iCalendar 파일 준비 예정</small>
       </ActionButton>
     </section>
@@ -223,7 +236,7 @@ function PastelInvitation({ notify }) {
           <span className="tiny-divider" aria-hidden="true" />
           <h1>{weddingContent.couple.groom} <b aria-hidden="true">·</b> {weddingContent.couple.bride}</h1>
           <span className="name-divider" aria-hidden="true" />
-          <p className="date-line">{weddingContent.event.date}<br />{weddingContent.event.time}<br />{weddingContent.venue.name}</p>
+          <p className="date-line">{weddingContent.event.date}<br />{weddingContent.event.day} {weddingContent.event.time}<br />{weddingContent.venue.name}</p>
         </div>
       </header>
       <Greeting />
@@ -285,7 +298,7 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.dataset.variant = variant;
-    document.title = `${VARIANTS[variant].label} · Wedding card design review`;
+    document.title = `${weddingContent.couple.groom} · ${weddingContent.couple.bride} | ${VARIANTS[variant].label}`;
     const params = new URLSearchParams(window.location.search);
     params.set("variant", variant);
     window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
