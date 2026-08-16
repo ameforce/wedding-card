@@ -458,9 +458,9 @@ function PastelInvitation({ notify }) {
           index={0}
           openPhoto={gallery.openPhoto}
           registerTrigger={gallery.registerTrigger}
-          className="pastel-hero-photo"
+          className="pastel-hero-photo is-inset-frame"
           priority
-          sizes="(min-width: 768px) 430px, 100vw"
+          sizes="(min-width: 768px) 370px, 86vw"
         />
         <div className="pastel-hero-copy">
           <p>저희 두 사람<br />새로운 시작을 함께합니다</p>

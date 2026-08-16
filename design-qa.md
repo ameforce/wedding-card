@@ -1,6 +1,49 @@
 # Design QA
 
-## Accepted pass — Letter B-informed photo hero and venue guidance
+## Accepted pass — Pastel inset photo frame composite target
+
+### Comparison target and normalization
+
+- Source visual truth is an intentional composite, not either historical screen alone: `C:\Users\enmso\AppData\Local\Temp\wedding-card-photo-layout-audit\01-quiet-hero.png` supplies the inset-frame principle; `C:\Users\enmso\AppData\Local\Temp\wedding-card-photo-layout-audit\02-pastel-hero.png` supplies the Pastel palette and real-photo content. The approved override is an 84–88% (implemented at 86%) softly arched frame with paper breathing room and no visible border or shadow.
+- Both source captures are 1280 × 720 pixels at 72 dpi. Their centered 430 × 720 invitation regions were normalized to 390px wide for the focused comparison; the 390px implementation remains at native pixels.
+- Implementation capture: `artifacts/qa/pastel-inset-frame-390.png` — 390 × 844 pixels, CSS viewport 390 × 844, `devicePixelRatio: 1`, `?variant=pastel`, default top-of-page state with the lightbox closed.
+- Full-view combined input: `artifacts/qa/pastel-inset-frame-comparison-390.png` — Quiet source and Pastel source above the native implementation capture.
+- Focused combined input: `artifacts/qa/pastel-inset-frame-focused-comparison-390.png` — left Quiet inset principle, center Pastel content/palette, right current Pastel implementation. The focused hero occupies a native 390px-wide implementation panel, so a separate crop is not needed.
+
+### Findings
+
+- No actionable P0, P1, or P2 differences were found in the approved composite target.
+- Intentional deviation: the historical Pastel source is full bleed, while the current implementation is not. This is the approved 86% inset-frame override, not fidelity drift.
+
+### Required fidelity surfaces
+
+- Fonts and typography: the existing `Noto Serif KR Variable` hierarchy, Korean/Latin optical alignment, and readable 390px name/date treatment remain unchanged from the accepted Pastel content surface.
+- Spacing and layout rhythm: the live hero measures 335.39px / 390px = 86.0%, with 27.3px side breathing room, 22px top padding at 390px, 20px lower separation, and `50% 50% 18px 18px / 20% 20% 18px 18px` framing.
+- Colors and tokens: the Pastel `#fcfbf4` paper, watercolor identity surface, and blue-ink treatment are retained; no new heavy surface, rule, or dark gallery treatment was introduced.
+- Image quality and asset fidelity: the supplied real Pastel studio photo is unchanged; its crop remains cover-based, sharp, and free of artificial matte, border, or shadow.
+- Copy and content: confirmed couple, date, venue, and existing Pastel invitation copy remain intact; no unconfirmed public information was introduced.
+
+### Responsive, interaction, and console evidence
+
+- Live frame checks passed at 360px (309.59px / 86.0%), 390px (335.39px / 86.0%), and 430px (369.80px / 86.0%); all had no horizontal overflow, `border: 0`, and `box-shadow: none`. Quiet was compared at 390px and retained its existing 37.7% arched hero without regression.
+- The shared accessible lightbox opened from the Pastel hero, focused `갤러리 닫기`, advanced to photo 2 with ArrowRight, closed with Escape, and restored focus to `1번째 사진 크게 보기`.
+- Browser console error/warning check: none.
+
+### Comparison history
+
+1. 2026-08-17 — first composite comparison using the two approved source captures and the current 390px implementation: no P0/P1/P2 finding; no corrective iteration required.
+
+### Implementation checklist
+
+- [x] Keep the Pastel hero at the approved 86% inset width with an arched, unshadowed frame.
+- [x] Preserve the shared gallery/lightbox behavior and Quiet variant.
+- [x] Record the durable Pastel frame rule in `AGENTS.md`.
+
+final result: passed
+
+## Superseded pass — Letter B-informed photo hero and venue guidance
+
+The prior full-width Pastel hero acceptance below is superseded only for the top-photo treatment by the composite inset-frame pass above. Its remaining venue, gallery, accessibility, and utility evidence is historical context.
 
 ### Visual result
 

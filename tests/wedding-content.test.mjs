@@ -87,7 +87,7 @@ test("Pastel removes the redundant timeline and presents one full-width story", 
 
 test("Pastel gallery uses portrait media and an accessible lightbox", () => {
   assert.match(app, /const photos = \[WEDDING_PHOTOS\.pastel\.hero, \.\.\.WEDDING_PHOTOS\.pastel\.gallery\]/);
-  assert.match(app, /className="pastel-hero-photo"/);
+  assert.match(app, /className="pastel-hero-photo is-inset-frame"/);
   assert.match(app, /className="pastel-gallery-item"/);
   assert.match(app, /role="dialog"/);
   assert.match(app, /aria-modal="true"/);
@@ -104,6 +104,17 @@ test("Pastel gallery uses portrait media and an accessible lightbox", () => {
 
   const galleryItem = css.match(/\.pastel-gallery-item\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.match(galleryItem, /aspect-ratio:\s*3\s*\/\s*4/);
+});
+
+test("Pastel hero uses a breathing-room inset photo frame without a heavy treatment", () => {
+  const pastelHero = css.match(/\.pastel-hero\s*\{([^}]+)\}/)?.[1] ?? "";
+  const pastelHeroPhoto = css.match(/\.pastel-hero-photo\s*\{([^}]+)\}/)?.[1] ?? "";
+
+  assert.match(pastelHero, /padding:\s*clamp\(22px,\s*6vw,\s*30px\)\s*0\s*0/);
+  assert.match(pastelHeroPhoto, /width:\s*86%/);
+  assert.match(pastelHeroPhoto, /margin:\s*0\s+auto\s+clamp\(20px,\s*5vw,\s*26px\)/);
+  assert.match(pastelHeroPhoto, /border-radius:\s*50%\s+50%\s+18px\s+18px\s*\/\s*20%\s+20%\s+18px\s+18px/);
+  assert.doesNotMatch(pastelHeroPhoto, /(?:border|box-shadow)\s*:/);
 });
 
 test("confirmed subway, shuttle and parking guidance is represented verbatim", () => {
