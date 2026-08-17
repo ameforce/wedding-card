@@ -182,6 +182,7 @@ test("the app exposes the content admin route and runtime content provider", asy
 test("the admin UI labels local review and keeps publish behind an explicit saved draft", async () => {
   const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
   const previewSource = await readFile(new URL("../src/admin-content/public-content.jsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(source, /로컬 검토 모드/);
   assert.match(source, /임시 저장/);
   assert.match(source, /이 초안을 공개/);
@@ -196,6 +197,7 @@ test("the admin UI labels local review and keeps publish behind an explicit save
   assert.match(source, /\/api\/admin\/media|uploadPhoto/);
   assert.match(source, /사진 저장 공간/);
   assert.match(source, /2GB에 도달하면 추가 업로드가 자동으로 차단/);
+  assert.match(styles, /@media \(max-width: 1120px\)\s*\{[\s\S]*?\.content-admin-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
 
 test("applied admin content keeps full runtime photo objects", () => {

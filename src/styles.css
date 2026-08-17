@@ -427,7 +427,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-preview > div { display: flex; padding: 2px 8px 12px; justify-content: space-between; color: #dfe7ee; font-size: 12px; }
 .content-admin-preview iframe { display: block; width: 390px; max-width: 100%; height: min(78vh, 844px); margin: 0 auto; background: #fff; border: 0; border-radius: 18px; }
 
-@media (max-width: 980px) {
+@media (max-width: 1120px) {
   .content-admin-header { align-items: flex-start; flex-direction: column; }
   .content-admin-layout { grid-template-columns: minmax(0, 1fr); }
   .content-admin-preview { position: relative; top: auto; grid-row: 1; width: min(100%, 430px); margin: 0 auto; }
