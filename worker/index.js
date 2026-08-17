@@ -6,6 +6,7 @@ const PASSWORD_ITERATIONS = 600_000;
 const MAX_BODY_BYTES = 8_192;
 const MAX_CONTENT_BODY_BYTES = 131_072;
 const MAX_MEDIA_BODY_BYTES = 30 * 1024 * 1024;
+const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 const GUESTBOOK_RETENTION = "permanent";
 const SEARCH_ROBOTS_DIRECTIVE = "noindex, nofollow, noarchive, nosnippet, noimageindex";
 const ACCESS_JWKS_TTL_MS = 5 * 60 * 1000;
@@ -546,9 +547,56 @@ function validUpload(file, types, maxBytes) {
   return file && typeof file.arrayBuffer === "function" && types.includes(file.type) && file.size > 0 && file.size <= maxBytes;
 }
 
+function mediaUsagePayload(usedBytes, mediaSets = 0) {
+  const normalizedUsedBytes = Math.max(0, Number(usedBytes) || 0);
+  return {
+    usedBytes: normalizedUsedBytes,
+    limitBytes: MEDIA_STORAGE_LIMIT_BYTES,
+    remainingBytes: Math.max(0, MEDIA_STORAGE_LIMIT_BYTES - normalizedUsedBytes),
+    percent: Math.min(100, Math.round((normalizedUsedBytes / MEDIA_STORAGE_LIMIT_BYTES) * 10_000) / 100),
+    mediaSets: Math.max(0, Number(mediaSets) || 0),
+  };
+}
+
+async function getMediaUsageFromDatabase(db) {
+  const row = await db.prepare(
+    "SELECT COALESCE(SUM(total_bytes), 0) AS used_bytes, COUNT(*) AS media_sets FROM invitation_media_sets WHERE status IN ('reserved', 'stored')",
+  ).first();
+  return mediaUsagePayload(row?.used_bytes, row?.media_sets);
+}
+
+async function getAdminMediaUsage(request, env) {
+  const db = requireContentDatabase(env);
+  await requireAdminEmail(request, env);
+  requireMediaBucket(env);
+  return json(await getMediaUsageFromDatabase(db));
+}
+
+async function reserveMediaStorage(db, { mediaId, slot, totalBytes }) {
+  const createdAt = new Date().toISOString();
+  const result = await db.prepare(
+    `INSERT INTO invitation_media_sets (id, slot, total_bytes, status, created_at, stored_at)
+     SELECT ?, ?, ?, 'reserved', ?, NULL
+     WHERE (SELECT COALESCE(SUM(total_bytes), 0) FROM invitation_media_sets WHERE status IN ('reserved', 'stored')) + ? <= ?`,
+  ).bind(mediaId, slot, totalBytes, createdAt, totalBytes, MEDIA_STORAGE_LIMIT_BYTES).run();
+  if (!result?.meta?.changes) {
+    throw { status: 507, code: "MEDIA_STORAGE_LIMIT", message: "사진 저장 공간 2GB 한도에 도달했습니다. 기존 사진 정리 후 다시 시도해 주세요." };
+  }
+}
+
+async function releaseMediaStorage(db, mediaId) {
+  await db.prepare("DELETE FROM invitation_media_sets WHERE id = ? AND status = 'reserved'").bind(mediaId).run();
+}
+
+async function commitMediaStorage(db, mediaId) {
+  await db.prepare("UPDATE invitation_media_sets SET status = 'stored', stored_at = ? WHERE id = ? AND status = 'reserved'")
+    .bind(new Date().toISOString(), mediaId).run();
+}
+
 async function uploadInvitationMedia(request, env) {
   requireSameOrigin(request);
   await requireAdminEmail(request, env);
+  const db = requireContentDatabase(env);
   const length = Number(request.headers.get("content-length") || 0);
   if (length > MAX_MEDIA_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "이미지 업로드 크기를 줄여 주세요.");
   const bucket = requireMediaBucket(env);
@@ -571,14 +619,32 @@ async function uploadInvitationMedia(request, env) {
   const mediaId = crypto.randomUUID();
   const originalExtension = original.type === "image/png" ? "png" : original.type === "image/webp" ? "webp" : "jpg";
   const baseKey = `invitation/${mediaId}/${slot}`;
-  await Promise.all([
-    bucket.put(`${baseKey}/original.${originalExtension}`, await original.arrayBuffer(), { httpMetadata: { contentType: original.type } }),
-    bucket.put(`${baseKey}/480.webp`, await small.arrayBuffer(), { httpMetadata: { contentType: "image/webp" } }),
-    bucket.put(`${baseKey}/960.webp`, await large.arrayBuffer(), { httpMetadata: { contentType: "image/webp" } }),
-  ]);
+  const keys = [
+    `${baseKey}/original.${originalExtension}`,
+    `${baseKey}/480.webp`,
+    `${baseKey}/960.webp`,
+  ];
+  const totalBytes = original.size + small.size + large.size;
+  await reserveMediaStorage(db, { mediaId, slot, totalBytes });
+  try {
+    await Promise.all([
+      bucket.put(keys[0], await original.arrayBuffer(), { httpMetadata: { contentType: original.type } }),
+      bucket.put(keys[1], await small.arrayBuffer(), { httpMetadata: { contentType: "image/webp" } }),
+      bucket.put(keys[2], await large.arrayBuffer(), { httpMetadata: { contentType: "image/webp" } }),
+    ]);
+    await commitMediaStorage(db, mediaId);
+  } catch (error) {
+    await Promise.allSettled([
+      typeof bucket.delete === "function" ? bucket.delete(keys) : Promise.resolve(),
+      releaseMediaStorage(db, mediaId),
+    ]);
+    throw error;
+  }
   const src = `${MEDIA_API_PREFIX}/${baseKey}/480.webp`;
+  const usage = await getMediaUsageFromDatabase(db);
   return json({
     mediaId,
+    usage,
     photo: {
       src,
       srcSet: `${src} 480w, ${MEDIA_API_PREFIX}/${baseKey}/960.webp 960w`,
@@ -622,6 +688,9 @@ async function handleContent(request, env, url) {
     }
     if (url.pathname === `${ADMIN_API_PREFIX}/media` && request.method === "POST") {
       return await uploadInvitationMedia(request, env);
+    }
+    if (url.pathname === `${ADMIN_API_PREFIX}/media/usage` && request.method === "GET") {
+      return await getAdminMediaUsage(request, env);
     }
     if (url.pathname.startsWith(`${MEDIA_API_PREFIX}/`) && request.method === "GET") {
       return await getInvitationMedia(env, url);

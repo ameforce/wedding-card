@@ -331,3 +331,8 @@ This section records the prior `45b1ebacc0f3893d4cc88bfd7ae18dc3caa2b384` state.
 - `npm run test:sites`: 4/4 passed.
 
 final result: passed
+# Current admin storage-safety pass — 2026-08-17
+
+- `/admin/content` now exposes a restrained storage meter directly above the photo editors, showing used/limit/remaining capacity without exposing Cloudflare internals to ordinary visitors.
+- The production API reserves every immutable original/480/960 image set in D1 before writing to private R2 and rejects the request at the 2GiB project boundary.
+- The local review adapter clearly states that it does not consume Cloudflare storage; production retains the same photo editor layout and mobile input sizing.

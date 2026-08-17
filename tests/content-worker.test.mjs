@@ -59,9 +59,11 @@ function invitationDatabase() {
     updated_at: "1970-01-01T00:00:00.000Z",
   };
   const revisions = new Map();
+  const mediaSets = new Map();
   return {
     state,
     revisions,
+    mediaSets,
     prepare(sql) {
       let values = [];
       return {
@@ -72,6 +74,13 @@ function invitationDatabase() {
         async first() {
           if (sql.includes("FROM invitation_state")) return { ...state };
           if (sql.includes("FROM invitation_revisions")) return revisions.get(values[0]) || null;
+          if (sql.includes("FROM invitation_media_sets")) {
+            const active = [...mediaSets.values()].filter((entry) => ["reserved", "stored"].includes(entry.status));
+            return {
+              used_bytes: active.reduce((total, entry) => total + entry.total_bytes, 0),
+              media_sets: active.length,
+            };
+          }
           return null;
         },
         async all() {
@@ -79,6 +88,7 @@ function invitationDatabase() {
           return { results: [] };
         },
         async run() {
+          let changes = 1;
           if (sql.startsWith("INSERT INTO invitation_revisions")) {
             const [id, contentJson, createdAt, createdBy] = values;
             revisions.set(id, {
@@ -89,6 +99,28 @@ function invitationDatabase() {
               created_by: createdBy,
               published_at: null,
             });
+          } else if (sql.startsWith("INSERT INTO invitation_media_sets")) {
+            const [id, slot, totalBytes, createdAt, , limitBytes] = values;
+            const usedBytes = [...mediaSets.values()]
+              .filter((entry) => ["reserved", "stored"].includes(entry.status))
+              .reduce((total, entry) => total + entry.total_bytes, 0);
+            if (usedBytes + totalBytes <= limitBytes) {
+              mediaSets.set(id, { id, slot, total_bytes: totalBytes, status: "reserved", created_at: createdAt, stored_at: null });
+            } else {
+              changes = 0;
+            }
+          } else if (sql.includes("UPDATE invitation_media_sets SET status = 'stored'")) {
+            const [storedAt, id] = values;
+            const row = mediaSets.get(id);
+            if (row?.status === "reserved") {
+              row.status = "stored";
+              row.stored_at = storedAt;
+            } else {
+              changes = 0;
+            }
+          } else if (sql.includes("DELETE FROM invitation_media_sets")) {
+            const row = mediaSets.get(values[0]);
+            changes = row?.status === "reserved" && mediaSets.delete(values[0]) ? 1 : 0;
           } else if (sql.includes("SET draft_revision_id = ?, updated_at = ?")) {
             [state.draft_revision_id, state.updated_at] = values;
           } else if (sql.includes("SET draft_revision_id = NULL, published_revision_id = ?")) {
@@ -105,7 +137,7 @@ function invitationDatabase() {
             row.status = "published";
             row.published_at = publishedAt;
           }
-          return { success: true };
+          return { success: true, meta: { changes } };
         },
       };
     },
@@ -246,6 +278,9 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
       const object = objects.get(key);
       return object ? { body: object.value, httpMetadata: object.httpMetadata, etag: object.etag } : null;
     },
+    async delete(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+    },
   };
   const form = new FormData();
   form.set("slot", "pastel-hero");
@@ -265,12 +300,15 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
   try {
-    const response = await worker.fetch(uploadRequest, { ...fixture.env, WEDDING_MEDIA: bucket });
+    const db = invitationDatabase();
+    const response = await worker.fetch(uploadRequest, { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(response.status, 201);
     const payload = await response.json();
     assert.match(payload.photo.src, /^\/api\/media\/invitation\/[a-f0-9-]{36}\/pastel-hero\/480\.webp$/);
     assert.equal(payload.photo.alt, "신랑과 신부의 상단 사진");
     assert.equal(objects.size, 3);
+    assert.equal(payload.usage.usedBytes, 8);
+    assert.equal(payload.usage.limitBytes, 2 * 1024 * 1024 * 1024);
     assert.equal([...objects.keys()].some((key) => key.includes("/original.jpg")), true);
 
     const mediaResponse = await worker.fetch(request(payload.photo.src, { method: "GET" }), { WEDDING_MEDIA: bucket });
@@ -278,6 +316,54 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
     assert.equal(mediaResponse.headers.get("cache-control"), "public, max-age=31536000, immutable");
     assert.equal(mediaResponse.headers.get("content-type"), "image/webp");
     assert.deepEqual(new Uint8Array(await mediaResponse.arrayBuffer()), new Uint8Array([4, 5]));
+
+    const usageResponse = await worker.fetch(request("/api/admin/media/usage", {
+      headers: { "cf-access-jwt-assertion": fixture.assertion },
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(usageResponse.status, 200);
+    assert.equal((await usageResponse.json()).mediaSets, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("media uploads fail closed before R2 writes when the 2GB project quota would be exceeded", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const limitBytes = 2 * 1024 * 1024 * 1024;
+  const storedBytes = limitBytes - 4;
+  db.mediaSets.set("existing-media", {
+    id: "existing-media",
+    slot: "pastel-hero",
+    total_bytes: storedBytes,
+    status: "stored",
+    created_at: "2026-08-17T00:00:00.000Z",
+    stored_at: "2026-08-17T00:00:01.000Z",
+  });
+  let putCount = 0;
+  const bucket = {
+    async put() { putCount += 1; },
+    async get() { return null; },
+    async delete() {},
+  };
+  const form = new FormData();
+  form.set("slot", "pastel-hero");
+  form.set("alt", "용량 제한 검증 사진");
+  form.set("position", "50% 50%");
+  form.set("original", new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }));
+  form.set("small", new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }));
+  form.set("large", new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: form,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 507);
+    assert.equal((await response.json()).code, "MEDIA_STORAGE_LIMIT");
+    assert.equal(putCount, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

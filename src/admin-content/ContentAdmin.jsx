@@ -57,6 +57,12 @@ function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy }) {
   );
 }
 
+function formatStorage(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  return `${Math.ceil(bytes / (1024 * 1024))} MB`;
+}
+
 export function ContentAdmin() {
   const localReview = isLocalReviewBuild();
   const adapter = useMemo(() => createContentAdapter({ staticContent: weddingContent }), []);
@@ -69,15 +75,17 @@ export function ContentAdmin() {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(true);
   const [uploadingSlot, setUploadingSlot] = useState("");
+  const [mediaUsage, setMediaUsage] = useState(null);
 
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      const state = await adapter.getAdminState();
+      const [state, usage] = await Promise.all([adapter.getAdminState(), adapter.getMediaUsage()]);
       const next = normalizeContentDocument(state.draft || state.published, weddingContent, { allowLocalPreview: localReview });
       setDocument(next);
       setRevisionId(state.draftRevisionId || null);
       setDirty(false);
+      setMediaUsage(usage);
       setStatus({
         tone: localReview ? "review" : "success",
         message: localReview
@@ -179,8 +187,9 @@ export function ContentAdmin() {
       const isHero = slot === "pastel-hero";
       const index = isHero ? -1 : Number(slot.replace("pastel-gallery-", ""));
       const current = isHero ? document.photos.pastel.hero : document.photos.pastel.gallery[index];
-      const photo = await adapter.uploadPhoto({ slot, file, alt: current.alt, position: current.position });
-      update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], photo);
+      const result = await adapter.uploadPhoto({ slot, file, alt: current.alt, position: current.position });
+      update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], result.photo);
+      setMediaUsage(result.usage || await adapter.getMediaUsage());
       setStatus({ tone: "success", message: "새 사진을 초안에 넣었습니다. 초점과 설명을 확인해 주세요." });
     } catch (error) {
       setStatus({ tone: "error", message: error.message || "사진을 처리하지 못했습니다." });
@@ -256,6 +265,14 @@ export function ContentAdmin() {
 
           <fieldset disabled={busy}>
             <legend>사진</legend>
+            <div className="content-admin-storage" aria-live="polite">
+              <div>
+                <strong>사진 저장 공간</strong>
+                <span>{mediaUsage?.localReview ? "로컬 검토에서는 Cloudflare 공간을 사용하지 않습니다." : `${formatStorage(mediaUsage?.usedBytes || 0)} / ${formatStorage(mediaUsage?.limitBytes || 0)}`}</span>
+              </div>
+              <progress max="100" value={mediaUsage?.percent || 0} aria-label="사진 저장 공간 사용률" />
+              <small>{mediaUsage?.localReview ? "production에서는 2GB에 도달하면 추가 업로드가 자동으로 차단됩니다." : `사용률 ${mediaUsage?.percent || 0}% · 남은 공간 ${formatStorage(mediaUsage?.remainingBytes || 0)}`}</small>
+            </div>
             <div className="content-admin-photo-list">
               <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={uploadingSlot === "pastel-hero"} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
               {photos.gallery.map((photo, index) => (

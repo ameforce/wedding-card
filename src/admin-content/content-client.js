@@ -7,6 +7,18 @@ import {
 
 export const LOCAL_REVIEW_STORAGE_KEY = "wedding-card.content-review.v1";
 export const LOCAL_REVIEW_EVENT = "wedding-card:content-review-updated";
+export const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+
+function emptyMediaUsage(localReview = false) {
+  return {
+    usedBytes: 0,
+    limitBytes: MEDIA_STORAGE_LIMIT_BYTES,
+    remainingBytes: MEDIA_STORAGE_LIMIT_BYTES,
+    percent: 0,
+    mediaSets: 0,
+    localReview,
+  };
+}
 
 function isDevelopmentBuild() {
   return import.meta.env?.DEV === true;
@@ -187,6 +199,9 @@ export function createLocalReviewContentAdapter({
         content: applyContentDocument(current.published, staticContent, { allowLocalPreview: true }),
       };
     },
+    async getMediaUsage() {
+      return emptyMediaUsage(true);
+    },
     async saveDraft(document) {
       const current = load();
       state = {
@@ -213,10 +228,13 @@ export function createLocalReviewContentAdapter({
     async uploadPhoto({ file, alt, position }) {
       const { large } = await optimizedFiles(file);
       return {
-        src: await blobAsDataUrl(large),
-        alt,
-        position,
-        sizes: "(min-width: 768px) 430px, 100vw",
+        photo: {
+          src: await blobAsDataUrl(large),
+          alt,
+          position,
+          sizes: "(min-width: 768px) 430px, 100vw",
+        },
+        usage: emptyMediaUsage(true),
       };
     },
     subscribe(listener) {
@@ -260,6 +278,9 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
         history: Array.isArray(payload.history) ? payload.history : [],
       };
     },
+    async getMediaUsage() {
+      return requestJson(fetchImpl, "/api/admin/media/usage");
+    },
     async saveDraft(document) {
       const normalized = normalizeContentDocument(document, staticContent);
       const payload = await requestJson(fetchImpl, "/api/admin/content", {
@@ -295,7 +316,7 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw createRequestError(response, payload);
-      return payload.photo;
+      return { photo: payload.photo, usage: payload.usage };
     },
     subscribe() {
       return () => {};

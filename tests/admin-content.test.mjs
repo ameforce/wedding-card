@@ -76,16 +76,25 @@ test("production adapter uses the reviewed Cloudflare API paths and revision env
     }
     if (path === "/api/admin/content" && options.method === "PUT") return Response.json({ revisionId: "draft-2" });
     if (path === "/api/admin/content/publish") return Response.json({ revisionId: "draft-2" });
+    if (path === "/api/admin/media/usage") return Response.json({
+      usedBytes: 0,
+      limitBytes: 2 * 1024 * 1024 * 1024,
+      remainingBytes: 2 * 1024 * 1024 * 1024,
+      percent: 0,
+      mediaSets: 0,
+    });
     return Response.json({}, { status: 404 });
   };
   const adapter = createCloudflareContentAdapter({ staticContent: weddingContent, fetchImpl });
   assert.equal((await adapter.getPublicContent()).revisionId, "published-1");
   assert.equal((await adapter.getAdminState()).draft.content.couple.groom, weddingContent.couple.groom);
+  assert.equal((await adapter.getMediaUsage()).limitBytes, 2 * 1024 * 1024 * 1024);
   assert.equal((await adapter.saveDraft(document)).draftRevisionId, "draft-2");
   await adapter.publish("draft-2");
   assert.deepEqual(calls, [
     ["/api/content", "GET"],
     ["/api/admin/content", "GET"],
+    ["/api/admin/media/usage", "GET"],
     ["/api/admin/content", "PUT"],
     ["/api/admin/content/publish", "POST"],
   ]);
@@ -107,6 +116,8 @@ test("the admin UI labels local review and keeps publish behind an explicit save
   assert.match(source, /setRevisionId\(state\.draftRevisionId \|\| null\)/);
   assert.match(source, /CONTENT_PREVIEW_READY_MESSAGE_TYPE/);
   assert.match(source, /\/api\/admin\/media|uploadPhoto/);
+  assert.match(source, /사진 저장 공간/);
+  assert.match(source, /2GB에 도달하면 추가 업로드가 자동으로 차단/);
 });
 
 test("applied admin content keeps full runtime photo objects", () => {

@@ -20,12 +20,15 @@
   },
   "d1_databases": [
     {
-      "binding": "GUESTBOOK_DB"
+      "binding": "GUESTBOOK_DB",
+      "database_name": "wedding-card-guestbook-db",
+      "database_id": "d085b8fc-4b33-4cf5-a56e-ba62573c5ec8"
     }
   ],
   "r2_buckets": [
     {
-      "binding": "WEDDING_MEDIA"
+      "binding": "WEDDING_MEDIA",
+      "bucket_name": "wedding-card-media"
     }
   ],
   "ratelimits": [
