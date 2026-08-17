@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { weddingContent } from "../content.js";
 import { cloneContentDocument, createContentDocument, normalizeContentDocument } from "./content-document.js";
-import { createContentAdapter, isLocalReviewBuild } from "./content-client.js";
+import {
+  ACCESS_LOGOUT_PATH,
+  createContentAdapter,
+  isAdminAuthRequiredError,
+  isLocalReviewBuild,
+} from "./content-client.js";
 import {
   CONTENT_PREVIEW_MESSAGE_TYPE,
   CONTENT_PREVIEW_READY_MESSAGE_TYPE,
@@ -62,6 +67,17 @@ function formatStorage(bytes) {
   return `${Math.ceil(bytes / (1024 * 1024))} MB`;
 }
 
+function AdminReauthentication() {
+  return (
+    <section className="admin-auth-required content-admin-auth" role="alert" aria-labelledby="admin-auth-title">
+      <p className="eyebrow">SESSION REQUIRED</p>
+      <h2 id="admin-auth-title">관리자 인증이 필요합니다</h2>
+      <p>인증 방식이 변경되었거나 로그인 세션이 만료되었습니다. 기존 세션을 종료한 뒤 승인된 Google 계정으로 다시 로그인해 주세요.</p>
+      <a className="admin-auth-action" href={ACCESS_LOGOUT_PATH}>Google 계정으로 다시 로그인</a>
+    </section>
+  );
+}
+
 export function ContentAdmin() {
   const localReview = isLocalReviewBuild();
   const adapter = useMemo(() => createContentAdapter({ staticContent: weddingContent }), []);
@@ -75,6 +91,16 @@ export function ContentAdmin() {
   const [busy, setBusy] = useState(true);
   const [uploadingSlot, setUploadingSlot] = useState("");
   const [mediaUsage, setMediaUsage] = useState(null);
+  const [authRequired, setAuthRequired] = useState(false);
+
+  const showAdminError = useCallback((error, fallbackMessage) => {
+    if (isAdminAuthRequiredError(error)) {
+      setAuthRequired(true);
+      setStatus({ tone: "error", message: "승인된 Google 계정으로 다시 로그인해 주세요." });
+      return;
+    }
+    setStatus({ tone: "error", message: error.message || fallbackMessage });
+  }, []);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -86,6 +112,7 @@ export function ContentAdmin() {
       setPublishedRevisionId(state.publishedRevisionId || null);
       setDirty(false);
       setMediaUsage(usage);
+      setAuthRequired(false);
       setStatus({
         tone: localReview ? "review" : "success",
         message: localReview
@@ -93,11 +120,11 @@ export function ContentAdmin() {
           : "Cloudflare에 저장된 최신 콘텐츠를 불러왔습니다.",
       });
     } catch (error) {
-      setStatus({ tone: "error", message: error.message || "관리 콘텐츠를 불러오지 못했습니다." });
+      showAdminError(error, "관리 콘텐츠를 불러오지 못했습니다.");
     } finally {
       setBusy(false);
     }
-  }, [adapter, localReview]);
+  }, [adapter, localReview, showAdminError]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -140,7 +167,7 @@ export function ContentAdmin() {
       setStatus({ tone: "success", message: "임시 저장했습니다. 미리보기를 확인한 뒤 공개해 주세요." });
       return state.draftRevisionId;
     } catch (error) {
-      setStatus({ tone: "error", message: error.message || "임시 저장하지 못했습니다." });
+      showAdminError(error, "임시 저장하지 못했습니다.");
       return null;
     } finally {
       setBusy(false);
@@ -162,7 +189,7 @@ export function ContentAdmin() {
         message: localReview ? "로컬 공개본을 갱신했습니다. 실제 인터넷에는 배포되지 않았습니다." : "새 공개본을 반영했습니다.",
       });
     } catch (error) {
-      setStatus({ tone: "error", message: error.message || "공개본을 반영하지 못했습니다." });
+      showAdminError(error, "공개본을 반영하지 못했습니다.");
     } finally {
       setBusy(false);
     }
@@ -179,7 +206,7 @@ export function ContentAdmin() {
       setMediaUsage(result.usage || await adapter.getMediaUsage());
       setStatus({ tone: "success", message: "새 사진을 초안에 넣었습니다. 초점과 설명을 확인해 주세요." });
     } catch (error) {
-      setStatus({ tone: "error", message: error.message || "사진을 처리하지 못했습니다." });
+      showAdminError(error, "사진을 처리하지 못했습니다.");
     } finally {
       setUploadingSlot("");
     }
@@ -202,10 +229,11 @@ export function ContentAdmin() {
         <nav aria-label="관리 메뉴">
           <a href="/admin/guestbook">비공개 방명록</a>
           <a href="/" target="_blank" rel="noreferrer">현재 공개 화면</a>
+          {!localReview && <a className="admin-logout-link" href={ACCESS_LOGOUT_PATH}>로그아웃</a>}
         </nav>
       </header>
 
-      <div className="content-admin-layout">
+      {authRequired ? <AdminReauthentication /> : <div className="content-admin-layout">
         <section className="content-admin-editor" aria-label="초대장 콘텐츠 편집">
           <p className={`content-admin-status is-${status.tone}`} role="status">{status.message}</p>
 
@@ -282,7 +310,7 @@ export function ContentAdmin() {
           </div>
           <iframe ref={previewRef} title="파스텔 청첩장 미리보기" src="/?contentPreview=draft&capture=1" onLoad={() => previewRef.current?.contentWindow?.postMessage({ type: CONTENT_PREVIEW_MESSAGE_TYPE, document: editingDocument }, window.location.origin)} />
         </aside>
-      </div>
+      </div>}
     </main>
   );
 }

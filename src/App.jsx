@@ -23,6 +23,7 @@ import {
 import { createPortal } from "react-dom";
 import { getCalendarMonth, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
 import { ContentAdmin } from "./admin-content/ContentAdmin.jsx";
+import { ACCESS_LOGOUT_PATH, isAdminAuthRequiredError } from "./admin-content/content-client.js";
 import { getInvitationPhotos } from "./admin-content/content-document.js";
 import { usePublicInvitationContent } from "./admin-content/public-content.jsx";
 import { createGuestbookEntry, getAdminGuestbookEntries, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
@@ -723,12 +724,15 @@ function GuestbookAdmin() {
       const result = await getAdminGuestbookEntries();
       setState({ status: "ready", entries: result.entries, message: "" });
     } catch (error) {
+      const authRequired = isAdminAuthRequiredError(error);
       setState({
-        status: "error",
+        status: authRequired ? "auth-required" : error.status === 503 ? "unavailable" : "error",
         entries: [],
-        message: error.status === 503
+        message: authRequired
+          ? "인증 방식이 변경되었거나 로그인 세션이 만료되었습니다."
+          : error.status === 503
           ? "관리자 인증 공급자와 저장소가 아직 연결되지 않았습니다. 연결 전에는 어떤 메시지도 조회할 수 없습니다."
-          : "신랑·신부 계정 인증이 필요합니다.",
+          : "방명록 메시지를 불러오지 못했습니다.",
       });
     }
   };
@@ -736,14 +740,28 @@ function GuestbookAdmin() {
   return (
     <main className="guestbook-admin-shell">
       <section className="guestbook-admin" aria-labelledby="admin-title">
+        <nav className="guestbook-admin-nav" aria-label="관리 메뉴">
+          <a href="/admin/content">콘텐츠 관리</a>
+          <a className="admin-logout-link" href={ACCESS_LOGOUT_PATH}>로그아웃</a>
+        </nav>
         <MusicNote aria-hidden="true" weight="light" />
         <p className="eyebrow">COUPLE ONLY</p>
         <h1 id="admin-title">비공개 방명록</h1>
         <p>인증된 신랑·신부 계정에서만 메시지를 조회할 수 있습니다.</p>
-        <button type="button" onClick={loadEntries} disabled={state.status === "loading"}>
-          {state.status === "loading" ? "불러오는 중…" : state.status === "ready" ? "새로고침" : "인증 확인 후 불러오기"}
-        </button>
-        {state.message && <p className="admin-message" role="status">{state.message}</p>}
+        {state.status === "auth-required" ? (
+          <div className="admin-auth-required" role="alert">
+            <h2>관리자 인증이 필요합니다</h2>
+            <p>{state.message} 기존 세션을 종료한 뒤 승인된 Google 계정으로 다시 로그인해 주세요.</p>
+            <a className="admin-auth-action" href={ACCESS_LOGOUT_PATH}>Google 계정으로 다시 로그인</a>
+          </div>
+        ) : (
+          <>
+            <button type="button" onClick={loadEntries} disabled={state.status === "loading"}>
+              {state.status === "loading" ? "불러오는 중…" : state.status === "ready" ? "새로고침" : "인증 확인 후 불러오기"}
+            </button>
+            {state.message && <p className="admin-message" role="status">{state.message}</p>}
+          </>
+        )}
         {state.status === "ready" && state.entries.length === 0 && (
           <p className="admin-empty" role="status">아직 도착한 방명록 메시지가 없습니다.</p>
         )}

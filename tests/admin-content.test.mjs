@@ -8,10 +8,12 @@ import {
   normalizeContentDocument,
 } from "../src/admin-content/content-document.js";
 import {
+  ACCESS_LOGOUT_PATH,
   createContentAdapter,
   createCloudflareContentAdapter,
   createLocalReviewContentAdapter,
   getEmbeddedContentPreviewConfig,
+  isAdminAuthRequiredError,
   LOCAL_REVIEW_STORAGE_KEY,
 } from "../src/admin-content/content-client.js";
 
@@ -172,6 +174,24 @@ test("production adapter uses the reviewed Cloudflare API paths and revision env
   ]);
 });
 
+test("production admin requests preserve Access authentication failures for re-login UX", async () => {
+  const adapter = createCloudflareContentAdapter({
+    staticContent: weddingContent,
+    fetchImpl: async () => Response.json({
+      code: "ADMIN_AUTH_REQUIRED",
+      message: "신랑·신부 계정 인증이 필요합니다.",
+    }, { status: 401 }),
+  });
+
+  await assert.rejects(adapter.getAdminState(), (error) => {
+    assert.equal(error.status, 401);
+    assert.equal(error.code, "ADMIN_AUTH_REQUIRED");
+    assert.equal(isAdminAuthRequiredError(error), true);
+    return true;
+  });
+  assert.equal(ACCESS_LOGOUT_PATH, "/cdn-cgi/access/logout");
+});
+
 test("the app exposes the content admin route and runtime content provider", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   assert.match(source, /pathname === "\/admin\/content"/);
@@ -197,7 +217,19 @@ test("the admin UI labels local review and keeps publish behind an explicit save
   assert.match(source, /\/api\/admin\/media|uploadPhoto/);
   assert.match(source, /사진 저장 공간/);
   assert.match(source, /2GB에 도달하면 추가 업로드가 자동으로 차단/);
+  assert.match(source, /관리자 인증이 필요합니다/);
+  assert.match(source, /Google 계정으로 다시 로그인/);
+  assert.match(source, /authRequired \? <AdminReauthentication \/>/);
+  assert.match(source, /ACCESS_LOGOUT_PATH/);
   assert.match(styles, /@media \(max-width: 1120px\)\s*\{[\s\S]*?\.content-admin-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});
+
+test("both administrator screens expose logout and block stale sessions behind re-authentication", async () => {
+  const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(appSource, /guestbook-admin-nav/);
+  assert.match(appSource, /status: authRequired \? "auth-required"/);
+  assert.match(appSource, /Google 계정으로 다시 로그인/);
+  assert.match(appSource, /href=\{ACCESS_LOGOUT_PATH\}>로그아웃/);
 });
 
 test("applied admin content keeps full runtime photo objects", () => {

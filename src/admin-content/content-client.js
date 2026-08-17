@@ -8,6 +8,11 @@ import {
 export const LOCAL_REVIEW_STORAGE_KEY = "wedding-card.content-review.v1";
 export const LOCAL_REVIEW_EVENT = "wedding-card:content-review-updated";
 export const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+export const ACCESS_LOGOUT_PATH = "/cdn-cgi/access/logout";
+
+export function isAdminAuthRequiredError(error) {
+  return error?.code === "ADMIN_AUTH_REQUIRED" || error?.status === 401;
+}
 
 function emptyMediaUsage(localReview = false) {
   return {
@@ -89,6 +94,7 @@ function defaultEventTarget() {
 function createRequestError(response, payload) {
   const error = new Error(payload?.message || "콘텐츠 요청을 처리하지 못했습니다.");
   error.status = response.status;
+  error.code = typeof payload?.code === "string" ? payload.code : null;
   return error;
 }
 
