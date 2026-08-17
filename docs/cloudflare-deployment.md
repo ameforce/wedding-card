@@ -30,7 +30,7 @@ This project intentionally accepts Cloudflare as its only production data plane 
 
 ## Remaining decisions and runtime prerequisites
 
-- Confirm the RSVP contract: collected fields, deadline, recipient, and retention policy. No RSVP UI or endpoint should be inferred before then.
+- RSVP is confirmed disabled. Keep the public UI, Worker routes, storage, and admin surface free of attendance-response collection.
 - Confirm OG title/description/image. Search indexing is fixed off through the HTML robots meta, Static Assets `_headers`, and the Worker `X-Robots-Tag` response header. Keeping both header paths covers Cloudflare's default asset-first delivery and Worker-generated responses without requiring every static request to invoke the Worker.
 - Do not add `Disallow: /` for the public HTML: search crawlers must be able to read the `noindex` directive. This is indexing control, not access control; anyone with the URL can still open the invitation.
 - Provision the production Worker/static-assets project, D1 database and all migrations, `GUESTBOOK_DB` binding, private `WEDDING_MEDIA` R2 bucket, and Access runtime values in the deployment environment.

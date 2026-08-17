@@ -3,11 +3,11 @@
 ## Current accepted pass — Cloudflare content admin review
 
 - `/admin/content` renders a two-pane editor and an isolated 390px Pastel preview. At a 1440px browser viewport, the document reports `scrollWidth === clientWidth === 1440` and the preview iframe resolves to exactly 390px. At 390px, the admin document reports zero horizontal overflow, a 338px preview, and a minimum button height of 48px.
-- The editor exposes only the reviewed mutable subset: couple names, hero intro, event and venue display fields, invitation/story copy, transit/parking copy, and Pastel hero/gallery photos with alt text and focal position. Contacts, accounts, map links, search privacy, RSVP policy, and publication policy stay outside this UI and remain guarded by the bundled content contract.
+- The editor exposes only the reviewed mutable subset: couple names, hero intro, event and venue display fields, invitation/story copy, transit/parking copy, and Pastel hero/gallery photos with alt text and focal position. Contacts, accounts, map links, search privacy, the confirmed-disabled RSVP setting, and publication policy stay outside this UI and remain guarded by the bundled content contract.
 - A live browser canary changed the hero intro, observed the new text in the iframe, saved a draft, explicitly published the local review revision, observed it on the ordinary Pastel page, and then restored and republished the original text. No test marker remains in the saved local state.
 - A browser file-chooser canary selected an existing project WebP for the hero. The admin produced a local WebP data URL and updated the iframe without saving; a reload discarded that uncommitted photo and restored the approved `/assets/photos/` source.
 - A load/edit race found during QA was fixed by disabling fieldsets while the initial state loads and by adding a same-origin preview readiness/channel contract. The hero intro was also added to the normalization allowlist, preventing a valid edit from being dropped.
-- Console warning/error read-back was empty. Automated verification is recorded in the current commit evidence; the default production build remains fail-closed until RSVP and OG content are confirmed.
+- Console warning/error read-back was empty. Automated verification is recorded in the current commit evidence; RSVP is confirmed disabled and the default production build remains fail-closed only until OG content is confirmed.
 
 final result: passed
 
@@ -104,11 +104,11 @@ final result: passed
 - Natural inter-section spacing increases by 10px in Quiet and 14px in Pastel without inserting empty spacer sections.
 - Browser verification at 360, 390, 430, 768, and 1440px found zero horizontal overflow and zero failed images in both variants. The label remained entirely inside the approved photo at every width.
 - Normal-motion canary showed the label settling from 8px/transparent to its final position and sections revealing after scroll. Reduced-motion canary rendered the label and all sections immediately with no transform.
-- Account guidance and RSVP remain intentionally absent until exact public values, fields, destination, consent, and retention rules are confirmed.
+- This historical pass kept account guidance and RSVP absent. Account content was confirmed later; RSVP is now explicitly disabled.
 
 ### Final result
 
-`passed` for the confirmed hero-label, motion, and spacing subset. Account and RSVP remain blocked on user-supplied facts.
+`passed` for the confirmed hero-label, motion, and spacing subset. This pass predates the later account confirmation and explicit RSVP-disabled decision.
 
 ## Accepted pass — compact Pastel calendar heading
 
@@ -199,7 +199,7 @@ final result: passed
 - Implementable from confirmed facts now: the existing names, start date/time, venue, address, map, transit/parking guidance, December calendar in Quiet, and start-only iCalendar action. Pastel already exposes the same event facts in its Hero and the shared footer calendar action.
 - Optional presentation using confirmed facts: a dedicated Pastel `예식 안내` block or derived countdown. This is a product-choice question, not a missing-data blocker; it must not duplicate the existing footer calendar action, and a separate event timeline remains intentionally excluded.
 - Still requires exact user facts and a public-scope decision: account sections, including side, bank, holder, number, disclosure text, and whether the data is always visible or collapsed. The currently rendered family relations and couple/parent contact controls are already confirmed public content; no additional relation or contact value may be inferred from Letter B.
-- Other optional Letter B modules requiring separate product/content decisions: wedding interview, relationship timeline, guest-snap upload, notice carousel, RSVP, guestbook, and music. They are useful patterns, not current project requirements.
+- Other optional Letter B modules requiring separate product/content decisions: wedding interview, relationship timeline, guest-snap upload, and notice carousel. RSVP is explicitly disabled; guestbook and opt-in music are implemented under their confirmed contracts.
 - Highest-value next question: Which family/contact/account items, for which people, should be public, and what are the exact approved values?
 
 ### Final result
@@ -286,7 +286,7 @@ The prior full-width Pastel hero acceptance below is superseded only for the top
 - `npm run lint`: passed.
 - `npm run build:design`: passed.
 - `npm run test:sites`: 4/4 passed.
-- Default production `npm run build` remains intentionally blocked by `isDesignPlaceholder: true` because contact, family, RSVP, account, final greeting, domain/OG, and other publication decisions remain unconfirmed.
+- At this superseded pass, the default production build remained blocked by multiple publication decisions. In the current state, RSVP is confirmed disabled and only OG sharing metadata remains unconfirmed.
 
 final result: passed
 

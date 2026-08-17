@@ -52,9 +52,11 @@ export const SESANG_STICKERS = {
 export const weddingContent = {
   isDesignPlaceholder: true,
   unconfirmedContent: [
-    { key: "rsvp.contract", label: "RSVP 운영 계약(수집 항목·마감일·수신자·보존 정책)" },
     { key: "publishing.og", label: "공유 미리보기 설정(OG 제목·설명·이미지)" },
   ],
+  rsvp: {
+    enabled: false,
+  },
   publishing: {
     canonicalUrl: "https://wdcard.enmsoftware.com/",
     searchIndexing: false,

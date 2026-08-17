@@ -27,12 +27,14 @@ test("admin documents preserve non-editable public and search-privacy contracts"
   document.content.couple.groom = "변경 이름";
   document.content.hero.introLines = ["저희 두 사람", "관리자 미리보기 변경"];
   document.content.publishing.searchIndexing = true;
+  document.content.rsvp.enabled = true;
   document.content.accounts = {};
   const normalized = normalizeContentDocument(document, weddingContent);
 
   assert.equal(normalized.content.couple.groom, "변경 이름");
   assert.deepEqual(normalized.content.hero.introLines, ["저희 두 사람", "관리자 미리보기 변경"]);
   assert.equal(normalized.content.publishing.searchIndexing, false);
+  assert.deepEqual(normalized.content.rsvp, { enabled: false });
   assert.deepEqual(normalized.content.accounts, weddingContent.accounts);
   assert.deepEqual(normalized.content.familyContacts, weddingContent.familyContacts);
   assert.equal(normalized.photos.pastel.hero.src.startsWith("/assets/photos/"), true);
