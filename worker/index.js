@@ -742,7 +742,7 @@ export default {
 
     if (servesAdminShell) {
       const indexUrl = new URL(request.url);
-      indexUrl.pathname = "/index.html";
+      indexUrl.pathname = "/";
       indexUrl.search = "";
       return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
     }
@@ -754,7 +754,7 @@ export default {
     }
 
     const indexUrl = new URL(request.url);
-    indexUrl.pathname = "/index.html";
+    indexUrl.pathname = "/";
     indexUrl.search = "";
     return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
   },

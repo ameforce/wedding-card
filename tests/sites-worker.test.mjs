@@ -30,8 +30,8 @@ test("falls back to index.html for an unknown app route", async () => {
         fetch: async (request) => {
           const url = new URL(request.url);
           calls.push(url.pathname + url.search);
-          return new Response(url.pathname === "/index.html" ? "app" : "missing", {
-            status: url.pathname === "/index.html" ? 200 : 404,
+          return new Response(url.pathname === "/" ? "app" : "missing", {
+            status: url.pathname === "/" ? 200 : 404,
           });
         },
       },
@@ -40,7 +40,7 @@ test("falls back to index.html for an unknown app route", async () => {
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("x-robots-tag"), "noindex, nofollow, noarchive, nosnippet, noimageindex");
-  assert.deepEqual(calls, ["/flow/step-two?source=share", "/index.html"]);
+  assert.deepEqual(calls, ["/flow/step-two?source=share", "/"]);
 });
 
 test("serves the admin SPA shell before Static Assets can canonicalize the route", async () => {
@@ -54,9 +54,9 @@ test("serves the admin SPA shell before Static Assets can canonicalize the route
         fetch: async (request) => {
           const url = new URL(request.url);
           calls.push(url.pathname);
-          return new Response(url.pathname === "/index.html" ? "admin app" : null, {
-            status: url.pathname === "/index.html" ? 200 : 308,
-            headers: url.pathname === "/index.html" ? undefined : { location: "/" },
+          return new Response(url.pathname === "/" ? "admin app" : null, {
+            status: url.pathname === "/" ? 200 : 308,
+            headers: url.pathname === "/" ? undefined : { location: "/" },
           });
         },
       },
@@ -65,7 +65,7 @@ test("serves the admin SPA shell before Static Assets can canonicalize the route
 
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "admin app");
-  assert.deepEqual(calls, ["/index.html"]);
+  assert.deepEqual(calls, ["/"]);
 });
 
 test("does not turn missing API or write requests into the app shell", async () => {
