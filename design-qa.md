@@ -1,34 +1,28 @@
 # Design QA
 
-## Accepted pass — Pastel script overlay, continuous watercolor, private guestbook, and opt-in music
+## Current accepted pass — Sacramento label, full-surface watercolor, and private guestbook policy
 
-### Source and implementation evidence
+### References, font decision, and implementation evidence
 
-- Script source: `C:\Users\enmso\AppData\Local\Temp\codex-clipboard-afa74bd9-0c52-4bf9-98cd-8e93847e741a.png`.
-- Script implementation capture: `artifacts/qa/pastel-hero-script-390.png`, CSS viewport 390 × 844, `devicePixelRatio: 1`, `?variant=pastel&capture=1`.
-- Focused script comparison inspected as one image: `artifacts/qa/pastel-script-reference-comparison.png`.
-- Calendar seam source: `C:\Users\enmso\AppData\Local\Temp\codex-clipboard-01ed0016-ff59-4c41-833f-5c38d9582124.png`.
-- Calendar implementation capture: `artifacts/qa/pastel-calendar-seam-390.png`, CSS viewport 390 × 844, `devicePixelRatio: 1`, scrolled invitation state.
-- Focused seam comparison inspected as one image: `artifacts/qa/pastel-calendar-seam-comparison.png`.
+- Active script source truth is the supplied `1-사진-1.jpg` and `2-사진-2.jpg` in `C:\Users\enmso\.codex\codex-remote-attachments\019ff501-f8d7-7280-b3f3-9fed0fbb6140\1A1AB2CB-03BC-490D-A976-70A65304E6E7`. The earlier clipboard reference is deliberately excluded from current comparison and decision-making.
+- `artifacts/qa/pastel-script-font-candidates-390.png` is the same-phrase, same-size, same-photo-placement comparison for self-hostable OFL-1.1 Sacramento, Parisienne, Italianno, and Alex Brush. Sacramento was selected: it preserves the requested smooth, rounded terminals; Alex Brush is closer in some reference letter shapes but has sharper terminals that could repeat the reported defect.
+- `artifacts/qa/pastel-script-reference-comparison.png` compares both active references with the final 390px Sacramento implementation. The label remains a restrained `-4deg` two-line `Our Wedding` / `Day` treatment rather than the former strong rotation; its 390px bounds are `7.5..280.1px` inside the `0..390px` invitation, with the image left edge at `27.3px`. It remains unclipped and visually clear of the groom's head.
+- Final whole-page background is `public/assets/design/pastel-watercolor-surface.webp` (864 × 1821, 68,646 bytes), rendered once at `auto 100%` beneath the existing repeated real paper-grain SVG. It replaces the 1.89MB staging PNG and avoids CSS radial gradients, 3:1 wash repetition, and vertically stretched `310% 100%` raster treatment.
+- The full-page raster came from built-in ImageGen after the supplied wash showed repeat banding. Prompt summary: a vertical warm-ivory watercolor-paper surface with distributed powder-blue and blush washes, fine paper fibers, no people, text, objects, borders, panels, bands, or seams. No supplied person photograph was AI-edited.
+- IAB Browser evidence uses the LAN preview `http://192.168.0.196:4173/?variant=pastel&capture=1`, CSS viewport 390 × 844, `devicePixelRatio: 1`: `artifacts/qa/pastel-sacramento-final-390-top.png`, `artifacts/qa/pastel-watercolor-surface-390-middle.png`, and `artifacts/qa/pastel-watercolor-surface-390-bottom.png`. The top, story/venue middle, and guestbook/footer bottom all retain restrained texture and watercolor without a repeated boundary or contrast loss.
 
-### Findings and fixes
+### Content, privacy, and activation boundary
 
-- Initial script mismatch: Dancing Script was round and casual, stayed too close to the photo interior, and used only a mild diagonal. Fix: self-hosted Allura, exact two-line `Our Wedding` / `Day`, `-15deg` rotation, a larger fluid size, and a second-line offset. At 390px its bounds were `6.09..282.19px` inside the `0..390px` invitation while extending left of the `27.30px` photo edge; there was no clipping or horizontal overflow.
-- Initial seam mismatch: three isolated placements of the 1200 × 400 watercolor source left visually separate coverage bands around the calendar. Fix: one full-height watercolor layer at `310% 100%`, four overlapping distributed blue/blush washes, one unchanged paper-grain layer, and transparent sections. The focused calendar composite shows no hard horizontal boundary between family copy, `WEDDING DAY`, the heading, and the calendar grid.
-- Music is a compact 44px fixed play/pause control with no autoplay and `preload="none"`. Live browser evidence was paused at `currentTime: 0`, played only after a click (`currentTime: 0.491`, `paused: false`), and returned to `paused: true`. Footer credit identifies Kevin MacLeod and links CC BY 4.0.
-- The public guestbook renders name/password/message fields but no message list or admin link. The author receives and can copy an opaque edit receipt after creation; the receipt is also stored on the same device. Missing API/storage returns an explicit message that nothing was sent.
-- `/admin/guestbook` is a separate couple-only surface. The Worker list endpoint fails closed without D1 and trusted upstream identity; no client-side administrator secret is present.
+- Pastel separates `마음 전하실 곳` from `방명록을 남겨주세요`. The private notice has a visual line break immediately after `메시지는 공개되지 않으며`, and the form/API/tests/docs use the same 4–72 character password contract. Hash-explanation copy is absent from the invitation while server-side PBKDF2-HMAC-SHA256 verification remains intact.
+- Create responses declare `retention: "permanent"`; no expiration, TTL, cleanup, or public guestbook-list endpoint exists. Retention does not bypass ordinary backup or operations controls.
+- `/admin/guestbook` and its API fail closed without D1 plus trusted upstream identity. The Worker accepts only exactly two distinct deployment-environment allowlist values. The actual groom/bride addresses are intentionally absent from source, tests, documentation, bundles, and QA artifacts; no external environment was changed.
 
-### Responsive and accessibility evidence
+### Verification status
 
-- Both Quiet and Pastel passed live checks at 360, 390, 430, 768, and 1440px: zero horizontal overflow, invitation capped at 430px above mobile widths, minimum tested control height 44px, and capture-mode sections immediately visible.
-- Pastel script bounds stayed inside the invitation at every required width. Quiet had no visual regression.
-- Keyboard focus showed a 2px solid outline on the variant control. Reduced-motion/capture behavior remains covered by the passing UI suite.
-- `npm run lint` passed; UI tests passed 34/34; Sites and private guestbook tests passed 10/10; design build and D1 migration packaging passed.
-
-### Remaining production activation boundary
-
-- Visual implementation is accepted. Production guestbook activation remains blocked until a real D1 database is provisioned, the migration is applied, and Sites Sign in with ChatGPT or an equivalent trusted identity gateway supplies an exact couple email allowlist. A distributed create/unlock/update rate limit is also required before public enablement.
+- IAB Browser LAN checks at 360, 390, 430, 768, and 1440px for both Quiet and Pastel found `scrollWidth === clientWidth`, zero failed images, a 430px desktop invitation cap, one calendar and one share action, and immediate capture-mode section visibility. Pastel has five photo triggers and Quiet keeps four; the Pastel label remains inside the invitation at every width.
+- Action controls measured 44px or more (the only smaller interactive element is the inline `CC BY 4.0` attribution link, not a utility control). Keyboard Tab reached the Pastel hero trigger with a 2px solid, 3px-offset focus outline. Emulated `prefers-reduced-motion: reduce` reported `labelAnimation: none`, static `-4deg` treatment, reveal opacity `1`, transform `none`, and transition duration `0s`.
+- `npm run lint` passed. `npm run test:ui` passed 35/35. `npm run build:design` passed and copied the 68,646-byte WebP to `dist/client/assets/design/`; `dist/client/index.html`, `dist/server/index.js`, and `dist/.openai/hosting.json` exist. `npm run test:sites` passed 12/12, including four-character password and exact-two-distinct-environment-allowlist cases.
+- Repository scans found no stale 8-character guestbook contract and no literal groom/bride administrator addresses. The final dependency tree contains Sacramento only; individual candidate captures, the comparison route/UI, unused candidate packages, and the staging PNG are absent.
 
 final result: passed
 
@@ -36,7 +30,7 @@ final result: passed
 
 ### Implemented outcome
 
-- The Pastel-only hero label now uses the self-hosted Latin `Dancing Script` webfont as a lightweight, diagonal two-line `Our Wedding` / `Day` composition. It extends slightly beyond the left photo edge while remaining inside the invitation; the approved 86% arched frame and `50% 58%` photo focal position are unchanged.
+- Earlier handwritten-script experiments are superseded by the current Sacramento decision and must not be used as implementation or visual-reference evidence. The approved 86% arched frame and `50% 58%` photo focal position remain unchanged.
 - The supplied watercolor wash is distributed through the full Pastel invitation at three natural positions, with low-opacity blue/blush support washes and a local procedural paper-grain asset behind content. It is no longer visually concentrated only at the hero's upper edge.
 - Pastel inter-section reveal gaps increase from 14px to 28px and its internal section padding is more generous, without adding spacer sections or changing Quiet spacing.
 - Pastel contact and account disclosures are independently collapsed by default. Groom/bride emoji markers appear on all four summary titles; each account has an accessible copy control. Account values are modeled once in source and intentionally omitted from tests, logs, and this QA record.
@@ -44,7 +38,7 @@ final result: passed
 
 ### Live browser evidence
 
-- At 360, 390, 430, 768, and 1440px, Pastel had no horizontal overflow or loaded-image failures. The hero stayed at a 0.86 photo-to-invitation ratio; the label used `Dancing Script`, crossed the photo's left edge, and stayed within the invitation.
+- At 360, 390, 430, 768, and 1440px, the earlier Pastel version had no horizontal overflow or loaded-image failures. The current-font evidence is the top-level Sacramento pass.
 - The two Pastel account disclosures were initially closed, the two copy controls remained at least 44px tall, and a copy click produced the expected success feedback without exposing the value in QA evidence.
 - The shared Pastel lightbox opened from the hero with focus on `갤러리 닫기`; Escape closed it and restored focus to the hero trigger. Under emulated reduced motion, the label animation was disabled while its static diagonal stayed intact, and reveal sections rendered opaque with no transform.
 - Quiet regression at the same five widths found no overflow or loaded-image failures, exactly four photo triggers, no account disclosure, and one calendar plus one share action. Its lightbox kept the same keyboard focus restoration behavior.

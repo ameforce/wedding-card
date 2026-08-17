@@ -1,5 +1,5 @@
 @import "@fontsource-variable/cormorant-garamond";
-@import "@fontsource/allura/400.css";
+@import "@fontsource/sacramento/400.css";
 @import "@fontsource-variable/noto-serif-kr";
 @import "@fontsource-variable/noto-sans-kr";
 
@@ -240,7 +240,9 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .contact-actions { display: flex; gap: 6px; }
 .contact-actions a { display: grid; width: 44px; height: 44px; place-items: center; color: inherit; background: rgba(255, 255, 255, .72); border: 1px solid rgba(91, 82, 73, .14); border-radius: 50%; text-decoration: none; }
 .contact-actions svg { width: 18px; height: 18px; }
-.account-groups { display: grid; gap: 8px; margin-top: 10px; }
+.account-groups { display: grid; gap: 8px; margin-top: 28px; }
+.account-section-heading { margin-bottom: 2px; text-align: center; }
+.account-section-heading h3 { margin: 0; color: #4a5f75; font-family: "Noto Serif KR Variable", serif; font-size: 18px; font-weight: 520; }
 .account-list { padding: 0 12px 9px; }
 .account-row { display: grid; min-height: 64px; padding: 8px 2px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; border-top: 1px solid rgba(91, 82, 73, .11); }
 .account-details { display: grid; min-width: 0; gap: 3px; }
@@ -263,21 +265,16 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-invitation::before,
 .pastel-invitation::after { position: absolute; z-index: 0; inset: 0; content: ""; pointer-events: none; }
 .pastel-invitation::before {
-  background-image:
-    url("/assets/design/pastel-watercolor-wash.webp"),
-    radial-gradient(ellipse at 5% 19%, rgba(202, 225, 241, .32), transparent 24%),
-    radial-gradient(ellipse at 96% 44%, rgba(246, 211, 218, .29), transparent 25%),
-    radial-gradient(ellipse at 8% 67%, rgba(212, 229, 241, .25), transparent 25%),
-    radial-gradient(ellipse at 91% 88%, rgba(244, 213, 220, .24), transparent 24%);
-  background-position: 50% 0, 0 0, 0 0, 0 0, 0 0;
+  background-image: url("/assets/design/pastel-watercolor-surface.webp");
+  background-position: 20% center;
   background-repeat: no-repeat;
-  background-size: 310% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
-  opacity: .82;
+  background-size: auto 100%;
+  opacity: .92;
 }
 .pastel-invitation::after {
-  background: url("/assets/design/pastel-paper-grain.svg") 0 0 / 180px 180px repeat;
+  background: url("/assets/design/pastel-paper-grain.svg") 0 0 / 150px 150px repeat;
   mix-blend-mode: multiply;
-  opacity: .18;
+  opacity: .22;
 }
 .pastel-invitation > * { position: relative; z-index: 1; }
 .pastel-hero { position: relative; padding: clamp(26px, 7vw, 34px) 0 clamp(34px, 9vw, 42px); overflow: visible; background: transparent; }
@@ -286,20 +283,20 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-hero-photo { width: 86%; aspect-ratio: 4 / 5; margin: 0 auto clamp(32px, 8vw, 40px); overflow: visible; border-radius: 50% 50% 18px 18px / 20% 20% 18px 18px; }
 .pastel-hero-photo img { border-radius: inherit; filter: saturate(.88) contrast(.96) brightness(1.02); }
 .pastel-hero-photo .photo-overlay-label {
-  --hero-label-rotation: -15deg;
-  top: 10%;
-  left: clamp(-22px, -4vw, -14px);
+  --hero-label-rotation: -4deg;
+  top: clamp(-28px, -6.5vw, -20px);
+  left: clamp(-20px, -4.5vw, -13px);
   display: grid;
   justify-items: start;
   color: rgba(255, 253, 248, .98);
-  font-family: "Allura", cursive;
-  font-size: clamp(50px, 15.2vw, 65px);
+  font-family: "Sacramento", cursive;
+  font-size: clamp(52px, 15vw, 64px);
   font-weight: 400;
   line-height: .62;
   letter-spacing: -.035em;
-  text-shadow: 0 2px 16px rgba(25, 38, 48, .52);
+  text-shadow: 0 1px 7px rgba(25, 38, 48, .26);
 }
-.pastel-hero-photo .photo-overlay-label-line.is-day { margin-top: .08em; margin-left: clamp(84px, 26vw, 112px); }
+.pastel-hero-photo .photo-overlay-label-line.is-day { margin-top: 0; margin-left: clamp(78px, 24vw, 104px); }
 .pastel-hero-copy { position: relative; display: flex; padding: 0 30px; flex-direction: column; align-items: center; justify-content: center; background: transparent; text-align: center; }
 .pastel-hero h1 { margin: 0; font-family: "Noto Serif KR Variable", serif; font-size: 29px; font-weight: 430; letter-spacing: .12em; }
 .pastel-hero h1 b { font-weight: 300; }

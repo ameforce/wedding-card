@@ -1,6 +1,7 @@
 const API_PREFIX = "/api/guestbook";
 const PASSWORD_ITERATIONS = 600_000;
 const MAX_BODY_BYTES = 8_192;
+const GUESTBOOK_RETENTION = "permanent";
 
 function json(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
@@ -93,7 +94,7 @@ function normalizeEntry(payload, { requireMessage = true } = {}) {
   const password = typeof payload.password === "string" ? payload.password : "";
   const message = typeof payload.message === "string" ? payload.message.trim() : "";
   if (name.length < 1 || name.length > 30) throw { status: 400, code: "INVALID_NAME", message: "이름은 1~30자로 입력해 주세요." };
-  if (password.length < 8 || password.length > 72) throw { status: 400, code: "INVALID_PASSWORD", message: "비밀번호는 8~72자로 입력해 주세요." };
+  if (password.length < 4 || password.length > 72) throw { status: 400, code: "INVALID_PASSWORD", message: "비밀번호는 4~72자로 입력해 주세요." };
   if (requireMessage && (message.length < 1 || message.length > 500)) {
     throw { status: 400, code: "INVALID_MESSAGE", message: "메시지는 1~500자로 입력해 주세요." };
   }
@@ -123,7 +124,7 @@ async function createEntry(request, env) {
   await db.prepare(
     "INSERT INTO guestbook_entries (id, name, message, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
   ).bind(id, name, message, passwordHash, timestamp, timestamp).run();
-  return json({ id }, 201);
+  return json({ id, retention: GUESTBOOK_RETENTION }, 201);
 }
 
 async function unlockEntry(request, env, id) {
@@ -160,6 +161,7 @@ function getTrustedAdminEmail(request, env) {
     .split(",")
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
+  if (allowed.length !== 2 || new Set(allowed).size !== 2) return null;
   return allowed.includes(email) ? email : null;
 }
 

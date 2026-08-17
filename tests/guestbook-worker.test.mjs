@@ -81,7 +81,8 @@ test("authors can create, unlock, and edit only with the matching name and passw
     body: JSON.stringify({ name: "하객", password: "eightchars", message: "축하합니다" }),
   }), env);
   assert.equal(createResponse.status, 201);
-  const { id } = await createResponse.json();
+  const { id, retention } = await createResponse.json();
+  assert.equal(retention, "permanent");
   const stored = db.rows.get(id);
   assert.equal(stored.message, "축하합니다");
   assert.equal(stored.password_hash.includes("eightchars"), false);
@@ -107,6 +108,25 @@ test("authors can create, unlock, and edit only with the matching name and passw
   assert.equal(db.rows.get(id).message, "두 분 행복하세요");
 });
 
+test("guestbook accepts a four-character password and rejects shorter values", async () => {
+  const db = database();
+  const env = { GUESTBOOK_DB: db };
+
+  const rejected = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "abc", message: "축하합니다" }),
+  }), env);
+  assert.equal(rejected.status, 400);
+  assert.equal((await rejected.json()).code, "INVALID_PASSWORD");
+
+  const accepted = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "abcd", message: "축하합니다" }),
+  }), env);
+  assert.equal(accepted.status, 201);
+  assert.equal((await accepted.json()).retention, "permanent");
+});
+
 test("administrator list fails closed without trusted upstream identity", async () => {
   const response = await worker.fetch(request("/api/guestbook/admin/entries", { method: "GET" }), {
     GUESTBOOK_DB: database(),
@@ -130,7 +150,7 @@ test("administrator list requires an asserted allowlisted identity", async () =>
     GUESTBOOK_AUTH_MODE: "trusted-email-header",
     GUESTBOOK_AUTH_EMAIL_HEADER: "x-authenticated-email",
     GUESTBOOK_AUTH_ASSERTION_HEADER: "x-authenticated-assertion",
-    GUESTBOOK_ADMIN_EMAILS: "couple@example.test",
+    GUESTBOOK_ADMIN_EMAILS: "groom@example.test,bride@example.test",
   };
   const denied = await worker.fetch(request("/api/guestbook/admin/entries", { method: "GET" }), env);
   assert.equal(denied.status, 401);
@@ -138,7 +158,7 @@ test("administrator list requires an asserted allowlisted identity", async () =>
   const allowed = await worker.fetch(request("/api/guestbook/admin/entries", {
     method: "GET",
     headers: {
-      "x-authenticated-email": "couple@example.test",
+      "x-authenticated-email": "bride@example.test",
       "x-authenticated-assertion": "verified-by-upstream",
     },
   }), env);
@@ -152,4 +172,23 @@ test("administrator list requires an asserted allowlisted identity", async () =>
     updatedAt: "2026-08-17T00:00:00.000Z",
   }]);
   assert.equal(JSON.stringify(payload).includes("password_hash"), false);
+});
+
+test("administrator allowlist fails closed unless exactly two distinct deployment emails are configured", async () => {
+  const env = {
+    GUESTBOOK_DB: database(),
+    GUESTBOOK_AUTH_MODE: "trusted-email-header",
+    GUESTBOOK_AUTH_EMAIL_HEADER: "x-authenticated-email",
+    GUESTBOOK_AUTH_ASSERTION_HEADER: "x-authenticated-assertion",
+    GUESTBOOK_ADMIN_EMAILS: "groom@example.test,bride@example.test,extra@example.test",
+  };
+  const response = await worker.fetch(request("/api/guestbook/admin/entries", {
+    method: "GET",
+    headers: {
+      "x-authenticated-email": "groom@example.test",
+      "x-authenticated-assertion": "verified-by-upstream",
+    },
+  }), env);
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).code, "ADMIN_AUTH_REQUIRED");
 });

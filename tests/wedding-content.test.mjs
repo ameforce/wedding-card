@@ -54,6 +54,8 @@ test("confirmed account details are modeled once for initially collapsed Pastel-
   assert.deepEqual(accounts.map((account) => account.holder), ["김종인", "유지혜"]);
   assert.ok(accounts.every((account) => account.bank.length > 0 && /^\d+$/.test(account.number)));
   assert.match(app, /function AccountGroups/);
+  assert.match(app, /<section className="account-groups" aria-labelledby="account-title">/);
+  assert.match(app, /<h3 id="account-title">마음 전하실 곳<\/h3>/);
   assert.match(app, /<details className=\{`contact-group account-group is-\$\{account\.key\}`\}/);
   assert.match(app, /copyText\(account\.number\)/);
   assert.match(app, /<ContactSection pastel notify=\{notify\} \/>/);
@@ -177,7 +179,7 @@ test("Pastel hero uses a breathing-room inset photo frame without a heavy treatm
   assert.ok(pastelHeroMarkup.indexOf("pastel-hero-intro") < pastelHeroMarkup.indexOf("<PhotoButton"));
   assert.ok(pastelHeroMarkup.indexOf("<PhotoButton") < pastelHeroMarkup.indexOf("pastel-hero-copy"));
   assert.doesNotMatch(pastelHeroMarkup, /tiny-divider|name-divider/);
-  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*pastel-watercolor-wash\.webp/);
+  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*pastel-watercolor-surface\.webp/);
   assert.match(pastelHero, /overflow:\s*visible/);
   assert.match(pastelHero, /background:\s*transparent/);
   assert.match(pastelHeroCopy, /background:\s*transparent/);
@@ -192,20 +194,25 @@ test("Pastel hero uses a breathing-room inset photo frame without a heavy treatm
   assert.match(app, /className="photo-overlay-label"/);
   const overlay = css.match(/\.pastel-hero-photo \.photo-overlay-label\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.match(css, /\.photo-overlay-label\s*\{[^}]*position:\s*absolute/);
-  assert.match(overlay, /font-family:\s*"Allura", cursive/);
-  assert.match(overlay, /left:\s*clamp\(-22px,\s*-4vw,\s*-14px\)/);
-  assert.match(overlay, /--hero-label-rotation:\s*-15deg/);
+  assert.match(overlay, /font-family:\s*"Sacramento", cursive/);
+  assert.match(overlay, /top:\s*clamp\(-28px,\s*-6\.5vw,\s*-20px\)/);
+  assert.match(overlay, /left:\s*clamp\(-20px,\s*-4\.5vw,\s*-13px\)/);
+  assert.match(overlay, /--hero-label-rotation:\s*-4deg/);
   assert.match(css, /\.pastel-hero-photo\s*\{[^}]*overflow:\s*visible/);
-  assert.match(css, /\.pastel-hero-photo \.photo-overlay-label-line\.is-day\s*\{[^}]*margin-left:\s*clamp\(84px,\s*26vw,\s*112px\)/);
+  assert.match(css, /\.pastel-hero-photo \.photo-overlay-label-line\.is-day\s*\{[^}]*margin-left:\s*clamp\(78px,\s*24vw,\s*104px\)/);
 });
 
 test("Pastel uses one continuous watercolor surface and an opt-in licensed audio control", () => {
   assert.ok(existsSync(new URL("../public/assets/design/pastel-paper-grain.svg", import.meta.url)));
+  assert.ok(existsSync(new URL("../public/assets/design/pastel-watercolor-surface.webp", import.meta.url)));
   assert.ok(existsSync(new URL("../public/assets/audio/touching-moments-one-pulse.mp3", import.meta.url)));
   assert.ok(existsSync(new URL("../docs/audio-license.md", import.meta.url)));
-  assert.match(css, /@import "@fontsource\/allura\/400\.css"/);
+  assert.match(css, /@import "@fontsource\/sacramento\/400\.css"/);
+  assert.doesNotMatch(css, /@fontsource\/(?:allura|parisienne|italianno|alex-brush)/);
   assert.match(css, /\.pastel-invitation\s*\{[^}]*isolation:\s*isolate/);
-  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*?background-size:\s*310% 100%/);
+  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*?pastel-watercolor-surface\.webp[\s\S]*?background-size:\s*auto 100%/);
+  assert.doesNotMatch(css, /pastel-watercolor-wash\.webp|310% 100%/);
+  assert.doesNotMatch(css, /radial-gradient/);
   assert.match(css, /\.pastel-invitation::after\s*\{[^}]*pastel-paper-grain\.svg/);
   assert.match(css, /\.pastel-invitation > \*\s*\{[^}]*z-index:\s*1/);
   assert.match(app, /<audio[\s\S]*preload="none"[\s\S]*loop/);
@@ -222,6 +229,14 @@ test("private guestbook gives the author a recoverable opaque receipt for later 
   assert.match(app, /copyText\(receipt\)/);
   assert.match(app, /다른 기기에서 수정하려면 번호를 보관해 주세요/);
   assert.match(guestbookApi, /메시지는 전송되지 않았습니다/);
+});
+
+test("guestbook labels, privacy break, and password guidance stay private without exposing hashing", () => {
+  assert.match(app, /<h2 id="guestbook-title">방명록을 남겨주세요<\/h2>/);
+  assert.match(app, /메시지는 공개되지 않으며<br\s*\/>신랑·신부만 확인할 수 있습니다/);
+  assert.match(app, /minLength=\{4\} maxLength=\{72\}/);
+  assert.match(app, /<small>4자 이상<\/small>/);
+  assert.doesNotMatch(app, /단방향 해시|해시로만 보관/);
 });
 
 test("section spacing and reveal motion remain subtle and reduced-motion safe", () => {

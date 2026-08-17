@@ -399,7 +399,10 @@ function AccountGroups({ notify }) {
   };
 
   return (
-    <div className="account-groups" aria-label="계좌 안내">
+    <section className="account-groups" aria-labelledby="account-title">
+      <div className="account-section-heading">
+        <h3 id="account-title">마음 전하실 곳</h3>
+      </div>
       {Object.values(weddingContent.accounts).map((account) => (
         <details className={`contact-group account-group is-${account.key}`} key={account.key}>
           <summary>
@@ -423,7 +426,7 @@ function AccountGroups({ notify }) {
           </div>
         </details>
       ))}
-    </div>
+    </section>
   );
 }
 
@@ -657,9 +660,9 @@ function GuestbookSection({ notify }) {
     <section className="guestbook-section section-pad" aria-labelledby="guestbook-title">
       <div className="section-heading">
         <p className="eyebrow">PRIVATE GUESTBOOK</p>
-        <h2 id="guestbook-title">마음을 전해 주세요</h2>
+        <h2 id="guestbook-title">방명록을 남겨주세요</h2>
       </div>
-      <p className="guestbook-privacy">메시지는 공개되지 않으며 신랑·신부만 확인할 수 있습니다.</p>
+      <p className="guestbook-privacy">메시지는 공개되지 않으며<br />신랑·신부만 확인할 수 있습니다.</p>
       {receipt && (
         <div className="guestbook-receipt" role="status">
           <span>수정용 접수 번호</span>
@@ -692,8 +695,8 @@ function GuestbookSection({ notify }) {
         </label>
         <label>
           <span>비밀번호</span>
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={8} maxLength={72} autoComplete={mode === "write" ? "new-password" : "current-password"} />
-          <small>8자 이상 · 서버에서 단방향 해시로만 보관합니다.</small>
+          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={4} maxLength={72} autoComplete={mode === "write" ? "new-password" : "current-password"} />
+          <small>4자 이상</small>
         </label>
         {(mode === "write" || unlocked) && (
           <label>
