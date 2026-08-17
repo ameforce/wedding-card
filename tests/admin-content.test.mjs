@@ -8,8 +8,10 @@ import {
   normalizeContentDocument,
 } from "../src/admin-content/content-document.js";
 import {
+  createContentAdapter,
   createCloudflareContentAdapter,
   createLocalReviewContentAdapter,
+  getEmbeddedContentPreviewConfig,
   LOCAL_REVIEW_STORAGE_KEY,
 } from "../src/admin-content/content-client.js";
 
@@ -57,6 +59,76 @@ test("development review keeps draft and published content as separate explicit 
   await adapter.publish(saved.draftRevisionId);
   assert.equal((await adapter.getPublicContent()).content.venue.name, "검토용 예식장");
   assert.equal(storage.values.has(LOCAL_REVIEW_STORAGE_KEY), true);
+});
+
+test("production draft persists for administrator reloads and moves the public pointer only on publish", async () => {
+  let draft = null;
+  let published = {
+    id: "published-1",
+    document: createContentDocument(weddingContent),
+  };
+  let draftSequence = 1;
+  const fetchImpl = async (path, options = {}) => {
+    const method = options.method || "GET";
+    if (path === "/api/content" && method === "GET") {
+      return Response.json({ revisionId: published.id, document: published.document });
+    }
+    if (path === "/api/admin/content" && method === "GET") {
+      return Response.json({
+        draftRevisionId: draft?.id ?? null,
+        publishedRevisionId: published.id,
+        draft: draft && { id: draft.id, document: draft.document },
+        published: { id: published.id, document: published.document },
+        history: [],
+      });
+    }
+    if (path === "/api/admin/content" && method === "PUT") {
+      draft = {
+        id: `draft-${draftSequence += 1}`,
+        document: JSON.parse(options.body).document,
+      };
+      return Response.json({ revisionId: draft.id }, { status: 201 });
+    }
+    if (path === "/api/admin/content/publish" && method === "POST") {
+      const { revisionId } = JSON.parse(options.body);
+      assert.equal(revisionId, draft?.id);
+      published = { id: revisionId, document: draft.document };
+      draft = null;
+      return Response.json({ revisionId });
+    }
+    return Response.json({}, { status: 404 });
+  };
+
+  const adapter = createCloudflareContentAdapter({ staticContent: weddingContent, fetchImpl });
+  const editing = createContentDocument(weddingContent);
+  editing.content.venue.name = "초안 전용 예식장";
+  const saved = await adapter.saveDraft(editing);
+
+  const reloadedAdmin = await createCloudflareContentAdapter({ staticContent: weddingContent, fetchImpl }).getAdminState();
+  assert.equal(reloadedAdmin.draftRevisionId, saved.draftRevisionId);
+  assert.equal(reloadedAdmin.draft.content.venue.name, "초안 전용 예식장");
+  assert.equal((await adapter.getPublicContent()).content.venue.name, weddingContent.venue.name);
+
+  await adapter.publish(saved.draftRevisionId);
+  assert.equal((await adapter.getPublicContent()).content.venue.name, "초안 전용 예식장");
+});
+
+test("draft preview is embedded-only and production keeps its public-content transport separate", () => {
+  const productionPreview = getEmbeddedContentPreviewConfig({
+    search: "?contentPreview=draft",
+    embedded: true,
+    localReview: false,
+  });
+  assert.deepEqual(productionPreview, { previewDraft: true, adapterMode: "cloudflare" });
+  assert.equal(createContentAdapter({ staticContent: weddingContent, mode: productionPreview.adapterMode }).mode, "cloudflare");
+  assert.deepEqual(
+    getEmbeddedContentPreviewConfig({ search: "?contentPreview=draft", embedded: false, localReview: false }),
+    { previewDraft: false, adapterMode: undefined },
+  );
+  assert.deepEqual(
+    getEmbeddedContentPreviewConfig({ search: "?contentPreview=draft", embedded: true, localReview: true }),
+    { previewDraft: true, adapterMode: "local-review" },
+  );
 });
 
 test("production adapter uses the reviewed Cloudflare API paths and revision envelopes", async () => {
@@ -109,12 +181,18 @@ test("the app exposes the content admin route and runtime content provider", asy
 
 test("the admin UI labels local review and keeps publish behind an explicit saved draft", async () => {
   const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  const previewSource = await readFile(new URL("../src/admin-content/public-content.jsx", import.meta.url), "utf8");
   assert.match(source, /로컬 검토 모드/);
   assert.match(source, /임시 저장/);
   assert.match(source, /이 초안을 공개/);
-  assert.match(source, /dirty \|\| !revisionId/);
-  assert.match(source, /setRevisionId\(state\.draftRevisionId \|\| null\)/);
+  assert.match(source, /dirty \|\| !draftRevisionId/);
+  assert.match(source, /setDraftRevisionId\(state\.draftRevisionId \|\| null\)/);
+  assert.match(source, /setPublishedRevisionId\(published\.revisionId \|\| draftRevisionId\)/);
+  assert.match(source, /미저장 변경.*저장된 초안.*공개본/s);
   assert.match(source, /CONTENT_PREVIEW_READY_MESSAGE_TYPE/);
+  assert.match(previewSource, /event\.source !== window\.parent/);
+  assert.match(previewSource, /receivedLivePreview/);
+  assert.doesNotMatch(previewSource, /getAdminState\(\)/);
   assert.match(source, /\/api\/admin\/media|uploadPhoto/);
   assert.match(source, /사진 저장 공간/);
   assert.match(source, /2GB에 도달하면 추가 업로드가 자동으로 차단/);

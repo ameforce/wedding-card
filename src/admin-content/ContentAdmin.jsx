@@ -3,7 +3,6 @@ import { weddingContent } from "../content.js";
 import { cloneContentDocument, createContentDocument, normalizeContentDocument } from "./content-document.js";
 import { createContentAdapter, isLocalReviewBuild } from "./content-client.js";
 import {
-  CONTENT_PREVIEW_CHANNEL_NAME,
   CONTENT_PREVIEW_MESSAGE_TYPE,
   CONTENT_PREVIEW_READY_MESSAGE_TYPE,
 } from "./public-content.jsx";
@@ -67,10 +66,10 @@ export function ContentAdmin() {
   const localReview = isLocalReviewBuild();
   const adapter = useMemo(() => createContentAdapter({ staticContent: weddingContent }), []);
   const previewRef = useRef(null);
-  const previewChannelRef = useRef(null);
-  const [document, setDocument] = useState(() => createContentDocument(weddingContent));
-  const documentRef = useRef(document);
-  const [revisionId, setRevisionId] = useState(null);
+  const [editingDocument, setEditingDocument] = useState(() => createContentDocument(weddingContent));
+  const documentRef = useRef(editingDocument);
+  const [draftRevisionId, setDraftRevisionId] = useState(null);
+  const [publishedRevisionId, setPublishedRevisionId] = useState(null);
   const [status, setStatus] = useState({ tone: "neutral", message: "관리 콘텐츠를 불러오는 중입니다." });
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -82,8 +81,9 @@ export function ContentAdmin() {
     try {
       const [state, usage] = await Promise.all([adapter.getAdminState(), adapter.getMediaUsage()]);
       const next = normalizeContentDocument(state.draft || state.published, weddingContent, { allowLocalPreview: localReview });
-      setDocument(next);
-      setRevisionId(state.draftRevisionId || null);
+      setEditingDocument(next);
+      setDraftRevisionId(state.draftRevisionId || null);
+      setPublishedRevisionId(state.publishedRevisionId || null);
       setDirty(false);
       setMediaUsage(usage);
       setStatus({
@@ -101,46 +101,30 @@ export function ContentAdmin() {
 
   useEffect(() => { void load(); }, [load]);
 
-  documentRef.current = document;
-
-  useEffect(() => {
-    if (!localReview || typeof BroadcastChannel !== "function") return undefined;
-    const channel = new BroadcastChannel(CONTENT_PREVIEW_CHANNEL_NAME);
-    previewChannelRef.current = channel;
-    channel.onmessage = (event) => {
-      if (event.data?.type === CONTENT_PREVIEW_READY_MESSAGE_TYPE) {
-        channel.postMessage({ type: CONTENT_PREVIEW_MESSAGE_TYPE, document: documentRef.current });
-      }
-    };
-    return () => {
-      previewChannelRef.current = null;
-      channel.close();
-    };
-  }, [localReview]);
+  documentRef.current = editingDocument;
 
   useEffect(() => {
     const send = () => {
-      const payload = { type: CONTENT_PREVIEW_MESSAGE_TYPE, document };
+      const payload = { type: CONTENT_PREVIEW_MESSAGE_TYPE, document: editingDocument };
       previewRef.current?.contentWindow?.postMessage(payload, window.location.origin);
-      previewChannelRef.current?.postMessage(payload);
     };
     send();
     const retry = window.setTimeout(send, 250);
     return () => window.clearTimeout(retry);
-  }, [document]);
+  }, [editingDocument]);
 
   useEffect(() => {
     const sendCurrentDocument = (event) => {
       if (event.origin !== window.location.origin || event.source !== previewRef.current?.contentWindow) return;
       if (event.data?.type !== CONTENT_PREVIEW_READY_MESSAGE_TYPE) return;
-      previewRef.current.contentWindow.postMessage({ type: CONTENT_PREVIEW_MESSAGE_TYPE, document }, window.location.origin);
+      previewRef.current.contentWindow.postMessage({ type: CONTENT_PREVIEW_MESSAGE_TYPE, document: documentRef.current }, window.location.origin);
     };
     window.addEventListener("message", sendCurrentDocument);
     return () => window.removeEventListener("message", sendCurrentDocument);
-  }, [document]);
+  }, []);
 
   const update = (path, value) => {
-    setDocument((current) => setAtPath(current, path, value));
+    setEditingDocument((current) => setAtPath(current, path, value));
     setDirty(true);
     setStatus({ tone: "neutral", message: "아직 저장하지 않은 변경사항이 있습니다." });
   };
@@ -148,9 +132,10 @@ export function ContentAdmin() {
   const saveDraft = async () => {
     setBusy(true);
     try {
-      const state = await adapter.saveDraft(document);
-      setRevisionId(state.draftRevisionId);
-      setDocument(normalizeContentDocument(state.draft || document, weddingContent, { allowLocalPreview: localReview }));
+      const state = await adapter.saveDraft(editingDocument);
+      setDraftRevisionId(state.draftRevisionId || null);
+      if (state.publishedRevisionId) setPublishedRevisionId(state.publishedRevisionId);
+      setEditingDocument(normalizeContentDocument(state.draft || editingDocument, weddingContent, { allowLocalPreview: localReview }));
       setDirty(false);
       setStatus({ tone: "success", message: "임시 저장했습니다. 미리보기를 확인한 뒤 공개해 주세요." });
       return state.draftRevisionId;
@@ -163,13 +148,15 @@ export function ContentAdmin() {
   };
 
   const publish = async () => {
-    if (dirty || !revisionId) {
+    if (dirty || !draftRevisionId) {
       setStatus({ tone: "error", message: "먼저 현재 변경사항을 임시 저장해 주세요." });
       return;
     }
     setBusy(true);
     try {
-      await adapter.publish(revisionId);
+      const published = await adapter.publish(draftRevisionId);
+      setPublishedRevisionId(published.revisionId || draftRevisionId);
+      setDraftRevisionId(null);
       setStatus({
         tone: "success",
         message: localReview ? "로컬 공개본을 갱신했습니다. 실제 인터넷에는 배포되지 않았습니다." : "새 공개본을 반영했습니다.",
@@ -186,7 +173,7 @@ export function ContentAdmin() {
     try {
       const isHero = slot === "pastel-hero";
       const index = isHero ? -1 : Number(slot.replace("pastel-gallery-", ""));
-      const current = isHero ? document.photos.pastel.hero : document.photos.pastel.gallery[index];
+      const current = isHero ? editingDocument.photos.pastel.hero : editingDocument.photos.pastel.gallery[index];
       const result = await adapter.uploadPhoto({ slot, file, alt: current.alt, position: current.position });
       update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], result.photo);
       setMediaUsage(result.usage || await adapter.getMediaUsage());
@@ -198,10 +185,11 @@ export function ContentAdmin() {
     }
   };
 
-  const event = document.content.event;
-  const venue = document.content.venue;
-  const transit = document.content.transit;
-  const photos = document.photos.pastel;
+  const event = editingDocument.content.event;
+  const venue = editingDocument.content.venue;
+  const transit = editingDocument.content.transit;
+  const photos = editingDocument.photos.pastel;
+  const previewStateLabel = dirty ? "미저장 변경" : draftRevisionId ? "저장된 초안" : publishedRevisionId ? "공개본" : "저장 전";
 
   return (
     <main className="content-admin-shell">
@@ -224,9 +212,9 @@ export function ContentAdmin() {
           <fieldset disabled={busy}>
             <legend>첫 화면과 기본 정보</legend>
             <div className="content-admin-grid">
-              <Field label="신랑 이름" value={document.content.couple.groom} onChange={(value) => update(["content", "couple", "groom"], value)} />
-              <Field label="신부 이름" value={document.content.couple.bride} onChange={(value) => update(["content", "couple", "bride"], value)} />
-              <CopyField label="상단 인사" lines={document.content.hero.introLines} onChange={(value) => update(["content", "hero", "introLines"], value)} hint="줄바꿈 그대로 표시됩니다." />
+              <Field label="신랑 이름" value={editingDocument.content.couple.groom} onChange={(value) => update(["content", "couple", "groom"], value)} />
+              <Field label="신부 이름" value={editingDocument.content.couple.bride} onChange={(value) => update(["content", "couple", "bride"], value)} />
+              <CopyField label="상단 인사" lines={editingDocument.content.hero.introLines} onChange={(value) => update(["content", "hero", "introLines"], value)} hint="줄바꿈 그대로 표시됩니다." />
             </div>
           </fieldset>
 
@@ -247,8 +235,8 @@ export function ContentAdmin() {
           <fieldset disabled={busy}>
             <legend>초대 문구</legend>
             <div className="content-admin-grid">
-              <CopyField label="인사말" lines={document.content.message} onChange={(value) => update(["content", "message"], value)} />
-              <CopyField label="우리의 이야기" lines={document.content.story} onChange={(value) => update(["content", "story"], value)} />
+              <CopyField label="인사말" lines={editingDocument.content.message} onChange={(value) => update(["content", "message"], value)} />
+              <CopyField label="우리의 이야기" lines={editingDocument.content.story} onChange={(value) => update(["content", "story"], value)} />
             </div>
           </fieldset>
 
@@ -283,16 +271,16 @@ export function ContentAdmin() {
 
           <div className="content-admin-actions">
             <button type="button" className="is-secondary" onClick={saveDraft} disabled={busy || Boolean(uploadingSlot)}>임시 저장</button>
-            <button type="button" onClick={publish} disabled={busy || dirty || !revisionId || Boolean(uploadingSlot)}>이 초안을 공개</button>
+            <button type="button" onClick={publish} disabled={busy || dirty || !draftRevisionId || Boolean(uploadingSlot)}>이 초안을 공개</button>
           </div>
         </section>
 
         <aside className="content-admin-preview" aria-label="실제 모바일 미리보기">
           <div>
             <span>390px 실제 화면</span>
-            <span>{dirty ? "미저장 변경" : "저장된 초안"}</span>
+            <span>{previewStateLabel}</span>
           </div>
-          <iframe ref={previewRef} title="파스텔 청첩장 미리보기" src="/?contentPreview=draft&capture=1" onLoad={() => previewRef.current?.contentWindow?.postMessage({ type: CONTENT_PREVIEW_MESSAGE_TYPE, document }, window.location.origin)} />
+          <iframe ref={previewRef} title="파스텔 청첩장 미리보기" src="/?contentPreview=draft&capture=1" onLoad={() => previewRef.current?.contentWindow?.postMessage({ type: CONTENT_PREVIEW_MESSAGE_TYPE, document: editingDocument }, window.location.origin)} />
         </aside>
       </div>
     </main>

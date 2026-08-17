@@ -1,72 +1,66 @@
 import { useEffect, useMemo, useState } from "react";
 import { weddingContent } from "../content.js";
 import { applyContentDocument, normalizeContentDocument } from "./content-document.js";
-import { createContentAdapter, isLocalReviewBuild } from "./content-client.js";
+import { createContentAdapter, getEmbeddedContentPreviewConfig, isLocalReviewBuild } from "./content-client.js";
 
 export const CONTENT_PREVIEW_MESSAGE_TYPE = "wedding-card:content-preview";
 export const CONTENT_PREVIEW_READY_MESSAGE_TYPE = "wedding-card:content-preview-ready";
-export const CONTENT_PREVIEW_CHANNEL_NAME = "wedding-card:content-preview-channel-v1";
 
-function shouldPreviewDraft() {
-  if (!isLocalReviewBuild() || typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get("contentPreview") === "draft";
+function getContentPreviewConfig() {
+  if (typeof window === "undefined") return getEmbeddedContentPreviewConfig();
+  return getEmbeddedContentPreviewConfig({
+    search: window.location.search,
+    embedded: window.parent !== window,
+    localReview: isLocalReviewBuild(),
+  });
 }
 
 export function usePublicInvitationContent(staticContent = weddingContent) {
-  const previewDraft = shouldPreviewDraft();
+  const { previewDraft, adapterMode } = getContentPreviewConfig();
+  const localReview = isLocalReviewBuild();
   const adapter = useMemo(
-    () => createContentAdapter({ staticContent, mode: previewDraft ? "local-review" : undefined }),
-    [previewDraft, staticContent],
+    () => createContentAdapter({ staticContent, mode: adapterMode }),
+    [adapterMode, staticContent],
   );
   const [state, setState] = useState(() => ({ content: staticContent, source: "bundled-static" }));
 
   useEffect(() => {
     let active = true;
+    let receivedLivePreview = false;
     const setContent = (next) => {
       if (active) setState(next);
     };
     const load = async () => {
       try {
-        if (previewDraft) {
-          const adminState = await adapter.getAdminState();
-          setContent({ content: applyContentDocument(adminState.draft, staticContent, { allowLocalPreview: true }), source: "local-review-draft" });
-          window.parent.postMessage({ type: CONTENT_PREVIEW_READY_MESSAGE_TYPE }, window.location.origin);
-          return;
-        }
-        setContent(await adapter.getPublicContent());
+        const next = await adapter.getPublicContent();
+        // The embedded admin parent owns drafts. Do not let a public content
+        // request race with, or replace, its unsaved live preview document.
+        if (!receivedLivePreview) setContent(next);
       } catch {
-        setContent({ content: staticContent, source: "bundled-static" });
+        if (!receivedLivePreview) setContent({ content: staticContent, source: "bundled-static" });
       }
     };
+
+    const receivePreview = (event) => {
+      if (!previewDraft || event.origin !== window.location.origin) return;
+      if (event.source !== window.parent) return;
+      if (event.data?.type !== CONTENT_PREVIEW_MESSAGE_TYPE) return;
+      receivedLivePreview = true;
+      const document = normalizeContentDocument(event.data.document, staticContent, { allowLocalPreview: localReview });
+      setContent({ content: applyContentDocument(document, staticContent, { allowLocalPreview: localReview }), source: "admin-live-preview" });
+    };
+    if (previewDraft) window.addEventListener("message", receivePreview);
+    if (previewDraft) window.parent.postMessage({ type: CONTENT_PREVIEW_READY_MESSAGE_TYPE }, window.location.origin);
     void load();
 
     const unsubscribe = adapter.subscribe?.(() => { void load(); });
-    const receivePreview = (event) => {
-      if (!previewDraft || event.origin !== window.location.origin) return;
-      if (event.data?.type !== CONTENT_PREVIEW_MESSAGE_TYPE) return;
-      const document = normalizeContentDocument(event.data.document, staticContent, { allowLocalPreview: true });
-      setContent({ content: applyContentDocument(document, staticContent, { allowLocalPreview: true }), source: "local-review-live-preview" });
-    };
-    if (previewDraft) window.addEventListener("message", receivePreview);
-    const previewChannel = previewDraft && typeof BroadcastChannel === "function"
-      ? new BroadcastChannel(CONTENT_PREVIEW_CHANNEL_NAME)
-      : null;
-    if (previewChannel) {
-      previewChannel.onmessage = (event) => {
-        if (event.data?.type !== CONTENT_PREVIEW_MESSAGE_TYPE) return;
-        const document = normalizeContentDocument(event.data.document, staticContent, { allowLocalPreview: true });
-        setContent({ content: applyContentDocument(document, staticContent, { allowLocalPreview: true }), source: "local-review-live-preview" });
-      };
-      previewChannel.postMessage({ type: CONTENT_PREVIEW_READY_MESSAGE_TYPE });
-    }
 
     return () => {
       active = false;
       unsubscribe?.();
       if (previewDraft) window.removeEventListener("message", receivePreview);
-      previewChannel?.close();
     };
-  }, [adapter, previewDraft, staticContent]);
+  }, [adapter, localReview, previewDraft, staticContent]);
 
   return state;
 }

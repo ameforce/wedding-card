@@ -24,6 +24,14 @@ function isDevelopmentBuild() {
   return import.meta.env?.DEV === true;
 }
 
+export function getEmbeddedContentPreviewConfig({ search = "", embedded = false, localReview = false } = {}) {
+  const previewDraft = embedded && new URLSearchParams(search).get("contentPreview") === "draft";
+  return {
+    previewDraft,
+    adapterMode: previewDraft ? (localReview ? "local-review" : "cloudflare") : undefined,
+  };
+}
+
 function fallbackPublicContent(staticContent) {
   return {
     source: "bundled-static",
