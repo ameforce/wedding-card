@@ -44,11 +44,18 @@ test("user-confirmed wedding facts are represented without filling unknown field
   assert.equal(weddingContent.venue.address, "경기 성남시 분당구 양현로 322");
   assert.equal(weddingContent.publishing.canonicalUrl, "https://wdcard.enmsoftware.com/");
   assert.equal(weddingContent.publishing.searchIndexing, false);
+  assert.deepEqual(weddingContent.publishing.og, {
+    title: "김종인 · 유지혜의 결혼식에 초대합니다",
+    description: "2026년 12월 27일 일요일 오후 3시 · 더 바실리움 8층",
+    image: "https://wdcard.enmsoftware.com/assets/og/wedding-card-1200x630.jpg",
+    imageAlt: "야외 스튜디오에서 함께 미소 짓는 김종인과 유지혜",
+    width: 1200,
+    height: 630,
+    type: "image/jpeg",
+  });
   assert.deepEqual(weddingContent.rsvp, { enabled: false });
-  assert.equal(weddingContent.isDesignPlaceholder, true);
-  assert.deepEqual(weddingContent.unconfirmedContent, [
-    { key: "publishing.og", label: "공유 미리보기 설정(OG 제목·설명·이미지)" },
-  ]);
+  assert.equal(weddingContent.isDesignPlaceholder, false);
+  assert.deepEqual(weddingContent.unconfirmedContent, []);
   assert.deepEqual(weddingContent.message, [
     "서로를 아끼며 믿음으로",
     "한 걸음 한 걸음 함께 걷겠습니다.",
@@ -73,16 +80,26 @@ test("public delivery declares a search indexing opt-out without blocking crawle
   assert.equal(existsSync(new URL("../public/robots.txt", import.meta.url)), false);
 });
 
-test("production content guard reports each structured unconfirmed item", () => {
+test("approved Open Graph metadata and image contract are production-ready", async () => {
+  assert.match(html, /<link rel="canonical" href="https:\/\/wdcard\.enmsoftware\.com\/" \/>/);
+  assert.match(html, /<meta property="og:title" content="김종인 · 유지혜의 결혼식에 초대합니다" \/>/);
+  assert.match(html, /<meta property="og:description" content="2026년 12월 27일 일요일 오후 3시 · 더 바실리움 8층" \/>/);
+  assert.match(html, /<meta property="og:image" content="https:\/\/wdcard\.enmsoftware\.com\/assets\/og\/wedding-card-1200x630\.jpg" \/>/);
+  assert.match(html, /<meta property="og:image:width" content="1200" \/>/);
+  assert.match(html, /<meta property="og:image:height" content="630" \/>/);
+  const metadata = await sharp(fileURLToPath(new URL("../public/assets/og/wedding-card-1200x630.jpg", import.meta.url))).metadata();
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, 1200);
+  assert.equal(metadata.height, 630);
+});
+
+test("production content guard passes after every public content contract is confirmed", () => {
   const result = spawnSync(process.execPath, ["scripts/check-content.mjs"], {
     cwd: projectRoot,
     encoding: "utf8",
   });
-  assert.equal(result.status, 1);
-  for (const item of weddingContent.unconfirmedContent) {
-    assert.match(result.stderr, new RegExp(item.key.replaceAll(".", "\\.")));
-    assert.match(result.stderr, new RegExp(item.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  }
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, "");
 });
 
 test("confirmed family contacts are modeled once and exposed through accessible call and text actions", () => {

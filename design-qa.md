@@ -7,7 +7,8 @@
 - A live browser canary changed the hero intro, observed the new text in the iframe, saved a draft, explicitly published the local review revision, observed it on the ordinary Pastel page, and then restored and republished the original text. No test marker remains in the saved local state.
 - A browser file-chooser canary selected an existing project WebP for the hero. The admin produced a local WebP data URL and updated the iframe without saving; a reload discarded that uncommitted photo and restored the approved `/assets/photos/` source.
 - A load/edit race found during QA was fixed by disabling fieldsets while the initial state loads and by adding a same-origin preview readiness/channel contract. The hero intro was also added to the normalization allowlist, preventing a valid edit from being dropped.
-- Console warning/error read-back was empty. Automated verification is recorded in the current commit evidence; RSVP is confirmed disabled and the default production build remains fail-closed only until OG content is confirmed.
+- The approved OG contract uses the confirmed title and description plus a 1200×630 progressive JPEG cropped directly from `KSJ_1400.jpg`. Visual inspection confirms both faces, the bride's raised arm and bouquet, and the primary wardrobe silhouette remain visible without AI person edits; the optimized asset is 154,750 bytes.
+- Console warning/error read-back was empty. Automated verification is recorded in the current commit evidence; RSVP is confirmed disabled, OG metadata is confirmed, and the default production build is no longer content-blocked.
 
 final result: passed
 

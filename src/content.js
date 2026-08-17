@@ -50,16 +50,23 @@ export const SESANG_STICKERS = {
 };
 
 export const weddingContent = {
-  isDesignPlaceholder: true,
-  unconfirmedContent: [
-    { key: "publishing.og", label: "공유 미리보기 설정(OG 제목·설명·이미지)" },
-  ],
+  isDesignPlaceholder: false,
+  unconfirmedContent: [],
   rsvp: {
     enabled: false,
   },
   publishing: {
     canonicalUrl: "https://wdcard.enmsoftware.com/",
     searchIndexing: false,
+    og: {
+      title: "김종인 · 유지혜의 결혼식에 초대합니다",
+      description: "2026년 12월 27일 일요일 오후 3시 · 더 바실리움 8층",
+      image: "https://wdcard.enmsoftware.com/assets/og/wedding-card-1200x630.jpg",
+      imageAlt: "야외 스튜디오에서 함께 미소 짓는 김종인과 유지혜",
+      width: 1200,
+      height: 630,
+      type: "image/jpeg",
+    },
   },
   couple: {
     groom: "김종인",
