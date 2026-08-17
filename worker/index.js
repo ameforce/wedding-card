@@ -9,12 +9,32 @@ const MAX_MEDIA_BODY_BYTES = 30 * 1024 * 1024;
 const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 const GUESTBOOK_RETENTION = "permanent";
 const SEARCH_ROBOTS_DIRECTIVE = "noindex, nofollow, noarchive, nosnippet, noimageindex";
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "media-src 'self'",
+  "connect-src 'self'",
+  "form-action 'self'",
+  "frame-src 'self'",
+  "frame-ancestors 'self'",
+  "upgrade-insecure-requests",
+].join("; ");
 const ACCESS_JWKS_TTL_MS = 5 * 60 * 1000;
 const accessKeyCache = new Map();
 
 function withSearchPrivacy(response) {
   const headers = new Headers(response.headers);
   headers.set("x-robots-tag", SEARCH_ROBOTS_DIRECTIVE);
+  headers.set("content-security-policy", CONTENT_SECURITY_POLICY);
+  headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
+  headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("x-frame-options", "SAMEORIGIN");
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

@@ -3,6 +3,14 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import worker from "../worker/index.js";
 
+function assertSecurityHeaders(response) {
+  assert.equal(response.headers.get("x-robots-tag"), "noindex, nofollow, noarchive, nosnippet, noimageindex");
+  assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'self'/);
+  assert.equal(response.headers.get("x-frame-options"), "SAMEORIGIN");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+}
+
 test("serves existing static assets without a fallback", async () => {
   const calls = [];
   const response = await worker.fetch(new Request("https://example.test/assets/app.js"), {
@@ -15,7 +23,7 @@ test("serves existing static assets without a fallback", async () => {
   });
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("x-robots-tag"), "noindex, nofollow, noarchive, nosnippet, noimageindex");
+  assertSecurityHeaders(response);
   assert.deepEqual(calls, ["/assets/app.js"]);
 });
 
@@ -39,7 +47,7 @@ test("falls back to index.html for an unknown app route", async () => {
   );
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("x-robots-tag"), "noindex, nofollow, noarchive, nosnippet, noimageindex");
+  assertSecurityHeaders(response);
   assert.deepEqual(calls, ["/flow/step-two?source=share", "/"]);
 });
 
@@ -65,6 +73,7 @@ test("serves the admin SPA shell before Static Assets can canonicalize the route
 
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "admin app");
+  assertSecurityHeaders(response);
   assert.deepEqual(calls, ["/"]);
 });
 
@@ -97,6 +106,8 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/index.html", import.meta.url));
   const staticHeaders = await readFile(new URL("../dist/client/_headers", import.meta.url), "utf8");
   assert.match(staticHeaders, /X-Robots-Tag:\s*noindex, nofollow, noarchive, nosnippet, noimageindex/);
+  assert.match(staticHeaders, /Content-Security-Policy:.*frame-ancestors 'self'/);
+  assert.match(staticHeaders, /X-Frame-Options:\s*SAMEORIGIN/);
   await access(new URL("../dist/server/index.js", import.meta.url));
   await access(new URL("../dist/.openai/hosting.json", import.meta.url));
   await access(new URL("../dist/.openai/drizzle/0001_guestbook.sql", import.meta.url));

@@ -740,9 +740,14 @@ function GuestbookAdmin() {
         <p className="eyebrow">COUPLE ONLY</p>
         <h1 id="admin-title">비공개 방명록</h1>
         <p>인증된 신랑·신부 계정에서만 메시지를 조회할 수 있습니다.</p>
-        <button type="button" onClick={loadEntries} disabled={state.status === "loading"}>인증 확인 후 불러오기</button>
+        <button type="button" onClick={loadEntries} disabled={state.status === "loading"}>
+          {state.status === "loading" ? "불러오는 중…" : state.status === "ready" ? "새로고침" : "인증 확인 후 불러오기"}
+        </button>
         {state.message && <p className="admin-message" role="status">{state.message}</p>}
-        {state.status === "ready" && (
+        {state.status === "ready" && state.entries.length === 0 && (
+          <p className="admin-empty" role="status">아직 도착한 방명록 메시지가 없습니다.</p>
+        )}
+        {state.status === "ready" && state.entries.length > 0 && (
           <ul className="admin-entry-list">
             {state.entries.map((entry) => (
               <li key={entry.id}>

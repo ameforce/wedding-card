@@ -318,6 +318,12 @@ test("guestbook labels, privacy break, and password guidance stay private withou
   assert.doesNotMatch(app, /단방향 해시|해시로만 보관/);
 });
 
+test("couple-only guestbook admin reports a successful empty state", () => {
+  assert.match(app, /state\.status === "ready" && state\.entries\.length === 0/);
+  assert.match(app, /아직 도착한 방명록 메시지가 없습니다/);
+  assert.match(app, /state\.status === "ready" \? "새로고침"/);
+});
+
 test("section spacing and reveal motion remain subtle and reduced-motion safe", () => {
   assert.match(app, /function ScrollReveal/);
   assert.match(app, /new IntersectionObserver/);

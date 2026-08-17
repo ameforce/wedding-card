@@ -1,2 +1,7 @@
 /*
   X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex
+  Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self'; connect-src 'self'; form-action 'self'; frame-src 'self'; frame-ancestors 'self'; upgrade-insecure-requests
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN

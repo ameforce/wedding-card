@@ -380,6 +380,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .guestbook-admin > button { min-height: 46px; padding: 0 16px; color: #fff; background: #516f8e; border: 0; border-radius: 10px; cursor: pointer; font: inherit; }
 .guestbook-admin > button:disabled { cursor: wait; opacity: .6; }
 .guestbook-admin .admin-message { padding: 12px; background: #f6ecec; border-radius: 10px; font-size: 13px; }
+.guestbook-admin .admin-empty { margin: 18px 0 0; padding: 18px; color: #617386; background: #f4f7f8; border-radius: 12px; text-align: center; }
 .admin-entry-list { display: grid; margin: 24px 0 0; padding: 0; gap: 12px; list-style: none; }
 .admin-entry-list li { padding: 16px; background: #f5f8fa; border-radius: 12px; }
 .admin-entry-list time { margin-left: 8px; color: #718196; font-size: 12px; }
