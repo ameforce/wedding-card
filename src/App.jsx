@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -22,6 +22,9 @@ import {
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import { getCalendarMonth, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
+import { ContentAdmin } from "./admin-content/ContentAdmin.jsx";
+import { getInvitationPhotos } from "./admin-content/content-document.js";
+import { usePublicInvitationContent } from "./admin-content/public-content.jsx";
 import { createGuestbookEntry, getAdminGuestbookEntries, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
 import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
 
@@ -33,6 +36,9 @@ const VARIANTS = {
     title: "모바일 청첩장",
   },
 };
+
+const WeddingRuntimeContext = createContext({ content: weddingContent, photos: WEDDING_PHOTOS });
+const useWeddingRuntime = () => useContext(WeddingRuntimeContext);
 
 const PASTEL_HERO_WORDMARK = (
   <span className="pastel-hero-wordmark" aria-label="Our Wedding Day">
@@ -234,6 +240,8 @@ function SesangCameo({ asset, side }) {
 }
 
 function PlaceholderBadge() {
+  const { content } = useWeddingRuntime();
+  if (!content.isDesignPlaceholder && content.unconfirmedContent?.length === 0) return null;
   return (
     <div className="placeholder-badge" role="note">
       DESIGN REVIEW · 일부 예식 정보 미확정
@@ -270,15 +278,16 @@ function ScrollReveal({ children, className = "" }) {
 }
 
 function CalendarPattern() {
-  const { year, month, weekdays } = weddingContent.calendar;
-  const calendarDays = getCalendarMonth(weddingContent.calendar);
+  const { content } = useWeddingRuntime();
+  const { year, month, weekdays } = content.calendar;
+  const calendarDays = getCalendarMonth(content.calendar);
   const monthLabel = `${year}년 ${month}월`;
 
   return (
     <section className="calendar-pattern" aria-label={`${monthLabel} 예식 캘린더`}>
       <div className="calendar-heading">
         <p>{monthLabel}</p>
-        <span>{weddingContent.calendar.day}일 {weddingContent.event.day} · {weddingContent.event.time} 예식</span>
+        <span>{content.calendar.day}일 {content.event.day} · {content.event.time} 예식</span>
       </div>
       <div className="weekday-row">
         {weekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}
@@ -288,7 +297,7 @@ function CalendarPattern() {
           if (!calendarDay) return <span className="calendar-day is-empty" aria-hidden="true" key={`empty-${index}`} />;
 
           const isEvent = calendarDay.isEvent;
-          const label = `${month}월 ${calendarDay.date}일 ${weekdays[calendarDay.weekday]}요일${isEvent ? `, ${weddingContent.event.time} 예식` : ""}`;
+          const label = `${month}월 ${calendarDay.date}일 ${weekdays[calendarDay.weekday]}요일${isEvent ? `, ${content.event.time} 예식` : ""}`;
           return (
             <time
               className={`calendar-day ${calendarDay.weekday === 0 ? "is-sunday" : ""} ${isEvent ? "is-event" : ""}`}
@@ -306,18 +315,20 @@ function CalendarPattern() {
 }
 
 function Greeting() {
+  const { content } = useWeddingRuntime();
   return (
     <section className="greeting section-pad" aria-labelledby="greeting-title">
       <p className="eyebrow" id="greeting-title">INVITATION</p>
-      {weddingContent.message.map((line) => <p key={line}>{line}</p>)}
+      {content.message.map((line) => <p key={line}>{line}</p>)}
     </section>
   );
 }
 
 function FamilyIntroduction() {
+  const { content } = useWeddingRuntime();
   return (
     <section className="family-introduction section-pad" aria-label="양가 가족 소개">
-      {Object.values(weddingContent.familyContacts).map((side) => (
+      {Object.values(content.familyContacts).map((side) => (
         <p key={side.label}>
           <span>{side.parents.join(" · ")}</span>의 {side.childRole} <strong>{side.childName}</strong>
         </p>
@@ -339,18 +350,20 @@ function PastelSchedule() {
 }
 
 function EventDate({ className = "" }) {
-  const dateTime = `${weddingContent.event.isoDate}T${weddingContent.event.startTime24h}:00${weddingContent.event.timezone.utcOffset}`;
+  const { content } = useWeddingRuntime();
+  const dateTime = `${content.event.isoDate}T${content.event.startTime24h}:00${content.event.timezone.utcOffset}`;
   return (
     <time className={`event-date ${className}`} dateTime={dateTime}>
-      <span className="event-date-primary">{weddingContent.event.dateLabel}</span>
-      <span className="event-date-secondary">{weddingContent.event.day} · {weddingContent.event.time}</span>
+      <span className="event-date-primary">{content.event.dateLabel}</span>
+      <span className="event-date-secondary">{content.event.day} · {content.event.time}</span>
     </time>
   );
 }
 
 function VenueMap() {
+  const { content } = useWeddingRuntime();
   const [failed, setFailed] = useState(false);
-  const map = weddingContent.venue.map;
+  const map = content.venue.map;
   const canRenderMap = Boolean(map.localAssetPath && map.sourceAttribution && map.alt) && !failed;
 
   if (!canRenderMap) {
@@ -401,6 +414,7 @@ function digitsOnly(phone) {
 }
 
 function AccountGroups({ notify }) {
+  const { content } = useWeddingRuntime();
   const copyAccount = async (account) => {
     try {
       await copyText(account.number);
@@ -415,7 +429,7 @@ function AccountGroups({ notify }) {
       <div className="account-section-heading">
         <h3 id="account-title">마음 전하실 곳</h3>
       </div>
-      {Object.values(weddingContent.accounts).map((account) => (
+      {Object.values(content.accounts).map((account) => (
         <details className={`contact-group account-group is-${account.key}`} key={account.key}>
           <summary>
             <span className="group-summary-label">
@@ -443,6 +457,7 @@ function AccountGroups({ notify }) {
 }
 
 function ContactSection({ pastel = false, notify }) {
+  const { content } = useWeddingRuntime();
   return (
     <section className="contact-section section-pad" id="contact" aria-labelledby="contact-title">
       <div className="section-heading">
@@ -451,7 +466,7 @@ function ContactSection({ pastel = false, notify }) {
       </div>
       <p className="contact-intro">축하의 마음을 전하실 분께 연락해 주세요.</p>
       <div className="contact-groups">
-        {Object.values(weddingContent.familyContacts).map((side) => (
+        {Object.values(content.familyContacts).map((side) => (
           <details className={`contact-group ${pastel ? `is-${side.key}` : ""}`.trim()} key={side.label}>
             <summary>
               <span className="group-summary-label">
@@ -491,10 +506,11 @@ function ContactSection({ pastel = false, notify }) {
 }
 
 function Location({ notify, compact = false }) {
-  const openMap = (label) => notify(`${label}에서 ${weddingContent.venue.name}을 엽니다.`);
+  const { content } = useWeddingRuntime();
+  const openMap = (label) => notify(`${label}에서 ${content.venue.name}을 엽니다.`);
   const copyAddress = async () => {
     try {
-      await copyText(weddingContent.venue.address);
+      await copyText(content.venue.address);
       notify("예식장 주소를 복사했습니다.");
     } catch {
       notify("주소를 복사하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
@@ -508,27 +524,27 @@ function Location({ notify, compact = false }) {
       </div>
       <VenueMap />
       <div className="venue-copy">
-        <strong>{weddingContent.venue.name} · {weddingContent.venue.floor}</strong>
-        <span>{weddingContent.venue.address}</span>
+        <strong>{content.venue.name} · {content.venue.floor}</strong>
+        <span>{content.venue.address}</span>
         <button className="address-copy" type="button" onClick={copyAddress}>
           <Copy aria-hidden="true" weight="light" /> 주소 복사
         </button>
       </div>
       <div className="route-actions" aria-label="길찾기 서비스">
-        <ActionButton icon={MapPin} href={weddingContent.venue.mapLinks.naver} onClick={() => openMap("네이버 지도")} ariaLabel="네이버 지도에서 길찾기">네이버</ActionButton>
-        <ActionButton icon={NavigationArrow} href={weddingContent.venue.mapLinks.kakao} onClick={() => openMap("카카오맵")}>카카오맵</ActionButton>
-        <ActionButton icon={NavigationArrow} href={weddingContent.venue.mapLinks.tmap} onClick={() => openMap("T map")}>T map</ActionButton>
+        <ActionButton icon={MapPin} href={content.venue.mapLinks.naver} onClick={() => openMap("네이버 지도")} ariaLabel="네이버 지도에서 길찾기">네이버</ActionButton>
+        <ActionButton icon={NavigationArrow} href={content.venue.mapLinks.kakao} onClick={() => openMap("카카오맵")}>카카오맵</ActionButton>
+        <ActionButton icon={NavigationArrow} href={content.venue.mapLinks.tmap} onClick={() => openMap("T map")}>T map</ActionButton>
       </div>
       <div className="transit-list">
-        <div><Train aria-hidden="true" weight="light" /><p><strong>지하철 이용 시</strong><span>{weddingContent.transit.subway}</span></p></div>
-        <div><Bus aria-hidden="true" weight="light" /><p><strong>셔틀버스 운행</strong><span>{weddingContent.transit.shuttle}</span></p></div>
+        <div><Train aria-hidden="true" weight="light" /><p><strong>지하철 이용 시</strong><span>{content.transit.subway}</span></p></div>
+        <div><Bus aria-hidden="true" weight="light" /><p><strong>셔틀버스 운행</strong><span>{content.transit.shuttle}</span></p></div>
         <div>
           <Car aria-hidden="true" weight="light" />
           <p>
             <strong>주차 안내</strong>
-            <span>{weddingContent.transit.parking}</span>
-            <span className="transit-detail">{weddingContent.transit.parkingRegistrationLocation}</span>
-            <span className="transit-detail">{weddingContent.transit.parkingRegistration}</span>
+            <span>{content.transit.parking}</span>
+            <span className="transit-detail">{content.transit.parkingRegistrationLocation}</span>
+            <span className="transit-detail">{content.transit.parkingRegistration}</span>
           </p>
         </div>
       </div>
@@ -537,9 +553,10 @@ function Location({ notify, compact = false }) {
 }
 
 function BottomActions({ notify, pastel = false }) {
+  const { content } = useWeddingRuntime();
   const saveDate = async () => {
     try {
-      const result = await saveCalendar(weddingContent);
+      const result = await saveCalendar(content);
       if (result === "shared-file") notify("일정 파일을 시스템 공유 메뉴로 전달했습니다.");
       if (result === "opened-file") notify("캘린더 일정 열기를 요청했습니다.");
     } catch {
@@ -548,7 +565,7 @@ function BottomActions({ notify, pastel = false }) {
   };
   const share = async () => {
     try {
-      const result = await shareInvitation(weddingContent, weddingContent.publishing.canonicalUrl);
+      const result = await shareInvitation(content, content.publishing.canonicalUrl);
       if (result === "shared") notify("청첩장을 공유했습니다.");
       if (result === "copied") {
         notify(window.isSecureContext
@@ -742,7 +759,8 @@ function GuestbookAdmin() {
 }
 
 function QuietInvitation({ notify }) {
-  const photos = [WEDDING_PHOTOS.quiet.hero, ...WEDDING_PHOTOS.quiet.gallery];
+  const { content, photos: runtimePhotos } = useWeddingRuntime();
+  const photos = [runtimePhotos.quiet.hero, ...runtimePhotos.quiet.gallery];
   const gallery = usePhotoGallery();
   return (
     <article className="invitation quiet-invitation" data-variant="quiet">
@@ -750,9 +768,9 @@ function QuietInvitation({ notify }) {
       <header className="quiet-hero section-pad">
         <p className="display-title" lang="en">OUR DAY</p>
         <PhotoButton photo={photos[0]} index={0} openPhoto={gallery.openPhoto} registerTrigger={gallery.registerTrigger} className="hero-photo is-arched" priority sizes="198px" />
-        <h1>{weddingContent.couple.groom} <i aria-hidden="true">&amp;</i> {weddingContent.couple.bride}</h1>
+        <h1>{content.couple.groom} <i aria-hidden="true">&amp;</i> {content.couple.bride}</h1>
         <EventDate className="date-line" />
-        <p className="venue-line">{weddingContent.venue.name} · {weddingContent.venue.floor}</p>
+        <p className="venue-line">{content.venue.name} · {content.venue.floor}</p>
       </header>
       <ScrollReveal><Greeting /></ScrollReveal>
       <ScrollReveal><FamilyIntroduction /></ScrollReveal>
@@ -809,14 +827,15 @@ function PastelGallery({ gallery, photos }) {
 }
 
 function PastelInvitation({ notify }) {
-  const photos = [WEDDING_PHOTOS.pastel.hero, ...WEDDING_PHOTOS.pastel.gallery];
+  const { content, photos: runtimePhotos } = useWeddingRuntime();
+  const photos = [runtimePhotos.pastel.hero, ...runtimePhotos.pastel.gallery];
   const gallery = usePhotoGallery();
   return (
     <article className="invitation pastel-invitation" data-variant="pastel">
       <PlaceholderBadge />
       <header className="pastel-hero">
         <div className="pastel-hero-intro">
-          <p>저희 두 사람<br />새로운 시작을 함께합니다</p>
+          <p>{content.hero.introLines.map((line, index) => <span key={line}>{index > 0 && <br />}{line}</span>)}</p>
         </div>
         <div className="pastel-hero-media">
           <PhotoButton
@@ -831,22 +850,22 @@ function PastelInvitation({ notify }) {
           {PASTEL_HERO_WORDMARK}
         </div>
         <div className="pastel-hero-copy">
-          <h1>{weddingContent.couple.groom} <b aria-hidden="true">·</b> {weddingContent.couple.bride}</h1>
+          <h1>{content.couple.groom} <b aria-hidden="true">·</b> {content.couple.bride}</h1>
           <EventDate className="date-line" />
-          <p className="pastel-venue-line">{weddingContent.venue.name} · {weddingContent.venue.floor}</p>
+          <p className="pastel-venue-line">{content.venue.name} · {content.venue.floor}</p>
         </div>
       </header>
       <ScrollReveal><Greeting /></ScrollReveal>
       <ScrollReveal><FamilyIntroduction /></ScrollReveal>
       <ScrollReveal><PastelSchedule /></ScrollReveal>
-      <ScrollReveal><PastelGallery gallery={gallery} photos={WEDDING_PHOTOS.pastel.gallery} /></ScrollReveal>
+      <ScrollReveal><PastelGallery gallery={gallery} photos={runtimePhotos.pastel.gallery} /></ScrollReveal>
       <ScrollReveal>
         <section className="pastel-story section-pad" aria-labelledby="pastel-story-title">
           <div className="pastel-section-heading">
             <p className="eyebrow">OUR STORY</p>
             <h2 id="pastel-story-title">우리의 이야기</h2>
           </div>
-          <p>{weddingContent.story.join(" ")}</p>
+          <p>{content.story.join(" ")}</p>
         </section>
       </ScrollReveal>
       <ScrollReveal><Location notify={notify} /></ScrollReveal>
@@ -861,18 +880,23 @@ function PastelInvitation({ notify }) {
 
 function WeddingApp() {
   const [variant] = useState(getVariant);
+  const runtime = usePublicInvitationContent(weddingContent);
+  const runtimePhotos = useMemo(() => ({
+    quiet: getInvitationPhotos(runtime.content, "quiet"),
+    pastel: getInvitationPhotos(runtime.content, "pastel"),
+  }), [runtime.content]);
   const [toast, setToast] = useState({ message: "", tone: "success" });
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
 
   useEffect(() => {
     document.documentElement.dataset.variant = variant;
-    document.title = `${weddingContent.couple.groom} · ${weddingContent.couple.bride} | ${VARIANTS[variant].title}`;
+    document.title = `${runtime.content.couple.groom} · ${runtime.content.couple.bride} | ${VARIANTS[variant].title}`;
     const params = new URLSearchParams(window.location.search);
     if (variant === "quiet") params.set("variant", "quiet");
     else params.delete("variant");
     const query = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
-  }, [variant]);
+  }, [runtime.content.couple.bride, runtime.content.couple.groom, variant]);
 
   const notify = (message, tone = "success") => {
     setToast({ message, tone });
@@ -881,6 +905,7 @@ function WeddingApp() {
   };
 
   return (
+    <WeddingRuntimeContext.Provider value={{ content: runtime.content, photos: runtimePhotos }}>
     <main className={`app-shell ${captureMode ? "is-capture" : ""}`}>
       <div className="invitation-stage">
         {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
@@ -891,9 +916,12 @@ function WeddingApp() {
         <span>{toast.message}</span>
       </div>
     </main>
+    </WeddingRuntimeContext.Provider>
   );
 }
 
 export function App() {
-  return window.location.pathname === "/admin/guestbook" ? <GuestbookAdmin /> : <WeddingApp />;
+  if (window.location.pathname === "/admin/guestbook") return <GuestbookAdmin />;
+  if (window.location.pathname === "/admin/content") return <ContentAdmin />;
+  return <WeddingApp />;
 }

@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wedding-card",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-08-17",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "wdcard.enmsoftware.com",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "GUESTBOOK_DB"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "WEDDING_MEDIA"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "GUESTBOOK_RATE_LIMITER",
+      "namespace_id": "42617",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    }
+  ],
+  "vars": {
+    "ADMIN_AUTH_MODE": "cloudflare-access-jwt",
+    "REQUIRE_GUESTBOOK_RATE_LIMIT": "1"
+  }
+}

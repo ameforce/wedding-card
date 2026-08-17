@@ -62,8 +62,8 @@ test("user-confirmed wedding facts are represented without filling unknown field
     "함께 계절을 걸어갑니다.",
   ]);
   assert.doesNotMatch(app, /weddingContent\.venue\.hall/);
-  assert.match(app, /weddingContent\.venue\.name} · \{weddingContent\.venue\.floor/);
-  assert.match(app, /shareInvitation\(weddingContent, weddingContent\.publishing\.canonicalUrl\)/);
+  assert.match(app, /content\.venue\.name} · \{content\.venue\.floor/);
+  assert.match(app, /shareInvitation\(content, content\.publishing\.canonicalUrl\)/);
 });
 
 test("public delivery declares a search indexing opt-out without blocking crawler access", () => {
@@ -162,10 +162,10 @@ test("December 2026 calendar has all real dates and emphasizes Sunday the 27th",
   assert.equal(eventIndex, 28);
   assert.deepEqual(eventDay, { date: 27, weekday: 0, isEvent: true });
   assert.match(app, /className="calendar-heading"/);
-  assert.match(app, /weddingContent\.calendar\.day}일 \{weddingContent\.event\.day} · \{weddingContent\.event\.time} 예식/);
+  assert.match(app, /content\.calendar\.day}일 \{content\.event\.day} · \{content\.event\.time} 예식/);
   assert.match(app, /className="weekday-row"/);
   assert.match(app, /className="calendar-days"/);
-  assert.match(app, /weddingContent\.event\.time} 예식/);
+  assert.match(app, /content\.event\.time} 예식/);
   assert.doesNotMatch(app, /date-dots/);
   assert.match(app, /className="pastel-schedule section-pad"/);
   assert.match(app, /id="pastel-schedule-title">예식 일정/);
@@ -197,7 +197,7 @@ test("venue map keeps source metadata without a separate visible provider captio
 test("Pastel removes the redundant timeline and presents one full-width story", () => {
   assert.doesNotMatch(app, /weddingContent\.timeline|timeline-item|우리의 하루/);
   assert.match(app, /className="pastel-story section-pad"/);
-  assert.match(app, /weddingContent\.story\.join\(" "\)/);
+  assert.match(app, /content\.story\.join\(" "\)/);
 
   const pastelStory = css.match(/\.pastel-story\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.doesNotMatch(pastelStory, /grid-template-columns/);
@@ -205,7 +205,7 @@ test("Pastel removes the redundant timeline and presents one full-width story", 
 });
 
 test("Pastel gallery uses portrait media and an accessible lightbox", () => {
-  assert.match(app, /const photos = \[WEDDING_PHOTOS\.pastel\.hero, \.\.\.WEDDING_PHOTOS\.pastel\.gallery\]/);
+  assert.match(app, /const photos = \[runtimePhotos\.pastel\.hero, \.\.\.runtimePhotos\.pastel\.gallery\]/);
   assert.match(app, /className="pastel-hero-photo is-inset-frame"/);
   assert.match(app, /className="pastel-gallery-item"/);
   assert.match(app, /role="dialog"/);
@@ -317,13 +317,13 @@ test("confirmed subway, shuttle and parking guidance is represented verbatim", (
     parkingRegistrationLocation: "웨딩홀·연회장 앞",
     parkingRegistration: "8층 웨딩홀 로비 주차등록 기기에서 등록",
   });
-  assert.match(app, /weddingContent\.transit\.shuttle/);
-  assert.match(app, /weddingContent\.transit\.parkingRegistrationLocation/);
-  assert.match(app, /weddingContent\.transit\.parkingRegistration/);
+  assert.match(app, /content\.transit\.shuttle/);
+  assert.match(app, /content\.transit\.parkingRegistrationLocation/);
+  assert.match(app, /content\.transit\.parkingRegistration/);
 });
 
 test("Quiet photos use the same accessible lightbox contract", () => {
-  assert.match(app, /const photos = \[WEDDING_PHOTOS\.quiet\.hero, \.\.\.WEDDING_PHOTOS\.quiet\.gallery\]/);
+  assert.match(app, /const photos = \[runtimePhotos\.quiet\.hero, \.\.\.runtimePhotos\.quiet\.gallery\]/);
   assert.match(app, /<PhotoButton photo=\{photos\[0\]\}/);
   assert.match(app, /<PhotoLightbox photos=\{photos\} gallery=\{gallery\} tone="quiet"/);
   assert.match(css, /\.gallery-lightbox\.is-pastel/);

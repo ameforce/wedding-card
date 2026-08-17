@@ -63,6 +63,9 @@ export const weddingContent = {
     groom: "김종인",
     bride: "유지혜",
   },
+  hero: {
+    introLines: ["저희 두 사람", "새로운 시작을 함께합니다"],
+  },
   familyContacts: {
     groom: {
       key: "groom",

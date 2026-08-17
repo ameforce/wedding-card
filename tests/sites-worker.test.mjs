@@ -71,4 +71,8 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/.openai/hosting.json", import.meta.url));
   await access(new URL("../dist/.openai/drizzle/0001_guestbook.sql", import.meta.url));
   await access(new URL("../dist/.openai/drizzle/0002_guestbook_name_lookup.sql", import.meta.url));
+  await access(new URL("../dist/.openai/drizzle/0003_invitation_content.sql", import.meta.url));
+  const hosting = JSON.parse(await readFile(new URL("../dist/.openai/hosting.json", import.meta.url), "utf8"));
+  assert.equal(hosting.d1, "GUESTBOOK_DB");
+  assert.equal(hosting.r2, "WEDDING_MEDIA");
 });

@@ -1,5 +1,16 @@
 # Design QA
 
+## Current accepted pass — Cloudflare content admin review
+
+- `/admin/content` renders a two-pane editor and an isolated 390px Pastel preview. At a 1440px browser viewport, the document reports `scrollWidth === clientWidth === 1440` and the preview iframe resolves to exactly 390px. At 390px, the admin document reports zero horizontal overflow, a 338px preview, and a minimum button height of 48px.
+- The editor exposes only the reviewed mutable subset: couple names, hero intro, event and venue display fields, invitation/story copy, transit/parking copy, and Pastel hero/gallery photos with alt text and focal position. Contacts, accounts, map links, search privacy, RSVP policy, and publication policy stay outside this UI and remain guarded by the bundled content contract.
+- A live browser canary changed the hero intro, observed the new text in the iframe, saved a draft, explicitly published the local review revision, observed it on the ordinary Pastel page, and then restored and republished the original text. No test marker remains in the saved local state.
+- A browser file-chooser canary selected an existing project WebP for the hero. The admin produced a local WebP data URL and updated the iframe without saving; a reload discarded that uncommitted photo and restored the approved `/assets/photos/` source.
+- A load/edit race found during QA was fixed by disabling fieldsets while the initial state loads and by adding a same-origin preview readiness/channel contract. The hero intro was also added to the normalization allowlist, preventing a valid edit from being dropped.
+- Console warning/error read-back was empty. Automated verification is recorded in the current commit evidence; the default production build remains fail-closed until RSVP and OG content are confirmed.
+
+final result: passed
+
 ## Current accepted pass — mobile priority hierarchy and interaction containment
 
 ### Source truth and current evidence
