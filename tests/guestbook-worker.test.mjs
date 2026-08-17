@@ -92,9 +92,18 @@ test("password verifiers are salted PBKDF2 values and reject the wrong password"
   const first = await __test.hashPassword("correct horse");
   const second = await __test.hashPassword("correct horse");
   assert.notEqual(first, second);
+  assert.match(first, /^pbkdf2-sha256\$100000\$/);
   assert.equal(first.includes("correct horse"), false);
   assert.equal(await __test.verifyPassword("correct horse", first), true);
   assert.equal(await __test.verifyPassword("wrong horse", first), false);
+});
+
+test("password verifier metadata never asks workerd to exceed its PBKDF2 limit", async () => {
+  assert.equal(__test.PASSWORD_ITERATIONS, 100_000);
+  assert.equal(__test.MAX_PASSWORD_ITERATIONS, 100_000);
+  const verifier = await __test.hashPassword("correct horse");
+  const unsupported = verifier.replace("$100000$", "$600000$");
+  assert.equal(await __test.verifyPassword("correct horse", unsupported), false);
 });
 
 test("worker source never logs guestbook payloads, passwords, messages, or hashes", async () => {
@@ -234,6 +243,26 @@ test("guestbook accepts a four-character password and rejects shorter values", a
   }), env);
   assert.equal(accepted.status, 201);
   assert.equal((await accepted.json()).retention, "permanent");
+});
+
+test("embedded null characters are rejected before a guestbook write", async () => {
+  const db = database();
+  const env = { GUESTBOOK_DB: db };
+
+  const invalidName = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "\u0000", password: "abcd", message: "축하합니다" }),
+  }), env);
+  assert.equal(invalidName.status, 400);
+  assert.equal((await invalidName.json()).code, "INVALID_NAME");
+
+  const invalidMessage = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "abcd", message: "축하\u0000합니다" }),
+  }), env);
+  assert.equal(invalidMessage.status, 400);
+  assert.equal((await invalidMessage.json()).code, "INVALID_MESSAGE");
+  assert.equal(db.rows.size, 0);
 });
 
 test("production guestbook writes fail closed without the rate limiter and never use plaintext names as keys", async () => {

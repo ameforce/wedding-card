@@ -8,7 +8,7 @@ The browser never receives a guestbook list, password hash, database credential,
 - `GET /api/guestbook/entries` is always rejected.
 - `GET /api/guestbook/admin/entries` is the only list endpoint and fails closed unless a Cloudflare Access JWT passes signature, issuer, audience, expiry, and exact two-email allowlist validation inside the Worker.
 
-Author passwords are length-validated at 4–72 characters, then processed with PBKDF2-HMAC-SHA256 at 600,000 iterations and a random 128-bit salt. The encoded verifier is stored in D1; plaintext passwords are neither stored nor logged. Comparisons scan every derived byte.
+Author passwords are length-validated at 4–72 characters, then processed with PBKDF2-HMAC-SHA256 at 100,000 iterations and a random 128-bit salt. This is the maximum supported by the deployed workerd runtime. The encoded verifier carries its iteration count, and the Worker rejects unsupported metadata before derivation; plaintext passwords are neither stored nor logged. Comparisons scan every derived byte.
 
 Public create, unlock, and update responses never expose the internal entry id. Lookup and update return the same generic authentication failure for a missing name, wrong password, or unsafe legacy duplicate. A D1 unique index provides the final duplicate-name race guard.
 

@@ -2,7 +2,11 @@ const API_PREFIX = "/api/guestbook";
 const CONTENT_API_PREFIX = "/api/content";
 const ADMIN_API_PREFIX = "/api/admin";
 const MEDIA_API_PREFIX = "/api/media";
-const PASSWORD_ITERATIONS = 600_000;
+// workerd rejects PBKDF2 requests above 100,000 iterations. Keep the value in
+// the encoded verifier and reject unsupported verifier metadata before asking
+// Web Crypto to derive any bits.
+const PASSWORD_ITERATIONS = 100_000;
+const MAX_PASSWORD_ITERATIONS = 100_000;
 const MAX_BODY_BYTES = 8_192;
 const MAX_CONTENT_BODY_BYTES = 131_072;
 const MAX_MEDIA_BODY_BYTES = 30 * 1024 * 1024;
@@ -111,7 +115,12 @@ async function enforceGuestbookRateLimit(env, action, actor = "all") {
 async function verifyPassword(password, encoded) {
   const [algorithm, iterationsText, saltText, hashText] = String(encoded).split("$");
   const iterations = Number(iterationsText);
-  if (algorithm !== "pbkdf2-sha256" || iterations !== PASSWORD_ITERATIONS || !saltText || !hashText) return false;
+  if (algorithm !== "pbkdf2-sha256"
+    || !Number.isSafeInteger(iterations)
+    || iterations < PASSWORD_ITERATIONS
+    || iterations > MAX_PASSWORD_ITERATIONS
+    || !saltText
+    || !hashText) return false;
   const expected = base64ToBytes(hashText);
   const actual = await derivePassword(password, base64ToBytes(saltText), iterations);
   if (actual.length !== expected.length) return false;
@@ -149,9 +158,14 @@ function normalizeEntry(payload, { requireMessage = true } = {}) {
   const name = typeof payload.name === "string" ? payload.name.trim().normalize("NFKC") : "";
   const password = typeof payload.password === "string" ? payload.password : "";
   const message = typeof payload.message === "string" ? payload.message.trim() : "";
-  if (name.length < 1 || name.length > 30) throw { status: 400, code: "INVALID_NAME", message: "이름은 1~30자로 입력해 주세요." };
+  // SQLite's length() stops at U+0000, while JavaScript string length does not.
+  // Reject it here so a malformed pasted value cannot reach the table CHECK
+  // constraint and turn a visitor validation error into a generic 500.
+  if (name.length < 1 || name.length > 30 || name.includes("\u0000")) {
+    throw { status: 400, code: "INVALID_NAME", message: "이름은 1~30자로 입력해 주세요." };
+  }
   if (password.length < 4 || password.length > 72) throw { status: 400, code: "INVALID_PASSWORD", message: "비밀번호는 4~72자로 입력해 주세요." };
-  if (requireMessage && (message.length < 1 || message.length > 500)) {
+  if (requireMessage && (message.length < 1 || message.length > 500 || message.includes("\u0000"))) {
     throw { status: 400, code: "INVALID_MESSAGE", message: "메시지는 1~500자로 입력해 주세요." };
   }
   return { name, password, message };
@@ -780,4 +794,11 @@ export default {
   },
 };
 
-export const __test = { hashPassword, verifyPassword, verifyAccessJwt, validateInvitationDocument };
+export const __test = {
+  PASSWORD_ITERATIONS,
+  MAX_PASSWORD_ITERATIONS,
+  hashPassword,
+  verifyPassword,
+  verifyAccessJwt,
+  validateInvitationDocument,
+};
