@@ -38,7 +38,21 @@ This project intentionally accepts Cloudflare as its only production data plane 
 - Keep Access protection on `/admin/*`, `/api/admin/*`, and `/api/guestbook/admin/*`. `ADMIN_AUTH_MODE=cloudflare-access-jwt`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, and the exact two-address `WEDDING_ADMIN_EMAILS` allowlist must remain deployment-only; never put those values in client code.
 - `wrangler.jsonc` records the provisioned D1 identifier and R2 bucket name. Treat unexpected changes to either binding as a deployment review event.
 - Keep `workers.dev` and preview URLs disabled so the Custom Domain cannot be bypassed through another public route.
-- After every production deployment, read back the active Worker version and run authenticated administrator plus public-content canaries before closing the release.
+- After every production deployment, read back the active Worker version and run `npm run canary:production` before closing the release. The canary checks the public invitation and security headers, creates one uniquely named synthetic guestbook row, unlocks and updates it with its transient password, verifies the D1 write, checks the administrator boundary, then deletes only that owned row and proves zero residue. It fails closed if cleanup cannot be proved and never prints its password or administrator token.
+
+## Post-deploy live canary
+
+The full authenticated canary requires an explicit production-write gate and a short-lived Cloudflare Access JWT belonging to one of the two allowlisted administrators. Supply the JWT only through the process environment; never commit it, place it in a command argument, or persist it in a `.env` file:
+
+```powershell
+$env:WEDDING_CANARY_ALLOW_PRODUCTION_WRITE = "1"
+$env:WEDDING_CANARY_ACCESS_TOKEN = "<short-lived Access JWT>"
+npm run canary:production
+Remove-Item Env:\WEDDING_CANARY_ACCESS_TOKEN
+Remove-Item Env:\WEDDING_CANARY_ALLOW_PRODUCTION_WRITE
+```
+
+For an attended operator run where the administrator UI is checked separately in an already authenticated browser, set `WEDDING_CANARY_ALLOW_D1_ADMIN_READ=1` instead of an Access token. That reduced mode still proves the public lifecycle, remote D1 persistence, exact cleanup, and that the administrator endpoint rejects an unauthenticated request; it does not claim an authenticated administrator API read. `npm run deploy:cloudflare:verified` deliberately inherits the same gates so a deployment cannot be reported verified after silently skipping them.
 
 ## Official references
 
