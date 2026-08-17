@@ -735,8 +735,19 @@ export default {
       return withSearchPrivacy(await handleContent(request, env, url));
     }
 
-    const response = await env.ASSETS.fetch(request);
     const acceptsHtml = request.headers.get("accept")?.includes("text/html");
+    const servesAdminShell = ["/admin/content", "/admin/guestbook"].includes(url.pathname)
+      && acceptsHtml
+      && ["GET", "HEAD"].includes(request.method);
+
+    if (servesAdminShell) {
+      const indexUrl = new URL(request.url);
+      indexUrl.pathname = "/index.html";
+      indexUrl.search = "";
+      return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
+    }
+
+    const response = await env.ASSETS.fetch(request);
 
     if (response.status !== 404 || !acceptsHtml || !["GET", "HEAD"].includes(request.method)) {
       return withSearchPrivacy(response);

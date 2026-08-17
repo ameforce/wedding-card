@@ -43,6 +43,31 @@ test("falls back to index.html for an unknown app route", async () => {
   assert.deepEqual(calls, ["/flow/step-two?source=share", "/index.html"]);
 });
 
+test("serves the admin SPA shell before Static Assets can canonicalize the route", async () => {
+  const calls = [];
+  const response = await worker.fetch(
+    new Request("https://example.test/admin/content", {
+      headers: { accept: "text/html" },
+    }),
+    {
+      ASSETS: {
+        fetch: async (request) => {
+          const url = new URL(request.url);
+          calls.push(url.pathname);
+          return new Response(url.pathname === "/index.html" ? "admin app" : null, {
+            status: url.pathname === "/index.html" ? 200 : 308,
+            headers: url.pathname === "/index.html" ? undefined : { location: "/" },
+          });
+        },
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "admin app");
+  assert.deepEqual(calls, ["/index.html"]);
+});
+
 test("does not turn missing API or write requests into the app shell", async () => {
   for (const request of [
     new Request("https://example.test/api/missing", { headers: { accept: "application/json" } }),
