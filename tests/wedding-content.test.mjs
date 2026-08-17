@@ -37,15 +37,30 @@ test("user-confirmed wedding facts are represented without filling unknown field
     },
   });
   assert.equal(weddingContent.venue.name, "더 바실리움");
+  assert.equal(weddingContent.venue.floor, "8층");
+  assert.equal("hall" in weddingContent.venue, false);
   assert.equal(weddingContent.venue.address, "경기 성남시 분당구 양현로 322");
+  assert.equal(weddingContent.publishing.canonicalUrl, "https://wdcard.enmsoftware.com/");
   assert.equal(weddingContent.isDesignPlaceholder, true);
   assert.deepEqual(weddingContent.unconfirmedContent, [
-    { key: "venue.floorAndHall", label: "예식장 층·홀" },
-    { key: "copy.invitationMessage", label: "초대 문구 최종 확인" },
-    { key: "copy.story", label: "스토리 문구 최종 확인" },
     { key: "rsvp.contract", label: "RSVP 운영 계약(수집 항목·마감일·수신자·보존 정책)" },
-    { key: "publishing.scope", label: "공개 배포 범위(대표 URL·OG 메타데이터·검색 노출)" },
+    { key: "publishing.discovery", label: "공개 노출 설정(OG 메타데이터·검색 노출)" },
   ]);
+  assert.deepEqual(weddingContent.message, [
+    "서로를 아끼며 믿음으로",
+    "한 걸음 한 걸음 함께 걷겠습니다.",
+    "이 자리에 함께해 주시면",
+    "더없는 기쁨이 되겠습니다.",
+  ]);
+  assert.deepEqual(weddingContent.story, [
+    "처음 만난 순간부터",
+    "서로의 하루가 되어주었고,",
+    "같은 곳을 바라보며",
+    "함께 계절을 걸어갑니다.",
+  ]);
+  assert.doesNotMatch(app, /weddingContent\.venue\.hall/);
+  assert.match(app, /weddingContent\.venue\.name} · \{weddingContent\.venue\.floor/);
+  assert.match(app, /shareInvitation\(weddingContent, weddingContent\.publishing\.canonicalUrl\)/);
 });
 
 test("production content guard reports each structured unconfirmed item", () => {

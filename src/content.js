@@ -52,12 +52,12 @@ export const SESANG_STICKERS = {
 export const weddingContent = {
   isDesignPlaceholder: true,
   unconfirmedContent: [
-    { key: "venue.floorAndHall", label: "예식장 층·홀" },
-    { key: "copy.invitationMessage", label: "초대 문구 최종 확인" },
-    { key: "copy.story", label: "스토리 문구 최종 확인" },
     { key: "rsvp.contract", label: "RSVP 운영 계약(수집 항목·마감일·수신자·보존 정책)" },
-    { key: "publishing.scope", label: "공개 배포 범위(대표 URL·OG 메타데이터·검색 노출)" },
+    { key: "publishing.discovery", label: "공개 노출 설정(OG 메타데이터·검색 노출)" },
   ],
+  publishing: {
+    canonicalUrl: "https://wdcard.enmsoftware.com/",
+  },
   couple: {
     groom: "김종인",
     bride: "유지혜",
@@ -122,6 +122,7 @@ export const weddingContent = {
   },
   venue: {
     name: "더 바실리움",
+    floor: "8층",
     address: "경기 성남시 분당구 양현로 322",
     mapLinks: {
       naver: "https://naver.me/GOPesFwZ",

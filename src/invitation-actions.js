@@ -21,6 +21,7 @@ function formatUtcStamp(date) {
 export function createCalendarFile(content, now = new Date()) {
   const summary = `${content.couple.groom} · ${content.couple.bride} 결혼식`;
   const description = `${content.event.dateLabel} ${content.event.day} ${content.event.time}`;
+  const venueLabel = [content.venue.name, content.venue.floor].filter(Boolean).join(" ");
   const uidDate = compactDate(content.event.isoDate);
 
   return [
@@ -35,7 +36,7 @@ export function createCalendarFile(content, now = new Date()) {
     `DTSTART;TZID=${content.event.timezone.iana}:${uidDate}T${compactTime(content.event.startTime24h)}`,
     `SUMMARY:${escapeIcsValue(summary)}`,
     `DESCRIPTION:${escapeIcsValue(description)}`,
-    `LOCATION:${escapeIcsValue(`${content.venue.name}, ${content.venue.address}`)}`,
+    `LOCATION:${escapeIcsValue(`${venueLabel}, ${content.venue.address}`)}`,
     "STATUS:CONFIRMED",
     "END:VEVENT",
     "END:VCALENDAR",
@@ -44,10 +45,11 @@ export function createCalendarFile(content, now = new Date()) {
 }
 
 export function eventSummaryText(content) {
+  const venueLabel = [content.venue.name, content.venue.floor].filter(Boolean).join(" ");
   return [
     `${content.couple.groom} · ${content.couple.bride} 결혼식`,
     `${content.event.dateLabel} ${content.event.day} ${content.event.time}`,
-    `${content.venue.name} · ${content.venue.address}`,
+    `${venueLabel} · ${content.venue.address}`,
   ].join("\n");
 }
 

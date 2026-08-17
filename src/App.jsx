@@ -508,7 +508,7 @@ function Location({ notify, compact = false }) {
       </div>
       <VenueMap />
       <div className="venue-copy">
-        <strong>{weddingContent.venue.name}</strong>
+        <strong>{weddingContent.venue.name} · {weddingContent.venue.floor}</strong>
         <span>{weddingContent.venue.address}</span>
         <button className="address-copy" type="button" onClick={copyAddress}>
           <Copy aria-hidden="true" weight="light" /> 주소 복사
@@ -548,7 +548,7 @@ function BottomActions({ notify, pastel = false }) {
   };
   const share = async () => {
     try {
-      const result = await shareInvitation(weddingContent, window.location.href);
+      const result = await shareInvitation(weddingContent, weddingContent.publishing.canonicalUrl);
       if (result === "shared") notify("청첩장을 공유했습니다.");
       if (result === "copied") {
         notify(window.isSecureContext
@@ -752,7 +752,7 @@ function QuietInvitation({ notify }) {
         <PhotoButton photo={photos[0]} index={0} openPhoto={gallery.openPhoto} registerTrigger={gallery.registerTrigger} className="hero-photo is-arched" priority sizes="198px" />
         <h1>{weddingContent.couple.groom} <i aria-hidden="true">&amp;</i> {weddingContent.couple.bride}</h1>
         <EventDate className="date-line" />
-        <p className="venue-line">{weddingContent.venue.name}</p>
+        <p className="venue-line">{weddingContent.venue.name} · {weddingContent.venue.floor}</p>
       </header>
       <ScrollReveal><Greeting /></ScrollReveal>
       <ScrollReveal><FamilyIntroduction /></ScrollReveal>
@@ -833,7 +833,7 @@ function PastelInvitation({ notify }) {
         <div className="pastel-hero-copy">
           <h1>{weddingContent.couple.groom} <b aria-hidden="true">·</b> {weddingContent.couple.bride}</h1>
           <EventDate className="date-line" />
-          <p className="pastel-venue-line">{weddingContent.venue.name}</p>
+          <p className="pastel-venue-line">{weddingContent.venue.name} · {weddingContent.venue.floor}</p>
         </div>
       </header>
       <ScrollReveal><Greeting /></ScrollReveal>

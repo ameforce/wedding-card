@@ -12,7 +12,7 @@ test("calendar export preserves the confirmed Asia/Seoul start and does not infe
   assert.match(calendar, /DTSTART;TZID=Asia\/Seoul:20261227T150000/);
   assert.doesNotMatch(calendar, /DTEND/);
   assert.match(calendar, /SUMMARY:김종인 · 유지혜 결혼식/);
-  assert.match(calendar, /LOCATION:더 바실리움\\, 경기 성남시 분당구 양현로 322/);
+  assert.match(calendar, /LOCATION:더 바실리움 8층\\, 경기 성남시 분당구 양현로 322/);
   assert.match(calendar, /DTSTAMP:20260816T000000Z/);
   assert.doesNotMatch(calendar, /KST/);
   assert.ok(calendar.endsWith("\r\n"));
@@ -21,7 +21,7 @@ test("calendar export preserves the confirmed Asia/Seoul start and does not infe
 test("shareable event summary contains confirmed date, venue and address without a visible timezone label", () => {
   assert.equal(
     eventSummaryText(weddingContent),
-    "김종인 · 유지혜 결혼식\n2026년 12월 27일 일요일 오후 3시\n더 바실리움 · 경기 성남시 분당구 양현로 322",
+    "김종인 · 유지혜 결혼식\n2026년 12월 27일 일요일 오후 3시\n더 바실리움 8층 · 경기 성남시 분당구 양현로 322",
   );
 });
 
