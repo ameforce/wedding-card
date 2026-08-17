@@ -24,11 +24,11 @@ async function panel(input, { width, height, title, fit = "cover", position = "t
 }
 
 const referenceOne = `${attachmentDirectory}/1-사진-1.jpg`;
-const implementation = fileURLToPath(new URL("pastel-paper-script-390-top.png", qa));
+const implementation = fileURLToPath(new URL("pastel-wordmark-390-top.png", qa));
 
 const referencePanels = await Promise.all([
   panel(referenceOne, { width: 560, height: 620, title: "SOURCE · thin connected brush script", fit: "contain", position: "center" }),
-  panel(implementation, { width: 390, height: 620, title: "IMPLEMENTATION · Mrs Saint Delafield · -10°" }),
+  panel(implementation, { width: 390, height: 620, title: "IMPLEMENTATION · Allison DOM lockup · -8°" }),
 ]);
 await sharp({ create: { width: 980, height: 640, channels: 4, background: "#dedbd4" } })
   .composite([
@@ -36,9 +36,9 @@ await sharp({ create: { width: 980, height: 640, channels: 4, background: "#dedb
     { input: referencePanels[1], left: 580, top: 10 },
   ])
   .png()
-  .toFile(fileURLToPath(new URL("pastel-paper-script-reference-comparison.png", qa)));
+  .toFile(fileURLToPath(new URL("pastel-wordmark-reference-comparison.png", qa)));
 
-console.log("Created the current Pastel paper and script reference composite.");
+console.log("Created the current Pastel wordmark reference composite.");
 
 const paperReferenceOne = "C:/Users/enmso/AppData/Local/Temp/codex-clipboard-d0f90eb5-338b-41c5-9c61-0526aee5acd7.png";
 const paperReferenceTwo = "C:/Users/enmso/AppData/Local/Temp/codex-clipboard-f79f8fe5-9849-4367-a7e0-8479293a688a.png";

@@ -1,5 +1,5 @@
 @import "@fontsource-variable/cormorant-garamond";
-@import "@fontsource/mrs-saint-delafield/400.css";
+@import "@fontsource/allison/400.css";
 @import "@fontsource-variable/noto-serif-kr";
 @import "@fontsource-variable/noto-sans-kr";
 
@@ -101,25 +101,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .photo-button img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .3s ease, filter .3s ease; }
 .photo-button:hover img, .photo-button:focus-visible img { filter: saturate(.94) contrast(.98); transform: scale(1.025); }
 .photo-button.is-fallback { background: #d9d4ce; cursor: default; }
-.photo-overlay-label {
-  --hero-label-rotation: 0deg;
-  position: absolute;
-  z-index: 2;
-  top: clamp(16px, 5vw, 22px);
-  left: clamp(17px, 5vw, 23px);
-  color: rgba(255, 255, 255, .96);
-  font-family: "Cormorant Garamond Variable", serif;
-  font-size: clamp(21px, 6.4vw, 27px);
-  font-weight: 450;
-  line-height: 1;
-  letter-spacing: .035em;
-  pointer-events: none;
-  text-shadow: 0 2px 14px rgba(25, 38, 48, .5);
-  transform: rotate(var(--hero-label-rotation));
-  animation: hero-label-enter .72s cubic-bezier(.22, .72, .26, 1) .28s both;
-}
-.photo-overlay-label-line { display: block; white-space: nowrap; }
-
 .section-reveal {
   opacity: 0;
   transform: translateY(14px);
@@ -132,10 +113,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-invitation > header + .section-reveal { margin-top: 28px; }
 .pastel-invitation > .section-reveal + .section-reveal { margin-top: 28px; }
 
-@keyframes hero-label-enter {
-  from { opacity: 0; transform: translateY(8px) rotate(var(--hero-label-rotation)); }
-  to { opacity: 1; transform: translateY(0) rotate(var(--hero-label-rotation)); }
-}
 .crop-mark { position: absolute; right: 7px; bottom: 7px; width: 8px; height: 8px; border-right: 1px solid rgba(255,255,255,.65); border-bottom: 1px solid rgba(255,255,255,.65); }
 
 .sesang-cameo { position: absolute; z-index: 4; pointer-events: none; }
@@ -280,23 +257,38 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-hero { position: relative; padding: clamp(26px, 7vw, 34px) 0 clamp(34px, 9vw, 42px); overflow: visible; background: transparent; }
 .pastel-hero-intro { padding: 0 30px clamp(30px, 8vw, 38px); font-family: "Noto Serif KR Variable", serif; font-size: 14px; line-height: 1.8; text-align: center; }
 .pastel-hero-intro p { margin: 0; }
-.pastel-hero-photo { width: 86%; aspect-ratio: 4 / 5; margin: 0 auto clamp(32px, 8vw, 40px); overflow: visible; border-radius: 50% 50% 18px 18px / 20% 20% 18px 18px; }
+.pastel-hero-media { position: relative; width: 86%; aspect-ratio: 4 / 5; margin: 0 auto clamp(32px, 8vw, 40px); overflow: visible; }
+.pastel-hero-photo { width: 100%; height: 100%; overflow: hidden; border-radius: 50% 50% 18px 18px / 20% 20% 18px 18px; }
 .pastel-hero-photo img { border-radius: inherit; filter: saturate(.88) contrast(.96) brightness(1.02); }
-.pastel-hero-photo .photo-overlay-label {
-  --hero-label-rotation: -10deg;
-  top: clamp(-24px, -5.5vw, -17px);
-  left: clamp(-23px, -5vw, -15px);
-  display: grid;
-  justify-items: start;
+.pastel-hero-wordmark {
+  --hero-wordmark-rotation: -8deg;
+  position: absolute;
+  z-index: 2;
+  top: clamp(-6px, -.8vw, -2px);
+  left: clamp(-27px, -6vw, -20px);
+  display: flex;
+  width: max-content;
+  flex-direction: column;
+  align-items: flex-start;
   color: rgba(255, 253, 248, .98);
-  font-family: "Mrs Saint Delafield", cursive;
-  font-size: clamp(66px, 18vw, 78px);
+  font-family: "Allison", cursive;
+  font-size: clamp(74px, 20.8vw, 88px);
   font-weight: 400;
-  line-height: .54;
-  letter-spacing: .005em;
-  text-shadow: 0 1px 6px rgba(25, 38, 48, .22);
+  line-height: .58;
+  letter-spacing: .004em;
+  pointer-events: none;
+  text-shadow: 0 1px 1px rgba(25, 38, 48, .16);
+  transform: rotate(var(--hero-wordmark-rotation));
+  transform-origin: 18% 40%;
+  animation: hero-wordmark-enter .72s cubic-bezier(.22, .72, .26, 1) .28s both;
 }
-.pastel-hero-photo .photo-overlay-label-line.is-day { margin-top: clamp(7px, 2vw, 10px); margin-left: clamp(112px, 32vw, 138px); }
+.pastel-hero-wordmark-line { display: block; white-space: nowrap; transform: scaleX(1.04) skewX(-2deg); transform-origin: left center; }
+.pastel-hero-wordmark-line.is-day { margin-top: clamp(5px, 1.6vw, 7px); margin-left: clamp(146px, 39vw, 166px); transform: translateY(-2px) scaleX(1.08) skewX(-1deg); }
+
+@keyframes hero-wordmark-enter {
+  from { opacity: 0; transform: translateY(8px) rotate(var(--hero-wordmark-rotation)); }
+  to { opacity: 1; transform: translateY(0) rotate(var(--hero-wordmark-rotation)); }
+}
 .pastel-hero-copy { position: relative; display: flex; padding: 0 30px; flex-direction: column; align-items: center; justify-content: center; background: transparent; text-align: center; }
 .pastel-hero h1 { margin: 0; font-family: "Noto Serif KR Variable", serif; font-size: 29px; font-weight: 430; letter-spacing: .12em; }
 .pastel-hero h1 b { font-weight: 300; }
@@ -494,7 +486,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .section-reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
-  .photo-overlay-label { opacity: 1 !important; animation: none !important; transition: none !important; }
+  .pastel-hero-wordmark { opacity: 1 !important; animation: none !important; transition: none !important; }
   .sesang-sticker-motion { opacity: 1 !important; transform: none !important; transition: none !important; }
   .sesang-cameo img { animation: none !important; }
 }

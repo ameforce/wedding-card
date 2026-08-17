@@ -172,6 +172,7 @@ test("Pastel gallery uses portrait media and an accessible lightbox", () => {
 
 test("Pastel hero uses a breathing-room inset photo frame without a heavy treatment", () => {
   const pastelHero = css.match(/\.pastel-hero\s*\{([^}]+)\}/)?.[1] ?? "";
+  const pastelHeroMedia = css.match(/\.pastel-hero-media\s*\{([^}]+)\}/)?.[1] ?? "";
   const pastelHeroPhoto = css.match(/\.pastel-hero-photo\s*\{([^}]+)\}/)?.[1] ?? "";
   const pastelHeroCopy = css.match(/\.pastel-hero-copy\s*\{([^}]+)\}/)?.[1] ?? "";
   const pastelHeroMarkup = app.match(/<header className="pastel-hero">([\s\S]*?)<\/header>/)?.[1] ?? "";
@@ -184,22 +185,26 @@ test("Pastel hero uses a breathing-room inset photo frame without a heavy treatm
   assert.match(pastelHero, /background:\s*transparent/);
   assert.match(pastelHeroCopy, /background:\s*transparent/);
   assert.doesNotMatch(pastelHeroCopy, /pastel-watercolor-wash|border|box-shadow/);
-  assert.match(pastelHeroPhoto, /width:\s*86%/);
-  assert.match(pastelHeroPhoto, /margin:\s*0\s+auto\s+clamp\(32px,\s*8vw,\s*40px\)/);
+  assert.match(pastelHeroMedia, /width:\s*86%/);
+  assert.match(pastelHeroMedia, /margin:\s*0\s+auto\s+clamp\(32px,\s*8vw,\s*40px\)/);
+  assert.match(pastelHeroMedia, /overflow:\s*visible/);
+  assert.match(pastelHeroPhoto, /width:\s*100%/);
   assert.match(pastelHeroPhoto, /border-radius:\s*50%\s+50%\s+18px\s+18px\s*\/\s*20%\s+20%\s+18px\s+18px/);
   assert.doesNotMatch(pastelHeroPhoto, /(?:border|box-shadow)\s*:/);
-  assert.match(app, /overlayLabel=\{PASTEL_HERO_LABEL\}/);
-  assert.match(app, /<span className="photo-overlay-label-line">Our Wedding<\/span>/);
-  assert.match(app, /<span className="photo-overlay-label-line is-day">Day<\/span>/);
-  assert.match(app, /className="photo-overlay-label"/);
-  const overlay = css.match(/\.pastel-hero-photo \.photo-overlay-label\s*\{([^}]+)\}/)?.[1] ?? "";
-  assert.match(css, /\.photo-overlay-label\s*\{[^}]*position:\s*absolute/);
-  assert.match(overlay, /font-family:\s*"Mrs Saint Delafield", cursive/);
-  assert.match(overlay, /top:\s*clamp\(-24px,\s*-5\.5vw,\s*-17px\)/);
-  assert.match(overlay, /left:\s*clamp\(-23px,\s*-5vw,\s*-15px\)/);
-  assert.match(overlay, /--hero-label-rotation:\s*-10deg/);
-  assert.match(css, /\.pastel-hero-photo\s*\{[^}]*overflow:\s*visible/);
-  assert.match(css, /\.pastel-hero-photo \.photo-overlay-label-line\.is-day\s*\{[^}]*margin-left:\s*clamp\(112px,\s*32vw,\s*138px\)/);
+  assert.match(app, /const PASTEL_HERO_WORDMARK/);
+  assert.match(app, /className="pastel-hero-wordmark" aria-label="Our Wedding Day"/);
+  assert.match(app, /<span className="pastel-hero-wordmark-line" aria-hidden="true">Our Wedding<\/span>/);
+  assert.match(app, /<span className="pastel-hero-wordmark-line is-day" aria-hidden="true">Day<\/span>/);
+  assert.match(app, /\{PASTEL_HERO_WORDMARK\}/);
+  const wordmark = css.match(/\.pastel-hero-wordmark\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.match(wordmark, /position:\s*absolute/);
+  assert.match(wordmark, /font-family:\s*"Allison", cursive/);
+  assert.match(wordmark, /--hero-wordmark-rotation:\s*-8deg/);
+  assert.match(wordmark, /text-shadow:\s*0\s+1px\s+1px\s+rgba\(25,\s*38,\s*48,\s*\.16\)/);
+  assert.match(css, /\.pastel-hero-wordmark-line\s*\{[^}]*scaleX\(1\.04\)\s+skewX\(-2deg\)/);
+  assert.match(css, /\.pastel-hero-wordmark-line\.is-day\s*\{[^}]*margin-left:\s*clamp\(146px,\s*39vw,\s*166px\)/);
+  assert.doesNotMatch(app, /overlayLabel|photo-overlay-label|PASTEL_HERO_LABEL/);
+  assert.doesNotMatch(css, /Mrs Saint Delafield|hero-label-enter|photo-overlay-label/);
 });
 
 test("Pastel uses one continuous watercolor surface and an opt-in licensed audio control", () => {
@@ -207,7 +212,8 @@ test("Pastel uses one continuous watercolor surface and an opt-in licensed audio
   assert.ok(existsSync(new URL("../public/assets/design/pastel-watercolor-surface.webp", import.meta.url)));
   assert.ok(existsSync(new URL("../public/assets/audio/touching-moments-one-pulse.mp3", import.meta.url)));
   assert.ok(existsSync(new URL("../docs/audio-license.md", import.meta.url)));
-  assert.match(css, /@import "@fontsource\/mrs-saint-delafield\/400\.css"/);
+  assert.match(css, /@import "@fontsource\/allison\/400\.css"/);
+  assert.doesNotMatch(css, /@fontsource\/mrs-saint-delafield/);
   assert.doesNotMatch(css, /@fontsource\/(?:sacramento|allura|parisienne|italianno|alex-brush)/);
   assert.match(css, /\.pastel-invitation\s*\{[^}]*isolation:\s*isolate/);
   assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*?pastel-watercolor-surface\.webp[\s\S]*?background-size:\s*100% 100%/);

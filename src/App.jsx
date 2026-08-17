@@ -36,11 +36,11 @@ const VARIANTS = {
   },
 };
 
-const PASTEL_HERO_LABEL = (
-  <>
-    <span className="photo-overlay-label-line">Our Wedding</span>
-    <span className="photo-overlay-label-line is-day">Day</span>
-  </>
+const PASTEL_HERO_WORDMARK = (
+  <span className="pastel-hero-wordmark" aria-label="Our Wedding Day">
+    <span className="pastel-hero-wordmark-line" aria-hidden="true">Our Wedding</span>
+    <span className="pastel-hero-wordmark-line is-day" aria-hidden="true">Day</span>
+  </span>
 );
 
 function getVariant() {
@@ -48,7 +48,7 @@ function getVariant() {
   return value === "pastel" ? "pastel" : "quiet";
 }
 
-function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes, overlayLabel }) {
+function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes }) {
   const broken = new URLSearchParams(window.location.search).get("brokenAsset") === "1";
   const [failed, setFailed] = useState(false);
   return (
@@ -72,7 +72,6 @@ function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "",
           onError={() => setFailed(true)}
         />
       )}
-      {overlayLabel && <span className="photo-overlay-label" aria-hidden="true">{overlayLabel}</span>}
       <span className="sr-only">사진 크게 보기</span>
     </button>
   );
@@ -832,16 +831,18 @@ function PastelInvitation({ notify }) {
         <div className="pastel-hero-intro">
           <p>저희 두 사람<br />새로운 시작을 함께합니다</p>
         </div>
-        <PhotoButton
-          photo={photos[0]}
-          index={0}
-          openPhoto={gallery.openPhoto}
-          registerTrigger={gallery.registerTrigger}
-          className="pastel-hero-photo is-inset-frame"
-          priority
-          sizes="(min-width: 768px) 370px, 86vw"
-          overlayLabel={PASTEL_HERO_LABEL}
-        />
+        <div className="pastel-hero-media">
+          <PhotoButton
+            photo={photos[0]}
+            index={0}
+            openPhoto={gallery.openPhoto}
+            registerTrigger={gallery.registerTrigger}
+            className="pastel-hero-photo is-inset-frame"
+            priority
+            sizes="(min-width: 768px) 370px, 86vw"
+          />
+          {PASTEL_HERO_WORDMARK}
+        </div>
         <div className="pastel-hero-copy">
           <h1>{weddingContent.couple.groom} <b aria-hidden="true">·</b> {weddingContent.couple.bride}</h1>
           <EventDate className="date-line" />

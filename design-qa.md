@@ -1,24 +1,25 @@
 # Design QA
 
-## Current accepted pass — fine paper surface and reference-matched brush lettering
+## Current accepted pass — constructed brush-signature wordmark
 
 ### Source truth and normalized evidence
 
 - Active lettering source truth is `C:\Users\enmso\.codex\codex-remote-attachments\019ff501-f8d7-7280-b3f3-9fed0fbb6140\84FA598D-9FE2-4208-99B0-77A056F6295A\1-사진-1.jpg` (1080 × 286). It supersedes the earlier two-image font decision for this pass. The authoritative paper sources are the supplied 1080 × 2340 mobile screenshots `C:\Users\enmso\AppData\Local\Temp\codex-clipboard-d0f90eb5-338b-41c5-9c61-0526aee5acd7.png` and `C:\Users\enmso\AppData\Local\Temp\codex-clipboard-f79f8fe5-9849-4367-a7e0-8479293a688a.png`.
-- Browser-rendered implementation evidence is `artifacts/qa/pastel-paper-script-390-top.png`, `artifacts/qa/pastel-paper-script-390-middle.png`, and `artifacts/qa/pastel-paper-script-390-bottom.png`, each 390 × 844 pixels at CSS viewport 390 × 844 and `devicePixelRatio: 1`, with the lightbox closed and capture mode enabled.
-- Focused combined comparison is `artifacts/qa/pastel-paper-script-reference-comparison.png` (980 × 640). It places the complete 1080 × 286 lettering source and the native-density 390px implementation top in one comparison input. The source is a typography crop rather than a full invitation viewport, so only lettering form, stroke weight, terminal shape, and diagonal are judged from it.
+- Browser-rendered wordmark evidence is `artifacts/qa/pastel-wordmark-390-top.png` at CSS viewport 390 × 844 and `devicePixelRatio: 1`, with the lightbox closed and capture mode enabled.
+- Focused combined comparison is `artifacts/qa/pastel-wordmark-reference-comparison.png` (980 × 640). It places the complete 1080 × 286 lettering source and the native-density 390px implementation top in one comparison input. The source is a typography crop rather than a full invitation viewport, so lettering form, stroke weight, terminal shape, rhythm, proportion, overlap, and diagonal are the comparison surfaces.
 - `artifacts/qa/pastel-paper-fibers-reference-comparison.png` (1210 × 1270) is the same-input paper comparison: both mobile sources normalized to 390px width, the native-density IAB top/middle/bottom implementation captures, and the repeat-safe implementation microtexture asset. It supplies both full-view section evidence and a focused asset-level fiber comparison. A stitched browser full-page capture was excluded because the in-app Browser duplicated fixed regions while stitching.
 
 ### Findings and comparison history
 
-1. Initial P1 — the Sacramento label had inflated loops, weak connected-brush rhythm, and only a `-4deg` rotation, so it read almost horizontal against the new source. Fix: compared Hurricane, WindSong, Meow Script, Mrs Saint Delafield, and Birthstone on the same photo and selected self-hosted OFL-1.1 Mrs Saint Delafield; increased the static counter-clockwise rotation to `-10deg`, sized it at 66–78px, and kept the required two-line `Our Wedding` / `Day` composition.
-2. Initial P1 — the former 864 × 1821 full-page raster carried visible embedded texture while being enlarged, creating a macro-image impression. The first revision increased its resolution but retained long vertical streaks and broad fibrous bands, which still differed materially from the mobile sources' dense, low-contrast, short mottled cold-press fibers.
-3. Texture fix — blurred the 1536 × 4096 watercolor surface until it carries low-frequency powder-blue/blush color only. Derived a clean 350 × 350 crop from the first mobile source, mirrored it on both axes into a 700 × 700 repeat-safe `pastel-paper-fibers.webp`, and rendered that real raster microtexture at its reference-equivalent 234px CSS scale and 34% multiply opacity.
-4. Post-fix evidence — at 390px the live label bounds remain `2.5..270.1px` inside the invitation while the photo begins at `27.3px`; it extends intentionally past the photo edge without clipping, stays clear of the groom's head, and computes to the exact `-10deg` transform matrix. The authoritative top, middle, and bottom IAB captures now show short dense mottled fibers without the former vertical streaks, pixel blocks, repeat seams, or a detached panel.
+1. Rejected treatment — the earlier formal-calligraphy rendering used inflated loops, compressed row overlap, and a decorative rather than signature-like rhythm. It is removed from source and dependencies.
+2. Replacement — the visible wording remains real accessible DOM text and now uses self-hosted Allison under OFL-1.1. A two-line `Our Wedding` / `Day` lockup combines an `-8deg` group rotation with independent line scaling, skewing, and offsets; no SVG lettering or generated text asset is used.
+3. Texture preservation — the existing low-frequency watercolor surface and repeat-safe paper fibers remain unchanged; the real couple photos are byte-for-byte untouched.
+4. First comparison P1 — the replacement's stroke character passed, but its 236px bound occupied only 60.5% of the page and read like a small corner caption against a source wordmark spanning roughly 80% of its image. The lockup was enlarged by 1.26× and raised about 10px without changing the approved crop or interlock.
+5. Final evidence — at 390px the rotated wordmark bounds are `x=-1.18..296.53px` and `y=103.44..242.67px`; its 297.71px width occupies 76.3% of the page and overlaps the photo at `x=27.30..362.69px`, `y=138.86..558.09px`. The transformed box crosses zero only because of rotation; the rendered white stroke remains visibly intact. It now reads as the primary photo-spanning signature, stays clear of the groom's head, and the page retains zero horizontal overflow.
 
 ### Required fidelity surfaces
 
-- Fonts and typography: Mrs Saint Delafield is thinner, more continuously connected, and has longer ascenders/descenders than the superseded Sacramento treatment. The white label keeps a light 1px/6px shadow for contrast without thickening its strokes.
+- Fonts and typography: Allison supplies thin rounded connected strokes and long ascenders/descenders closer to the reference's brush-signature character. Per-line transforms make the two rows read as one lockup, and the white label uses only a restrained 1px/1px shadow so the strokes stay crisp.
 - Spacing and layout rhythm: the approved 86% arched photo, `50% 58%` crop, intro/photo/identity order, and clear space above the groom remain unchanged. At 360, 390, 430, 768, and 1440px the label remains inside the invitation with no horizontal overflow.
 - Colors and visual tokens: the continuous warm-ivory paper with distributed powder-blue/blush wash remains behind all sections. No CSS radial gradient, repeat band, separate panel, or dark gallery surface was added.
 - Image quality and asset fidelity: `pastel-watercolor-surface.webp` is a 1536 × 4096, 22,266-byte low-frequency color field; `pastel-paper-fibers.webp` is the 700 × 700, 15,374-byte reference-derived repeat-safe microtexture. The real couple photos are byte-for-byte untouched.
@@ -26,10 +27,11 @@
 
 ### Responsive, interaction, and verification evidence
 
-- Layout checks at 360, 390, 430, 768, and 1440px remain unchanged: zero document/invitation overflow, an exact 86% photo-width ratio, and the intended font loaded. Final paper evidence is the authoritative IAB 390 × 844, DPR1 capture set at scroll positions 0, 1400, and 3200; the watercolor is nonrepeating and the 234px raster microtexture repeats without a visible edge.
+- IAB layout checks at 360, 390, 430, 768, and 1440px passed for both Pastel and Quiet: zero document/invitation overflow, zero completed-image failures, and zero console warnings or errors. Pastel loaded Allison and computed the exact `-8deg` transform at every width. The lazy venue map was scrolled into view and confirmed loaded after 500ms; its initial top-only `naturalWidth=0` observation was deferred loading, not an asset failure.
 - The hero opened the shared lightbox with focus on `갤러리 닫기`, locked body scroll, and Escape restored focus to `1번째 사진 크게 보기` with the 2px solid/3px-offset focus outline.
-- Emulated `prefers-reduced-motion: reduce` reported `labelAnimation: none`, the static `-10deg` matrix, reveal opacity `1`, reveal transform `none`, and transition duration `0s`. Browser warning/error logs were empty.
-- `npm run test:ui`: 35/35 passed; `npm run test:sites`: 12/12 passed; `npm run lint`: passed; `npm run build:design`: passed. The build contains `dist/client/index.html`, `dist/server/index.js`, `dist/.openai/hosting.json`, the 22,266-byte low-frequency color surface, the 15,374-byte raster microtexture, and the Mrs Saint Delafield font bundle.
+- The IAB reduced-motion canary reported `match=true`, `animationName=none`, opacity `1`, the unchanged static `-8deg` transform, and zero overflow.
+- The dependency license was verified twice: npm package metadata reports `OFL-1.1`, and the installed package includes the SIL Open Font License 1.1 with copyright attributed to The Allison Project Authors.
+- `npm run test:ui`: 35/35 passed; `npm run test:sites`: 12/12 passed; `npm run lint`: passed; `npm run build:design`: passed. The build contains `dist/client/index.html`, `dist/server/index.js`, `dist/.openai/hosting.json`, and the Allison font bundle.
 
 final result: passed
 
@@ -37,7 +39,7 @@ final result: passed
 
 ### Implemented outcome
 
-- Earlier handwritten-script experiments are superseded by the current Sacramento decision and must not be used as implementation or visual-reference evidence. The approved 86% arched frame and `50% 58%` photo focal position remain unchanged.
+- Earlier handwritten-script experiments are superseded by the current constructed Allison lockup and must not be used as implementation or visual-reference evidence. The approved 86% arched frame and `50% 58%` photo focal position remain unchanged.
 - The supplied watercolor wash is distributed through the full Pastel invitation at three natural positions, with low-opacity blue/blush support washes and a local procedural paper-grain asset behind content. It is no longer visually concentrated only at the hero's upper edge.
 - Pastel inter-section reveal gaps increase from 14px to 28px and its internal section padding is more generous, without adding spacer sections or changing Quiet spacing.
 - Pastel contact and account disclosures are independently collapsed by default. Groom/bride emoji markers appear on all four summary titles; each account has an accessible copy control. Account values are modeled once in source and intentionally omitted from tests, logs, and this QA record.
@@ -45,7 +47,7 @@ final result: passed
 
 ### Live browser evidence
 
-- At 360, 390, 430, 768, and 1440px, the earlier Pastel version had no horizontal overflow or loaded-image failures. The current-font evidence is the top-level Sacramento pass.
+- At 360, 390, 430, 768, and 1440px, the earlier Pastel version had no horizontal overflow or loaded-image failures. The current-font evidence is the top-level constructed-wordmark pass.
 - The two Pastel account disclosures were initially closed, the two copy controls remained at least 44px tall, and a copy click produced the expected success feedback without exposing the value in QA evidence.
 - The shared Pastel lightbox opened from the hero with focus on `갤러리 닫기`; Escape closed it and restored focus to the hero trigger. Under emulated reduced motion, the label animation was disabled while its static diagonal stayed intact, and reveal sections rendered opaque with no transform.
 - Quiet regression at the same five widths found no overflow or loaded-image failures, exactly four photo triggers, no account disclosure, and one calendar plus one share action. Its lightbox kept the same keyboard focus restoration behavior.
