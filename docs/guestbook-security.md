@@ -12,7 +12,7 @@ Author passwords are length-validated at 4–72 characters, then processed with 
 
 Public create, unlock, and update responses never expose the internal entry id. Lookup and update return the same generic authentication failure for a missing name, wrong password, or unsafe legacy duplicate. A D1 unique index provides the final duplicate-name race guard.
 
-Guestbook messages have a permanent-retention policy. The Worker has no deletion or expiry endpoint, migration, TTL, or cleanup job for entries; do not add one without an explicit change to this decision. This is an application retention policy, not a substitute for backup and D1 operator access controls.
+Guestbook messages have a permanent-retention policy. The Worker has no deletion or expiry endpoint, migration, TTL, or cleanup job for entries; do not add one without an explicit change to this decision. This application retention policy has no separate backup commitment; D1 operator access controls remain required.
 
 Production requires all of the following before guestbook use:
 

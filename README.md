@@ -18,7 +18,9 @@ npm run dev
 신랑·신부 이름, 예식 일시, 예식장명과 8층 안내, 주소, 교통·주차 안내, 지도 링크, 초대·스토리 문구와 대표 URL `https://wdcard.enmsoftware.com/`은 사용자 확인값을 사용합니다. 다음 미확정 콘텐츠는 `weddingContent.unconfirmedContent`에 구조화되어 있으며, 화면에는 `DESIGN REVIEW`가 표시되고 `npm run build`는 항목별 목록을 출력한 뒤 의도적으로 실패합니다. 디자인 검토용 정적 결과만 만들 때는 `npm run build:design`을 사용합니다.
 
 - RSVP 운영 계약: 수집 항목, 마감일, 수신자, 보존 정책
-- 공개 노출 설정: OG 메타데이터, 검색 노출
+- 공유 미리보기 설정: OG 제목, 설명, 이미지
+
+검색엔진 노출은 비활성화로 확정했습니다. 공개 HTML의 robots 메타, Static Assets의 `_headers`, Worker 응답의 `X-Robots-Tag`가 모두 `noindex`를 선언하며, 크롤러가 이 지시를 읽지 못하게 만드는 전체 사이트 `robots.txt` 차단은 사용하지 않습니다.
 
 방명록의 D1 저장소와 관리자 인증 바인딩은 배포 전 런타임 준비 사항이며, 위 청첩장 콘텐츠 미확정 목록과는 별도로 관리합니다.
 

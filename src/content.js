@@ -53,10 +53,11 @@ export const weddingContent = {
   isDesignPlaceholder: true,
   unconfirmedContent: [
     { key: "rsvp.contract", label: "RSVP 운영 계약(수집 항목·마감일·수신자·보존 정책)" },
-    { key: "publishing.discovery", label: "공개 노출 설정(OG 메타데이터·검색 노출)" },
+    { key: "publishing.og", label: "공유 미리보기 설정(OG 제목·설명·이미지)" },
   ],
   publishing: {
     canonicalUrl: "https://wdcard.enmsoftware.com/",
+    searchIndexing: false,
   },
   couple: {
     groom: "김종인",

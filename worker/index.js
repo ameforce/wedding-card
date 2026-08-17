@@ -2,6 +2,17 @@ const API_PREFIX = "/api/guestbook";
 const PASSWORD_ITERATIONS = 600_000;
 const MAX_BODY_BYTES = 8_192;
 const GUESTBOOK_RETENTION = "permanent";
+const SEARCH_ROBOTS_DIRECTIVE = "noindex, nofollow, noarchive, nosnippet, noimageindex";
+
+function withSearchPrivacy(response) {
+  const headers = new Headers(response.headers);
+  headers.set("x-robots-tag", SEARCH_ROBOTS_DIRECTIVE);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 function json(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
@@ -238,19 +249,21 @@ async function handleGuestbook(request, env, url) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith(API_PREFIX)) return handleGuestbook(request, env, url);
+    if (url.pathname.startsWith(API_PREFIX)) {
+      return withSearchPrivacy(await handleGuestbook(request, env, url));
+    }
 
     const response = await env.ASSETS.fetch(request);
     const acceptsHtml = request.headers.get("accept")?.includes("text/html");
 
     if (response.status !== 404 || !acceptsHtml || !["GET", "HEAD"].includes(request.method)) {
-      return response;
+      return withSearchPrivacy(response);
     }
 
     const indexUrl = new URL(request.url);
     indexUrl.pathname = "/index.html";
     indexUrl.search = "";
-    return env.ASSETS.fetch(new Request(indexUrl, request));
+    return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
   },
 };
 

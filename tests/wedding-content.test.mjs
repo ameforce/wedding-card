@@ -9,6 +9,8 @@ import { getCalendarMonth, WEDDING_PHOTOS, weddingContent } from "../src/content
 
 const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+const staticHeaders = await readFile(new URL("../public/_headers", import.meta.url), "utf8");
 const guestbookApi = await readFile(new URL("../src/guestbook-api.js", import.meta.url), "utf8");
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -41,10 +43,11 @@ test("user-confirmed wedding facts are represented without filling unknown field
   assert.equal("hall" in weddingContent.venue, false);
   assert.equal(weddingContent.venue.address, "경기 성남시 분당구 양현로 322");
   assert.equal(weddingContent.publishing.canonicalUrl, "https://wdcard.enmsoftware.com/");
+  assert.equal(weddingContent.publishing.searchIndexing, false);
   assert.equal(weddingContent.isDesignPlaceholder, true);
   assert.deepEqual(weddingContent.unconfirmedContent, [
     { key: "rsvp.contract", label: "RSVP 운영 계약(수집 항목·마감일·수신자·보존 정책)" },
-    { key: "publishing.discovery", label: "공개 노출 설정(OG 메타데이터·검색 노출)" },
+    { key: "publishing.og", label: "공유 미리보기 설정(OG 제목·설명·이미지)" },
   ]);
   assert.deepEqual(weddingContent.message, [
     "서로를 아끼며 믿음으로",
@@ -61,6 +64,12 @@ test("user-confirmed wedding facts are represented without filling unknown field
   assert.doesNotMatch(app, /weddingContent\.venue\.hall/);
   assert.match(app, /weddingContent\.venue\.name} · \{weddingContent\.venue\.floor/);
   assert.match(app, /shareInvitation\(weddingContent, weddingContent\.publishing\.canonicalUrl\)/);
+});
+
+test("public delivery declares a search indexing opt-out without blocking crawler access", () => {
+  assert.match(html, /<meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex" \/>/);
+  assert.match(staticHeaders, /\/\*[\s\S]*X-Robots-Tag:\s*noindex, nofollow, noarchive, nosnippet, noimageindex/);
+  assert.equal(existsSync(new URL("../public/robots.txt", import.meta.url)), false);
 });
 
 test("production content guard reports each structured unconfirmed item", () => {

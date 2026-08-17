@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import worker from "../worker/index.js";
 
@@ -15,6 +15,7 @@ test("serves existing static assets without a fallback", async () => {
   });
 
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-robots-tag"), "noindex, nofollow, noarchive, nosnippet, noimageindex");
   assert.deepEqual(calls, ["/assets/app.js"]);
 });
 
@@ -38,6 +39,7 @@ test("falls back to index.html for an unknown app route", async () => {
   );
 
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-robots-tag"), "noindex, nofollow, noarchive, nosnippet, noimageindex");
   assert.deepEqual(calls, ["/flow/step-two?source=share", "/index.html"]);
 });
 
@@ -63,6 +65,8 @@ test("does not turn missing API or write requests into the app shell", async () 
 
 test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/index.html", import.meta.url));
+  const staticHeaders = await readFile(new URL("../dist/client/_headers", import.meta.url), "utf8");
+  assert.match(staticHeaders, /X-Robots-Tag:\s*noindex, nofollow, noarchive, nosnippet, noimageindex/);
   await access(new URL("../dist/server/index.js", import.meta.url));
   await access(new URL("../dist/.openai/hosting.json", import.meta.url));
   await access(new URL("../dist/.openai/drizzle/0001_guestbook.sql", import.meta.url));
