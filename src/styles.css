@@ -1,5 +1,5 @@
 @import "@fontsource-variable/cormorant-garamond";
-@import "@fontsource/sacramento/400.css";
+@import "@fontsource/mrs-saint-delafield/400.css";
 @import "@fontsource-variable/noto-serif-kr";
 @import "@fontsource-variable/noto-sans-kr";
 
@@ -266,15 +266,15 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-invitation::after { position: absolute; z-index: 0; inset: 0; content: ""; pointer-events: none; }
 .pastel-invitation::before {
   background-image: url("/assets/design/pastel-watercolor-surface.webp");
-  background-position: 20% center;
+  background-position: center top;
   background-repeat: no-repeat;
-  background-size: auto 100%;
-  opacity: .92;
+  background-size: 100% 100%;
+  opacity: .68;
 }
 .pastel-invitation::after {
-  background: url("/assets/design/pastel-paper-grain.svg") 0 0 / 150px 150px repeat;
+  background: url("/assets/design/pastel-paper-grain.svg") 0 0 / 96px 96px repeat;
   mix-blend-mode: multiply;
-  opacity: .22;
+  opacity: .16;
 }
 .pastel-invitation > * { position: relative; z-index: 1; }
 .pastel-hero { position: relative; padding: clamp(26px, 7vw, 34px) 0 clamp(34px, 9vw, 42px); overflow: visible; background: transparent; }
@@ -283,20 +283,20 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-hero-photo { width: 86%; aspect-ratio: 4 / 5; margin: 0 auto clamp(32px, 8vw, 40px); overflow: visible; border-radius: 50% 50% 18px 18px / 20% 20% 18px 18px; }
 .pastel-hero-photo img { border-radius: inherit; filter: saturate(.88) contrast(.96) brightness(1.02); }
 .pastel-hero-photo .photo-overlay-label {
-  --hero-label-rotation: -4deg;
-  top: clamp(-28px, -6.5vw, -20px);
-  left: clamp(-20px, -4.5vw, -13px);
+  --hero-label-rotation: -10deg;
+  top: clamp(-24px, -5.5vw, -17px);
+  left: clamp(-23px, -5vw, -15px);
   display: grid;
   justify-items: start;
   color: rgba(255, 253, 248, .98);
-  font-family: "Sacramento", cursive;
-  font-size: clamp(52px, 15vw, 64px);
+  font-family: "Mrs Saint Delafield", cursive;
+  font-size: clamp(66px, 18vw, 78px);
   font-weight: 400;
-  line-height: .62;
-  letter-spacing: -.035em;
-  text-shadow: 0 1px 7px rgba(25, 38, 48, .26);
+  line-height: .54;
+  letter-spacing: .005em;
+  text-shadow: 0 1px 6px rgba(25, 38, 48, .22);
 }
-.pastel-hero-photo .photo-overlay-label-line.is-day { margin-top: 0; margin-left: clamp(78px, 24vw, 104px); }
+.pastel-hero-photo .photo-overlay-label-line.is-day { margin-top: clamp(7px, 2vw, 10px); margin-left: clamp(112px, 32vw, 138px); }
 .pastel-hero-copy { position: relative; display: flex; padding: 0 30px; flex-direction: column; align-items: center; justify-content: center; background: transparent; text-align: center; }
 .pastel-hero h1 { margin: 0; font-family: "Noto Serif KR Variable", serif; font-size: 29px; font-weight: 430; letter-spacing: .12em; }
 .pastel-hero h1 b { font-weight: 300; }

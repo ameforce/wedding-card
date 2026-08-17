@@ -194,12 +194,12 @@ test("Pastel hero uses a breathing-room inset photo frame without a heavy treatm
   assert.match(app, /className="photo-overlay-label"/);
   const overlay = css.match(/\.pastel-hero-photo \.photo-overlay-label\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.match(css, /\.photo-overlay-label\s*\{[^}]*position:\s*absolute/);
-  assert.match(overlay, /font-family:\s*"Sacramento", cursive/);
-  assert.match(overlay, /top:\s*clamp\(-28px,\s*-6\.5vw,\s*-20px\)/);
-  assert.match(overlay, /left:\s*clamp\(-20px,\s*-4\.5vw,\s*-13px\)/);
-  assert.match(overlay, /--hero-label-rotation:\s*-4deg/);
+  assert.match(overlay, /font-family:\s*"Mrs Saint Delafield", cursive/);
+  assert.match(overlay, /top:\s*clamp\(-24px,\s*-5\.5vw,\s*-17px\)/);
+  assert.match(overlay, /left:\s*clamp\(-23px,\s*-5vw,\s*-15px\)/);
+  assert.match(overlay, /--hero-label-rotation:\s*-10deg/);
   assert.match(css, /\.pastel-hero-photo\s*\{[^}]*overflow:\s*visible/);
-  assert.match(css, /\.pastel-hero-photo \.photo-overlay-label-line\.is-day\s*\{[^}]*margin-left:\s*clamp\(78px,\s*24vw,\s*104px\)/);
+  assert.match(css, /\.pastel-hero-photo \.photo-overlay-label-line\.is-day\s*\{[^}]*margin-left:\s*clamp\(112px,\s*32vw,\s*138px\)/);
 });
 
 test("Pastel uses one continuous watercolor surface and an opt-in licensed audio control", () => {
@@ -207,13 +207,13 @@ test("Pastel uses one continuous watercolor surface and an opt-in licensed audio
   assert.ok(existsSync(new URL("../public/assets/design/pastel-watercolor-surface.webp", import.meta.url)));
   assert.ok(existsSync(new URL("../public/assets/audio/touching-moments-one-pulse.mp3", import.meta.url)));
   assert.ok(existsSync(new URL("../docs/audio-license.md", import.meta.url)));
-  assert.match(css, /@import "@fontsource\/sacramento\/400\.css"/);
-  assert.doesNotMatch(css, /@fontsource\/(?:allura|parisienne|italianno|alex-brush)/);
+  assert.match(css, /@import "@fontsource\/mrs-saint-delafield\/400\.css"/);
+  assert.doesNotMatch(css, /@fontsource\/(?:sacramento|allura|parisienne|italianno|alex-brush)/);
   assert.match(css, /\.pastel-invitation\s*\{[^}]*isolation:\s*isolate/);
-  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*?pastel-watercolor-surface\.webp[\s\S]*?background-size:\s*auto 100%/);
+  assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*?pastel-watercolor-surface\.webp[\s\S]*?background-size:\s*100% 100%/);
   assert.doesNotMatch(css, /pastel-watercolor-wash\.webp|310% 100%/);
   assert.doesNotMatch(css, /radial-gradient/);
-  assert.match(css, /\.pastel-invitation::after\s*\{[^}]*pastel-paper-grain\.svg/);
+  assert.match(css, /\.pastel-invitation::after\s*\{[^}]*pastel-paper-grain\.svg[^}]*96px 96px/);
   assert.match(css, /\.pastel-invitation > \*\s*\{[^}]*z-index:\s*1/);
   assert.match(app, /<audio[\s\S]*preload="none"[\s\S]*loop/);
   assert.doesNotMatch(app, /autoPlay|autoplay/);

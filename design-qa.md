@@ -1,28 +1,34 @@
 # Design QA
 
-## Current accepted pass — Sacramento label, full-surface watercolor, and private guestbook policy
+## Current accepted pass — fine paper surface and reference-matched brush lettering
 
-### References, font decision, and implementation evidence
+### Source truth and normalized evidence
 
-- Active script source truth is the supplied `1-사진-1.jpg` and `2-사진-2.jpg` in `C:\Users\enmso\.codex\codex-remote-attachments\019ff501-f8d7-7280-b3f3-9fed0fbb6140\1A1AB2CB-03BC-490D-A976-70A65304E6E7`. The earlier clipboard reference is deliberately excluded from current comparison and decision-making.
-- `artifacts/qa/pastel-script-font-candidates-390.png` is the same-phrase, same-size, same-photo-placement comparison for self-hostable OFL-1.1 Sacramento, Parisienne, Italianno, and Alex Brush. Sacramento was selected: it preserves the requested smooth, rounded terminals; Alex Brush is closer in some reference letter shapes but has sharper terminals that could repeat the reported defect.
-- `artifacts/qa/pastel-script-reference-comparison.png` compares both active references with the final 390px Sacramento implementation. The label remains a restrained `-4deg` two-line `Our Wedding` / `Day` treatment rather than the former strong rotation; its 390px bounds are `7.5..280.1px` inside the `0..390px` invitation, with the image left edge at `27.3px`. It remains unclipped and visually clear of the groom's head.
-- Final whole-page background is `public/assets/design/pastel-watercolor-surface.webp` (864 × 1821, 68,646 bytes), rendered once at `auto 100%` beneath the existing repeated real paper-grain SVG. It replaces the 1.89MB staging PNG and avoids CSS radial gradients, 3:1 wash repetition, and vertically stretched `310% 100%` raster treatment.
-- The full-page raster came from built-in ImageGen after the supplied wash showed repeat banding. Prompt summary: a vertical warm-ivory watercolor-paper surface with distributed powder-blue and blush washes, fine paper fibers, no people, text, objects, borders, panels, bands, or seams. No supplied person photograph was AI-edited.
-- IAB Browser evidence uses the LAN preview `http://192.168.0.196:4173/?variant=pastel&capture=1`, CSS viewport 390 × 844, `devicePixelRatio: 1`: `artifacts/qa/pastel-sacramento-final-390-top.png`, `artifacts/qa/pastel-watercolor-surface-390-middle.png`, and `artifacts/qa/pastel-watercolor-surface-390-bottom.png`. The top, story/venue middle, and guestbook/footer bottom all retain restrained texture and watercolor without a repeated boundary or contrast loss.
+- Active lettering source truth is `C:\Users\enmso\.codex\codex-remote-attachments\019ff501-f8d7-7280-b3f3-9fed0fbb6140\84FA598D-9FE2-4208-99B0-77A056F6295A\1-사진-1.jpg` (1080 × 286). It supersedes the earlier two-image font decision for this pass. The paper-direction source is `docs/design/references/pastel-letter-album.png` (390 × 1040).
+- Browser-rendered implementation evidence is `artifacts/qa/pastel-paper-script-390-top.png`, `artifacts/qa/pastel-paper-script-390-middle.png`, and `artifacts/qa/pastel-paper-script-390-bottom.png`, each 390 × 844 pixels at CSS viewport 390 × 844 and `devicePixelRatio: 1`, with the lightbox closed and capture mode enabled.
+- Focused combined comparison is `artifacts/qa/pastel-paper-script-reference-comparison.png` (980 × 640). It places the complete 1080 × 286 lettering source and the native-density 390px implementation top in one comparison input. The source is a typography crop rather than a full invitation viewport, so only lettering form, stroke weight, terminal shape, and diagonal are judged from it.
+- Full-view paper evidence uses the 390px paper reference plus the three native-density implementation sections above. A stitched browser full-page capture was excluded because the in-app Browser duplicated fixed regions while stitching; the three independently scrolled viewports are the reliable top/middle/bottom evidence.
 
-### Content, privacy, and activation boundary
+### Findings and comparison history
 
-- Pastel separates `마음 전하실 곳` from `방명록을 남겨주세요`. The private notice has a visual line break immediately after `메시지는 공개되지 않으며`, and the form/API/tests/docs use the same 4–72 character password contract. Hash-explanation copy is absent from the invitation while server-side PBKDF2-HMAC-SHA256 verification remains intact.
-- Create responses declare `retention: "permanent"`; no expiration, TTL, cleanup, or public guestbook-list endpoint exists. Retention does not bypass ordinary backup or operations controls.
-- `/admin/guestbook` and its API fail closed without D1 plus trusted upstream identity. The Worker accepts only exactly two distinct deployment-environment allowlist values. The actual groom/bride addresses are intentionally absent from source, tests, documentation, bundles, and QA artifacts; no external environment was changed.
+1. Initial P1 — the Sacramento label had inflated loops, weak connected-brush rhythm, and only a `-4deg` rotation, so it read almost horizontal against the new source. Fix: compared Hurricane, WindSong, Meow Script, Mrs Saint Delafield, and Birthstone on the same photo and selected self-hosted OFL-1.1 Mrs Saint Delafield; increased the static counter-clockwise rotation to `-10deg`, sized it at 66–78px, and kept the required two-line `Our Wedding` / `Day` composition.
+2. Initial P1 — the former 864 × 1821 full-page raster carried visible embedded texture while being enlarged, creating a macro-image impression. Fix: replaced it with a 1536 × 4096 nonrepeating color surface whose embedded microtexture was softened before optimization, lowered it to 68% opacity, and made the existing resolution-independent grain layer the primary texture at 96px and 16% opacity.
+3. Post-fix evidence — at 390px the live label bounds are `2.5..270.1px` inside the invitation while the photo begins at `27.3px`; it extends intentionally past the photo edge without clipping, stays clear of the groom's head, and computes to the exact `-10deg` transform matrix. Top, middle, and bottom captures show fine restrained fibers without pixel blocks, repeat seams, or a detached panel.
 
-### Verification status
+### Required fidelity surfaces
 
-- IAB Browser LAN checks at 360, 390, 430, 768, and 1440px for both Quiet and Pastel found `scrollWidth === clientWidth`, zero failed images, a 430px desktop invitation cap, one calendar and one share action, and immediate capture-mode section visibility. Pastel has five photo triggers and Quiet keeps four; the Pastel label remains inside the invitation at every width.
-- Action controls measured 44px or more (the only smaller interactive element is the inline `CC BY 4.0` attribution link, not a utility control). Keyboard Tab reached the Pastel hero trigger with a 2px solid, 3px-offset focus outline. Emulated `prefers-reduced-motion: reduce` reported `labelAnimation: none`, static `-4deg` treatment, reveal opacity `1`, transform `none`, and transition duration `0s`.
-- `npm run lint` passed. `npm run test:ui` passed 35/35. `npm run build:design` passed and copied the 68,646-byte WebP to `dist/client/assets/design/`; `dist/client/index.html`, `dist/server/index.js`, and `dist/.openai/hosting.json` exist. `npm run test:sites` passed 12/12, including four-character password and exact-two-distinct-environment-allowlist cases.
-- Repository scans found no stale 8-character guestbook contract and no literal groom/bride administrator addresses. The final dependency tree contains Sacramento only; individual candidate captures, the comparison route/UI, unused candidate packages, and the staging PNG are absent.
+- Fonts and typography: Mrs Saint Delafield is thinner, more continuously connected, and has longer ascenders/descenders than the superseded Sacramento treatment. The white label keeps a light 1px/6px shadow for contrast without thickening its strokes.
+- Spacing and layout rhythm: the approved 86% arched photo, `50% 58%` crop, intro/photo/identity order, and clear space above the groom remain unchanged. At 360, 390, 430, 768, and 1440px the label remains inside the invitation with no horizontal overflow.
+- Colors and visual tokens: the continuous warm-ivory paper with distributed powder-blue/blush wash remains behind all sections. No CSS radial gradient, repeat band, separate panel, or dark gallery surface was added.
+- Image quality and asset fidelity: `pastel-watercolor-surface.webp` is 1536 × 4096 and 148,646 bytes; the real couple photos are byte-for-byte untouched. Fine texture comes from the paper-grain asset rather than enlarging grain embedded in a low-resolution wash.
+- Copy and content: the exact `Our Wedding Day` label and all confirmed invitation copy remain unchanged; only typeface, placement, angle, and paper rendering changed.
+
+### Responsive, interaction, and verification evidence
+
+- IAB checks at 360, 390, 430, 768, and 1440px found zero document/invitation overflow, zero failed images, an exact 86% photo-width ratio, the intended font loaded, `background-repeat: no-repeat`, and a fine `96px 96px` grain layer.
+- The hero opened the shared lightbox with focus on `갤러리 닫기`, locked body scroll, and Escape restored focus to `1번째 사진 크게 보기` with the 2px solid/3px-offset focus outline.
+- Emulated `prefers-reduced-motion: reduce` reported `labelAnimation: none`, the static `-10deg` matrix, reveal opacity `1`, reveal transform `none`, and transition duration `0s`. Browser warning/error logs were empty.
+- `npm run test:ui`: 35/35 passed; `npm run test:sites`: 12/12 passed; `npm run lint`: passed; `npm run build:design`: passed. The build contains `dist/client/index.html`, `dist/server/index.js`, `dist/.openai/hosting.json`, the 148,646-byte paper asset, and the Mrs Saint Delafield font bundle.
 
 final result: passed
 
