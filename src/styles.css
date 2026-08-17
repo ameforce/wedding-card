@@ -43,7 +43,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .app-shell { min-height: 100vh; padding: 100px 24px 72px; }
 .app-shell.is-capture { padding: 0; background: #fff; }
 .invitation-stage { width: min(100%, 430px); margin: 0 auto; }
-.invitation { width: 100%; overflow: hidden; box-shadow: 0 24px 80px rgba(34, 36, 38, .13); }
+.invitation { width: 100%; overflow: hidden; box-shadow: 0 24px 80px rgba(34, 36, 38, .13); -webkit-user-select: none; user-select: none; }
+.invitation input,
+.invitation textarea,
+.invitation [contenteditable]:not([contenteditable="false"]) { -webkit-user-select: text; user-select: text; }
 .is-capture .invitation { box-shadow: none; }
 .section-pad { padding-inline: clamp(26px, 9vw, 42px); }
 
@@ -155,9 +158,9 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .eyebrow { margin: 0 0 10px; font-size: 12px; font-weight: 650; letter-spacing: .18em; }
 .greeting p:not(.eyebrow) { margin: 2px 0; font-family: "Noto Serif KR Variable", serif; font-size: 14px; font-weight: 380; line-height: 1.65; }
 .family-introduction { padding-top: 10px; padding-bottom: 15px; text-align: center; }
-.family-introduction p { margin: 5px 0; color: #625d58; font-family: "Noto Serif KR Variable", serif; font-size: 14px; line-height: 1.7; }
+.family-introduction p { margin: 5px 0; color: #625d58; font-family: "Noto Serif KR Variable", serif; font-size: 17px; line-height: 1.7; letter-spacing: -.01em; white-space: nowrap; }
 .family-introduction p > span { color: #47423e; }
-.family-introduction strong { margin-left: 3px; color: var(--ink); font-size: 15px; font-weight: 560; }
+.family-introduction strong { margin-left: 3px; color: var(--ink); font-size: 18px; font-weight: 560; }
 .calendar-pattern { width: min(82%, 330px); margin: 0 auto; padding: 14px 0 17px; }
 .calendar-heading { display: flex; margin-bottom: 10px; padding: 0 1px 8px; align-items: baseline; justify-content: space-between; gap: 10px; border-bottom: 1px solid rgba(108, 96, 85, .24); }
 .calendar-heading p { margin: 0; font-family: "Noto Serif KR Variable", serif; font-size: 16px; font-weight: 520; }
@@ -314,6 +317,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 }
 .pastel-schedule .calendar-heading p,
 .pastel-schedule .calendar-heading span { line-height: 1.55; }
+.pastel-schedule .calendar-heading p { font-size: 19px; letter-spacing: -.01em; }
+.pastel-schedule .calendar-heading span { font-size: 16px; letter-spacing: -.02em; }
 .pastel-schedule .calendar-heading span, .pastel-schedule .weekday-row { color: #718196; }
 .pastel-schedule .calendar-day { color: #415a79; }
 .pastel-schedule .calendar-day.is-sunday { color: #b77f89; }
@@ -377,9 +382,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .guestbook-tabs button { min-height: 44px; color: inherit; background: rgba(255, 255, 255, .4); border: 1px solid rgba(91, 82, 73, .14); border-radius: 10px; cursor: pointer; font-size: 13px; }
 .guestbook-tabs button.is-active { background: rgba(196, 146, 119, .14); border-color: rgba(143, 99, 76, .36); font-weight: 650; }
 .guestbook-form { display: grid; gap: 11px; }
-.guestbook-form label { display: grid; gap: 5px; color: #5f5954; font-size: 13px; }
+.guestbook-identity-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 8px; }
+.guestbook-identity-fields > label { align-self: start; align-content: start; }
+.guestbook-form label { display: grid; min-width: 0; gap: 5px; color: #5f5954; font-size: 13px; }
 .guestbook-form input,
-.guestbook-form textarea { width: 100%; min-height: 44px; padding: 10px 12px; color: #33312f; background: rgba(255, 255, 255, .66); border: 1px solid rgba(91, 82, 73, .18); border-radius: 10px; font: inherit; }
+.guestbook-form textarea { width: 100%; min-height: 44px; padding: 10px 12px; color: #33312f; background: rgba(255, 255, 255, .66); border: 1px solid rgba(91, 82, 73, .18); border-radius: 10px; font: inherit; font-size: 16px; }
+.guestbook-identity-fields input { height: 46px; min-height: 46px; }
 .guestbook-form textarea { min-height: 120px; resize: vertical; line-height: 1.65; }
 .guestbook-form small { color: #817a74; font-size: 12px; line-height: 1.5; }
 .guestbook-submit { min-height: 48px; margin-top: 3px; color: #fff; background: #6d625a; border: 0; border-radius: 12px; cursor: pointer; font: inherit; font-size: 14px; font-weight: 650; }
@@ -419,7 +427,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .admin-entry-list p { margin: 9px 0 0; line-height: 1.7; white-space: pre-wrap; }
 .pastel-footer { padding: 17px 24px 22px; color: #60768f; font-family: "Noto Serif KR Variable", serif; font-size: 13px; line-height: 1.7; text-align: center; }
 
-.gallery-lightbox { --lightbox-bg: rgba(248, 245, 238, .96); --lightbox-ink: #3f3933; --lightbox-control: rgba(255, 255, 255, .76); --lightbox-border: rgba(91, 82, 73, .14); position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: calc(64px + env(safe-area-inset-top)) 56px calc(64px + env(safe-area-inset-bottom)); color: var(--lightbox-ink); background: var(--lightbox-bg); backdrop-filter: blur(16px); touch-action: pan-y; }
+.gallery-lightbox { --lightbox-bg: rgba(248, 245, 238, .96); --lightbox-ink: #3f3933; --lightbox-control: rgba(255, 255, 255, .76); --lightbox-border: rgba(91, 82, 73, .14); position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: calc(64px + env(safe-area-inset-top)) 56px calc(64px + env(safe-area-inset-bottom)); color: var(--lightbox-ink); background: var(--lightbox-bg); backdrop-filter: blur(16px); -webkit-user-select: none; user-select: none; touch-action: none; }
 .gallery-lightbox.is-pastel { --lightbox-bg: rgba(252, 251, 244, .96); --lightbox-ink: #294765; --lightbox-control: rgba(229, 239, 247, .86); --lightbox-border: rgba(71, 98, 127, .14); }
 .lightbox-figure { display: grid; max-width: min(88vw, 760px); max-height: calc(100vh - 128px); margin: 0; gap: 10px; justify-items: center; }
 .lightbox-figure img { display: block; max-width: 100%; max-height: calc(100vh - 164px); object-fit: contain; border: 8px solid rgba(255, 255, 255, .72); border-radius: 10px; box-shadow: 0 20px 64px rgba(69, 60, 52, .18); }

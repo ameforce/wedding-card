@@ -112,6 +112,20 @@ function PhotoLightbox({ photos, gallery, tone }) {
   }, [openerIndexRef, triggerRefs]);
 
   useEffect(() => {
+    const lightbox = lightboxRef.current;
+    if (!lightbox) return undefined;
+
+    const preventNativeZoom = (event) => event.preventDefault();
+    lightbox.addEventListener("gesturestart", preventNativeZoom, { passive: false });
+    lightbox.addEventListener("gesturechange", preventNativeZoom, { passive: false });
+
+    return () => {
+      lightbox.removeEventListener("gesturestart", preventNativeZoom);
+      lightbox.removeEventListener("gesturechange", preventNativeZoom);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -169,6 +183,7 @@ function PhotoLightbox({ photos, gallery, tone }) {
         ));
       }}
       onPointerCancel={() => { pointerStartXRef.current = null; }}
+      onDoubleClick={(event) => event.preventDefault()}
     >
       <h2 className="sr-only" id="gallery-lightbox-title">웨딩 사진 크게 보기</h2>
       <button className="lightbox-close" type="button" aria-label="갤러리 닫기" ref={closeButtonRef} onClick={() => setActiveIndex(null)}>
@@ -688,15 +703,17 @@ function GuestbookSection({ notify }) {
             <input value={entryId} onChange={(event) => setEntryId(event.target.value)} required autoComplete="off" readOnly={unlocked} />
           </label>
         )}
-        <label>
-          <span>이름</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} required maxLength={30} autoComplete="name" readOnly={unlocked} />
-        </label>
-        <label>
-          <span>비밀번호</span>
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={4} maxLength={72} autoComplete={mode === "write" ? "new-password" : "current-password"} />
-          <small>4자 이상</small>
-        </label>
+        <div className="guestbook-identity-fields">
+          <label>
+            <span>이름</span>
+            <input value={name} onChange={(event) => setName(event.target.value)} required maxLength={30} autoComplete="name" readOnly={unlocked} />
+          </label>
+          <label>
+            <span>비밀번호</span>
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={4} maxLength={72} autoComplete={mode === "write" ? "new-password" : "current-password"} />
+            <small>4자 이상</small>
+          </label>
+        </div>
         {(mode === "write" || unlocked) && (
           <label>
             <span>축하 메시지</span>

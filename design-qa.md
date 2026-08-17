@@ -1,5 +1,27 @@
 # Design QA
 
+## Current accepted pass — mobile priority hierarchy and interaction containment
+
+### Source truth and current evidence
+
+- Source truth is the accepted mobile-feedback set: static invitation content must not be selectable, the two confirmed family lines and the Pastel two-line date heading are priority information, guestbook name/password controls share one mobile row without focus zoom, and gallery viewing must not permit native image zoom. The implementation source is `src/App.jsx` and `src/styles.css`; `AGENTS.md` records the durable constraints.
+- `artifacts/qa/pastel-priority-text-360.png` is the live 360px Pastel capture for the enlarged family/date surfaces. Each family line has 295.22px available width, `white-space: nowrap`, 17px supporting text, and 18px emphasized name text; the two calendar lines resolve at 19px and 16px with zero horizontal overflow.
+- `artifacts/qa/pastel-guestbook-fields-360.png` is the live 360px Pastel capture after the P2 correction. Name and password inputs each resolve to `y=238.25px`, `width=143.61px`, `height=46px`, `font-size=16px`, and `user-select: text`; the two-column grid has zero overflow.
+
+### Findings, fixes, and interaction evidence
+
+1. P2 found during the first 360px review — the password helper text expanded its grid label, which stretched the name field and left the two input tops/heights misaligned. Fix: the identity grid now aligns items to start, each label aligns and packs to start, and both identity inputs use the same 46px height/min-height. The final browser read-back reports identical `y`, height, width, 16px type, and zero overflow.
+2. Selection boundary — `.invitation` computes `user-select: none`; editable `input`, `textarea`, and contenteditable fields retain `user-select: text`. No global viewport `maximum-scale` or `user-scalable=no` restriction was introduced.
+3. Shared lightbox — its active surface computes `touch-action: none` and `user-select: none`, while body scroll is locked. ArrowRight changes the active photo; Escape closes the lightbox and restores focus to its opener. Existing close, previous/next, swipe, and focus-restoration behavior remain available.
+
+### Automated verification
+
+- `npm run test:ui`: 39/39 passed, including the equal-top/equal-height guestbook identity-field contract.
+- `npm run lint`: passed.
+- `npm run build:design` and `npm run test:sites`: rerun after this record and captured in the commit evidence. Plain `npm run build` remains intentionally blocked by the existing design-placeholder production gate.
+
+final result: passed
+
 ## Current accepted pass — constructed brush-signature wordmark
 
 ### Source truth and normalized evidence
