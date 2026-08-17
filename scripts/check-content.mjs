@@ -1,18 +1,18 @@
-import { readFileSync } from "node:fs";
+import { weddingContent } from "../src/content.js";
 
-const content = readFileSync(new URL("../src/content.js", import.meta.url), "utf8");
-const markers = [
-  "isDesignPlaceholder: true",
-  "시간 미정",
-  "정보 입력 예정",
-];
-const found = markers.filter((marker) => content.includes(marker));
+const unconfirmedContent = Array.isArray(weddingContent.unconfirmedContent)
+  ? weddingContent.unconfirmedContent
+  : [];
+const hasUnconfirmedContent = weddingContent.isDesignPlaceholder === true || unconfirmedContent.length > 0;
 
-if (found.length > 0 && process.env.ALLOW_DESIGN_PLACEHOLDERS !== "1") {
+if (hasUnconfirmedContent && process.env.ALLOW_DESIGN_PLACEHOLDERS !== "1") {
   console.error("Production build blocked: unverified design-only wedding content remains.");
-  for (const marker of found) console.error(`- ${marker}`);
+  if (unconfirmedContent.length === 0) {
+    console.error("- 상세 미확정 항목이 모델에 등록되지 않았습니다. (content.unconfirmedContent)");
+  }
+  for (const item of unconfirmedContent) console.error(`- ${item.label} [${item.key}]`);
   console.error("Use `npm run build:design` only for local design review.");
   process.exit(1);
 }
 
-console.log(found.length > 0 ? "Design-only placeholder build explicitly allowed." : "Verified content guard passed.");
+console.log(hasUnconfirmedContent ? "Design-only placeholder build explicitly allowed." : "Verified content guard passed.");

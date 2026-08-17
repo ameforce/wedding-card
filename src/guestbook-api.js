@@ -29,15 +29,15 @@ export function createGuestbookEntry(entry) {
   });
 }
 
-export function unlockGuestbookEntry(id, credentials) {
-  return requestJson(`/api/guestbook/entries/${encodeURIComponent(id)}/unlock`, {
+export function unlockGuestbookEntry(credentials) {
+  return requestJson("/api/guestbook/entries/unlock", {
     method: "POST",
     body: JSON.stringify(credentials),
   });
 }
 
-export function updateGuestbookEntry(id, entry) {
-  return requestJson(`/api/guestbook/entries/${encodeURIComponent(id)}`, {
+export function updateGuestbookEntry(entry) {
+  return requestJson("/api/guestbook/entries", {
     method: "PATCH",
     body: JSON.stringify(entry),
   });

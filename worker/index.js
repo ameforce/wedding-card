@@ -90,7 +90,7 @@ function requireSameOrigin(request) {
 }
 
 function normalizeEntry(payload, { requireMessage = true } = {}) {
-  const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  const name = typeof payload.name === "string" ? payload.name.trim().normalize("NFKC") : "";
   const password = typeof payload.password === "string" ? payload.password : "";
   const message = typeof payload.message === "string" ? payload.message.trim() : "";
   if (name.length < 1 || name.length > 30) throw { status: 400, code: "INVALID_NAME", message: "이름은 1~30자로 입력해 주세요." };
@@ -108,45 +108,71 @@ function requireDatabase(env) {
   return env.GUESTBOOK_DB;
 }
 
-async function findEntry(db, id) {
-  return db.prepare(
-    "SELECT id, name, message, password_hash, created_at, updated_at FROM guestbook_entries WHERE id = ? LIMIT 1",
-  ).bind(id).first();
+async function findEntriesByName(db, name) {
+  const result = await db.prepare(
+    "SELECT id, name, message, password_hash, created_at, updated_at FROM guestbook_entries WHERE name = ? LIMIT 2",
+  ).bind(name).all();
+  return result.results || [];
+}
+
+async function requireUniqueCredentialMatch(db, name, password) {
+  const candidates = await findEntriesByName(db, name);
+  if (candidates.length !== 1) {
+    throw { status: 401, code: "ENTRY_AUTH_FAILED", message: "이름 또는 비밀번호를 확인해 주세요." };
+  }
+  let passwordMatches = false;
+  try {
+    passwordMatches = await verifyPassword(password, candidates[0].password_hash);
+  } catch {
+    passwordMatches = false;
+  }
+  if (!passwordMatches) {
+    throw { status: 401, code: "ENTRY_AUTH_FAILED", message: "이름 또는 비밀번호를 확인해 주세요." };
+  }
+  return candidates[0];
 }
 
 async function createEntry(request, env) {
   requireSameOrigin(request);
   const db = requireDatabase(env);
   const { name, password, message } = normalizeEntry(await readJson(request));
+  const existingEntries = await findEntriesByName(db, name);
+  if (existingEntries.length > 0) {
+    return apiError(409, "ENTRY_NAME_IN_USE", "같은 이름으로 작성한 글이 이미 있습니다. 소속이나 별칭을 이름에 덧붙여 구분해 주세요.");
+  }
   const id = crypto.randomUUID();
   const timestamp = new Date().toISOString();
   const passwordHash = await hashPassword(password);
-  await db.prepare(
-    "INSERT INTO guestbook_entries (id, name, message, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-  ).bind(id, name, message, passwordHash, timestamp, timestamp).run();
-  return json({ id, retention: GUESTBOOK_RETENTION }, 201);
+  try {
+    await db.prepare(
+      "INSERT INTO guestbook_entries (id, name, message, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(id, name, message, passwordHash, timestamp, timestamp).run();
+  } catch (error) {
+    const racedEntry = await findEntriesByName(db, name);
+    if (racedEntry.length > 0) {
+      return apiError(409, "ENTRY_NAME_IN_USE", "같은 이름으로 작성한 글이 이미 있습니다. 소속이나 별칭을 이름에 덧붙여 구분해 주세요.");
+    }
+    throw error;
+  }
+  return json({ retention: GUESTBOOK_RETENTION }, 201);
 }
 
-async function unlockEntry(request, env, id) {
+async function unlockEntry(request, env) {
   requireSameOrigin(request);
   const db = requireDatabase(env);
   const { name, password } = normalizeEntry(await readJson(request), { requireMessage: false });
-  const entry = await findEntry(db, id);
-  const matches = entry && entry.name === name && await verifyPassword(password, entry.password_hash);
-  if (!matches) return apiError(401, "ENTRY_AUTH_FAILED", "접수 번호, 이름 또는 비밀번호를 확인해 주세요.");
-  return json({ entry: { id: entry.id, name: entry.name, message: entry.message, updatedAt: entry.updated_at } });
+  const entry = await requireUniqueCredentialMatch(db, name, password);
+  return json({ entry: { name: entry.name, message: entry.message, updatedAt: entry.updated_at } });
 }
 
-async function updateEntry(request, env, id) {
+async function updateEntry(request, env) {
   requireSameOrigin(request);
   const db = requireDatabase(env);
   const { name, password, message } = normalizeEntry(await readJson(request));
-  const entry = await findEntry(db, id);
-  const matches = entry && entry.name === name && await verifyPassword(password, entry.password_hash);
-  if (!matches) return apiError(401, "ENTRY_AUTH_FAILED", "접수 번호, 이름 또는 비밀번호를 확인해 주세요.");
+  const entry = await requireUniqueCredentialMatch(db, name, password);
   const updatedAt = new Date().toISOString();
-  await db.prepare("UPDATE guestbook_entries SET message = ?, updated_at = ? WHERE id = ?").bind(message, updatedAt, id).run();
-  return json({ id, updatedAt });
+  await db.prepare("UPDATE guestbook_entries SET message = ?, updated_at = ? WHERE id = ?").bind(message, updatedAt, entry.id).run();
+  return json({ updatedAt });
 }
 
 function getTrustedAdminEmail(request, env) {
@@ -192,13 +218,11 @@ async function handleGuestbook(request, env, url) {
   try {
     if (url.pathname === `${API_PREFIX}/entries`) {
       if (request.method === "POST") return await createEntry(request, env);
+      if (request.method === "PATCH") return await updateEntry(request, env);
       return apiError(405, "METHOD_NOT_ALLOWED", "공개 방명록 조회는 제공되지 않습니다.");
     }
-    const entryMatch = url.pathname.match(/^\/api\/guestbook\/entries\/([0-9a-f-]+)(?:\/(unlock))?$/i);
-    if (entryMatch) {
-      const [, id, action] = entryMatch;
-      if (action === "unlock" && request.method === "POST") return await unlockEntry(request, env, id);
-      if (!action && request.method === "PATCH") return await updateEntry(request, env, id);
+    if (url.pathname === `${API_PREFIX}/entries/unlock`) {
+      if (request.method === "POST") return await unlockEntry(request, env);
       return apiError(405, "METHOD_NOT_ALLOWED", "허용되지 않은 방명록 요청입니다.");
     }
     if (url.pathname === `${API_PREFIX}/admin/entries` && request.method === "GET") {

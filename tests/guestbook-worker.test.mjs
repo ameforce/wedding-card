@@ -28,6 +28,7 @@ function database() {
         async run() {
           if (sql.startsWith("INSERT")) {
             const [id, name, message, passwordHash, createdAt, updatedAt] = values;
+            if ([...rows.values()].some((entry) => entry.name === name)) throw new Error("UNIQUE constraint failed");
             rows.set(id, { id, name, message, password_hash: passwordHash, created_at: createdAt, updated_at: updatedAt });
           } else if (sql.startsWith("UPDATE")) {
             const [message, updatedAt, id] = values;
@@ -39,6 +40,9 @@ function database() {
           return rows.get(values[0]) || null;
         },
         async all() {
+          if (sql.includes("WHERE name = ?")) {
+            return { results: [...rows.values()].filter((entry) => entry.name === values[0]).slice(0, 2) };
+          }
           return { results: [...rows.values()] };
         },
       };
@@ -81,31 +85,98 @@ test("authors can create, unlock, and edit only with the matching name and passw
     body: JSON.stringify({ name: "하객", password: "eightchars", message: "축하합니다" }),
   }), env);
   assert.equal(createResponse.status, 201);
-  const { id, retention } = await createResponse.json();
+  const createPayload = await createResponse.json();
+  assert.equal("id" in createPayload, false);
+  const { retention } = createPayload;
   assert.equal(retention, "permanent");
+  const [id] = db.rows.keys();
   const stored = db.rows.get(id);
   assert.equal(stored.message, "축하합니다");
   assert.equal(stored.password_hash.includes("eightchars"), false);
 
-  const denied = await worker.fetch(request(`/api/guestbook/entries/${id}/unlock`, {
+  const denied = await worker.fetch(request("/api/guestbook/entries/unlock", {
     method: "POST",
     body: JSON.stringify({ name: "하객", password: "wrongpass" }),
   }), env);
   assert.equal(denied.status, 401);
 
-  const unlocked = await worker.fetch(request(`/api/guestbook/entries/${id}/unlock`, {
+  const deniedUpdate = await worker.fetch(request("/api/guestbook/entries", {
+    method: "PATCH",
+    body: JSON.stringify({ name: "하객", password: "wrongpass", message: "변조 시도" }),
+  }), env);
+  assert.equal(deniedUpdate.status, 401);
+  assert.equal(db.rows.get(id).message, "축하합니다");
+
+  const unlocked = await worker.fetch(request("/api/guestbook/entries/unlock", {
     method: "POST",
     body: JSON.stringify({ name: "하객", password: "eightchars" }),
   }), env);
   assert.equal(unlocked.status, 200);
-  assert.equal((await unlocked.json()).entry.message, "축하합니다");
+  const unlockedPayload = await unlocked.json();
+  assert.equal(unlockedPayload.entry.message, "축하합니다");
+  assert.equal("id" in unlockedPayload.entry, false);
 
-  const updated = await worker.fetch(request(`/api/guestbook/entries/${id}`, {
+  const updated = await worker.fetch(request("/api/guestbook/entries", {
     method: "PATCH",
     body: JSON.stringify({ name: "하객", password: "eightchars", message: "두 분 행복하세요" }),
   }), env);
   assert.equal(updated.status, 200);
   assert.equal(db.rows.get(id).message, "두 분 행복하세요");
+});
+
+test("duplicate normalized names are rejected and authentication failures stay generic", async () => {
+  const db = database();
+  const env = { GUESTBOOK_DB: db };
+  const first = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "A하객", password: "first-pass", message: "첫 메시지" }),
+  }), env);
+  assert.equal(first.status, 201);
+
+  const duplicate = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "  Ａ하객  ", password: "second-pass", message: "두 번째 메시지" }),
+  }), env);
+  assert.equal(duplicate.status, 409);
+  const duplicatePayload = await duplicate.json();
+  assert.equal(duplicatePayload.code, "ENTRY_NAME_IN_USE");
+  assert.match(duplicatePayload.message, /소속이나 별칭/);
+
+  const missingName = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "없는 하객", password: "first-pass" }),
+  }), env);
+  const wrongPassword = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "A하객", password: "wrong-pass" }),
+  }), env);
+  assert.equal(missingName.status, 401);
+  assert.equal(wrongPassword.status, 401);
+  assert.deepEqual(await missingName.json(), await wrongPassword.json());
+});
+
+test("unsafe legacy duplicate names fail closed instead of selecting an entry", async () => {
+  const db = database();
+  const verifier = await __test.hashPassword("shared-pass");
+  for (const id of ["legacy-one", "legacy-two"]) {
+    db.rows.set(id, {
+      id,
+      name: "동명이인",
+      message: id,
+      password_hash: verifier,
+      created_at: "2026-08-17T00:00:00.000Z",
+      updated_at: "2026-08-17T00:00:00.000Z",
+    });
+  }
+  const response = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "동명이인", password: "shared-pass" }),
+  }), { GUESTBOOK_DB: db });
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), {
+    code: "ENTRY_AUTH_FAILED",
+    message: "이름 또는 비밀번호를 확인해 주세요.",
+  });
 });
 
 test("guestbook accepts a four-character password and rejects shorter values", async () => {

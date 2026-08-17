@@ -568,8 +568,6 @@ function BottomActions({ notify, pastel = false }) {
   );
 }
 
-const GUESTBOOK_RECEIPT_KEY = "wedding-guestbook-entry-id";
-
 function MusicControl({ notify }) {
   const audioRef = useRef(null);
   const [playing, setPlaying] = useState(false);
@@ -618,13 +616,11 @@ function MusicCredit() {
 
 function GuestbookSection({ notify }) {
   const [mode, setMode] = useState("write");
-  const [entryId, setEntryId] = useState(() => window.localStorage.getItem(GUESTBOOK_RECEIPT_KEY) || "");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [receipt, setReceipt] = useState("");
 
   const switchMode = (nextMode) => {
     setMode(nextMode);
@@ -641,22 +637,19 @@ function GuestbookSection({ notify }) {
     setBusy(true);
     try {
       if (mode === "write") {
-        const result = await createGuestbookEntry({ name, password, message });
-        window.localStorage.setItem(GUESTBOOK_RECEIPT_KEY, result.id);
-        setEntryId(result.id);
-        setReceipt(result.id);
+        await createGuestbookEntry({ name, password, message });
         setName("");
         setPassword("");
         setMessage("");
         notify("축하 메시지를 안전하게 전했습니다.");
       } else if (!unlocked) {
-        const result = await unlockGuestbookEntry(entryId, { name, password });
+        const result = await unlockGuestbookEntry({ name, password });
         setName(result.entry.name);
         setMessage(result.entry.message);
         setUnlocked(true);
         notify("내 메시지를 불러왔습니다.");
       } else {
-        await updateGuestbookEntry(entryId, { name, password, message });
+        await updateGuestbookEntry({ name, password, message });
         setPassword("");
         setUnlocked(false);
         notify("축하 메시지를 수정했습니다.");
@@ -675,32 +668,11 @@ function GuestbookSection({ notify }) {
         <h2 id="guestbook-title">방명록을 남겨주세요</h2>
       </div>
       <p className="guestbook-privacy">메시지는 공개되지 않으며<br />신랑·신부만 확인할 수 있습니다.</p>
-      {receipt && (
-        <div className="guestbook-receipt" role="status">
-          <span>수정용 접수 번호</span>
-          <code>{receipt}</code>
-          <button type="button" onClick={async () => {
-            try {
-              await copyText(receipt);
-              notify("수정용 접수 번호를 복사했습니다.");
-            } catch {
-              notify("접수 번호를 복사하지 못했습니다.", "error");
-            }
-          }}><Copy aria-hidden="true" weight="light" /> 번호 복사</button>
-          <small>이 기기에는 자동 저장됩니다. 다른 기기에서 수정하려면 번호를 보관해 주세요.</small>
-        </div>
-      )}
       <div className="guestbook-tabs" role="group" aria-label="방명록 기능">
         <button type="button" className={mode === "write" ? "is-active" : ""} aria-pressed={mode === "write"} onClick={() => switchMode("write")}>새 메시지</button>
         <button type="button" className={mode === "edit" ? "is-active" : ""} aria-pressed={mode === "edit"} onClick={() => switchMode("edit")}>내 글 수정</button>
       </div>
       <form className="guestbook-form" onSubmit={submit}>
-        {mode === "edit" && (
-          <label>
-            <span>접수 번호</span>
-            <input value={entryId} onChange={(event) => setEntryId(event.target.value)} required autoComplete="off" readOnly={unlocked} />
-          </label>
-        )}
         <div className="guestbook-identity-fields">
           <label>
             <span>이름</span>

@@ -338,12 +338,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .guestbook-section .section-heading { margin-bottom: 8px; text-align: center; }
 .guestbook-section .section-heading .eyebrow { margin-bottom: 5px; color: #81766d; }
 .guestbook-privacy { margin: 0 auto 16px; color: #746d67; font-family: "Noto Serif KR Variable", serif; font-size: 13px; line-height: 1.65; text-align: center; }
-.guestbook-receipt { display: grid; margin-bottom: 14px; padding: 12px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 10px; color: #5f5954; background: rgba(255, 255, 255, .56); border: 1px solid rgba(91, 82, 73, .14); border-radius: 12px; font-size: 12px; }
-.guestbook-receipt > span { grid-column: 1 / -1; font-weight: 650; }
-.guestbook-receipt code { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
-.guestbook-receipt button { display: inline-flex; min-height: 44px; padding: 0 10px; align-items: center; gap: 5px; color: inherit; background: rgba(255, 255, 255, .7); border: 1px solid rgba(91, 82, 73, .14); border-radius: 9px; cursor: pointer; font: inherit; }
-.guestbook-receipt button svg { width: 15px; height: 15px; }
-.guestbook-receipt small { grid-column: 1 / -1; color: #817a74; font-size: 12px; line-height: 1.5; }
 .guestbook-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 12px; }
 .guestbook-tabs button { min-height: 44px; color: inherit; background: rgba(255, 255, 255, .4); border: 1px solid rgba(91, 82, 73, .14); border-radius: 10px; cursor: pointer; font-size: 13px; }
 .guestbook-tabs button.is-active { background: rgba(196, 146, 119, .14); border-color: rgba(143, 99, 76, .36); font-weight: 650; }
@@ -372,7 +366,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-invitation .guestbook-form label,
 .pastel-invitation .guestbook-form small { color: #6d7d8c; }
 .pastel-invitation .guestbook-tabs button,
-.pastel-invitation .guestbook-receipt,
 .pastel-invitation .guestbook-form input,
 .pastel-invitation .guestbook-form textarea { color: #294765; background: rgba(255, 255, 255, .48); border-color: rgba(71, 98, 127, .14); }
 .pastel-invitation .guestbook-tabs button.is-active { background: rgba(213, 229, 241, .66); border-color: rgba(96, 127, 158, .3); }

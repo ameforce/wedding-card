@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -9,6 +10,7 @@ import { getCalendarMonth, WEDDING_PHOTOS, weddingContent } from "../src/content
 const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 const guestbookApi = await readFile(new URL("../src/guestbook-api.js", import.meta.url), "utf8");
+const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 
 test("Pastel Letter is the fixed public default while Quiet remains an explicit regression route", () => {
   assert.match(app, /return value === "quiet" \? "quiet" : "pastel";/);
@@ -37,6 +39,25 @@ test("user-confirmed wedding facts are represented without filling unknown field
   assert.equal(weddingContent.venue.name, "더 바실리움");
   assert.equal(weddingContent.venue.address, "경기 성남시 분당구 양현로 322");
   assert.equal(weddingContent.isDesignPlaceholder, true);
+  assert.deepEqual(weddingContent.unconfirmedContent, [
+    { key: "venue.floorAndHall", label: "예식장 층·홀" },
+    { key: "copy.invitationMessage", label: "초대 문구 최종 확인" },
+    { key: "copy.story", label: "스토리 문구 최종 확인" },
+    { key: "rsvp.contract", label: "RSVP 운영 계약(수집 항목·마감일·수신자·보존 정책)" },
+    { key: "publishing.scope", label: "공개 배포 범위(대표 URL·OG 메타데이터·검색 노출)" },
+  ]);
+});
+
+test("production content guard reports each structured unconfirmed item", () => {
+  const result = spawnSync(process.execPath, ["scripts/check-content.mjs"], {
+    cwd: projectRoot,
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 1);
+  for (const item of weddingContent.unconfirmedContent) {
+    assert.match(result.stderr, new RegExp(item.key.replaceAll(".", "\\.")));
+    assert.match(result.stderr, new RegExp(item.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
 });
 
 test("confirmed family contacts are modeled once and exposed through accessible call and text actions", () => {
@@ -238,12 +259,12 @@ test("Pastel uses one continuous watercolor surface and an opt-in licensed audio
   assert.match(app, /creativecommons\.org\/licenses\/by\/4\.0/);
 });
 
-test("private guestbook gives the author a recoverable opaque receipt for later edits", () => {
-  assert.match(app, /GUESTBOOK_RECEIPT_KEY/);
-  assert.match(app, /window\.localStorage\.setItem\(GUESTBOOK_RECEIPT_KEY, result\.id\)/);
-  assert.match(app, /수정용 접수 번호/);
-  assert.match(app, /copyText\(receipt\)/);
-  assert.match(app, /다른 기기에서 수정하려면 번호를 보관해 주세요/);
+test("private guestbook recovery uses only name and password without exposing a receipt", () => {
+  assert.doesNotMatch(app, /GUESTBOOK_RECEIPT_KEY|localStorage|접수 번호|copyText\(receipt\)/);
+  assert.match(app, /unlockGuestbookEntry\(\{ name, password \}\)/);
+  assert.match(app, /updateGuestbookEntry\(\{ name, password, message \}\)/);
+  assert.match(guestbookApi, /"\/api\/guestbook\/entries\/unlock"/);
+  assert.doesNotMatch(guestbookApi, /encodeURIComponent\(id\)|entries\/\$\{/);
   assert.match(guestbookApi, /메시지는 전송되지 않았습니다/);
 });
 
