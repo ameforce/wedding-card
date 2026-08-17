@@ -203,7 +203,7 @@ test("Pastel hero uses a breathing-room inset photo frame without a heavy treatm
 });
 
 test("Pastel uses one continuous watercolor surface and an opt-in licensed audio control", () => {
-  assert.ok(existsSync(new URL("../public/assets/design/pastel-paper-grain.svg", import.meta.url)));
+  assert.ok(existsSync(new URL("../public/assets/design/pastel-paper-fibers.webp", import.meta.url)));
   assert.ok(existsSync(new URL("../public/assets/design/pastel-watercolor-surface.webp", import.meta.url)));
   assert.ok(existsSync(new URL("../public/assets/audio/touching-moments-one-pulse.mp3", import.meta.url)));
   assert.ok(existsSync(new URL("../docs/audio-license.md", import.meta.url)));
@@ -213,7 +213,7 @@ test("Pastel uses one continuous watercolor surface and an opt-in licensed audio
   assert.match(css, /\.pastel-invitation::before\s*\{[\s\S]*?pastel-watercolor-surface\.webp[\s\S]*?background-size:\s*100% 100%/);
   assert.doesNotMatch(css, /pastel-watercolor-wash\.webp|310% 100%/);
   assert.doesNotMatch(css, /radial-gradient/);
-  assert.match(css, /\.pastel-invitation::after\s*\{[^}]*pastel-paper-grain\.svg[^}]*96px 96px/);
+  assert.match(css, /\.pastel-invitation::after\s*\{[^}]*pastel-paper-fibers\.webp[^}]*234px 234px/);
   assert.match(css, /\.pastel-invitation > \*\s*\{[^}]*z-index:\s*1/);
   assert.match(app, /<audio[\s\S]*preload="none"[\s\S]*loop/);
   assert.doesNotMatch(app, /autoPlay|autoplay/);

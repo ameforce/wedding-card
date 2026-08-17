@@ -272,9 +272,9 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   opacity: .68;
 }
 .pastel-invitation::after {
-  background: url("/assets/design/pastel-paper-grain.svg") 0 0 / 96px 96px repeat;
+  background: url("/assets/design/pastel-paper-fibers.webp") 0 0 / 234px 234px repeat;
   mix-blend-mode: multiply;
-  opacity: .16;
+  opacity: .34;
 }
 .pastel-invitation > * { position: relative; z-index: 1; }
 .pastel-hero { position: relative; padding: clamp(26px, 7vw, 34px) 0 clamp(34px, 9vw, 42px); overflow: visible; background: transparent; }
