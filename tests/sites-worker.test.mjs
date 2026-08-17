@@ -63,6 +63,11 @@ test("does not turn missing API or write requests into the app shell", async () 
   }
 });
 
+test("routes protected admin pages through the Worker SPA fallback", async () => {
+  const wrangler = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
+  assert.deepEqual(wrangler.assets.run_worker_first, ["/api/*", "/admin/*"]);
+});
+
 test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/index.html", import.meta.url));
   const staticHeaders = await readFile(new URL("../dist/client/_headers", import.meta.url), "utf8");
