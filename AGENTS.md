@@ -4,6 +4,7 @@
 
 - Figma is optional and is not a source of truth. The rendered browser implementation is authoritative.
 - Maintain one semantic component tree with `quiet` and `pastel` visual variants. Do not fork full pages or long-lived design branches.
+- Pastel Letter is the final and default public design. Do not expose a public variant switcher or design-review utility. Keep Quiet Editorial query-addressable only for regression/reference checks, and do not use it to guide future visual decisions unless the user explicitly reopens that direction.
 - Never infer names, date, venue, contact, account, family relation, RSVP policy, or public copy.
 - Design placeholders must stay visibly labeled and must be rejected by the default production build.
 - Never generate people or likeness substitutes. Photo slots use non-person abstract design assets until supplied real photographs are approved.

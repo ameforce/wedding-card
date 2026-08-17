@@ -27,12 +27,10 @@ import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js
 
 const VARIANTS = {
   quiet: {
-    label: "1 · Quiet Editorial",
-    description: "따뜻한 종이색과 절제된 편집 디자인",
+    title: "Quiet Editorial 회귀 검증",
   },
   pastel: {
-    label: "2 · Pastel Letter",
-    description: "파우더 블루와 블러시의 서정적인 편지",
+    title: "모바일 청첩장",
   },
 };
 
@@ -45,7 +43,7 @@ const PASTEL_HERO_WORDMARK = (
 
 function getVariant() {
   const value = new URLSearchParams(window.location.search).get("variant");
-  return value === "pastel" ? "pastel" : "quiet";
+  return value === "quiet" ? "quiet" : "pastel";
 }
 
 function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes }) {
@@ -889,39 +887,19 @@ function PastelInvitation({ notify }) {
   );
 }
 
-function VariantSwitcher({ variant, onChange }) {
-  return (
-    <aside className="variant-switcher" aria-label="디자인 시안 선택">
-      <div>
-        <strong>Wedding card design review</strong>
-        <span>{VARIANTS[variant].description}</span>
-      </div>
-      <div className="variant-tabs" role="group" aria-label="디자인 버전">
-        {Object.entries(VARIANTS).map(([key, item]) => (
-          <button
-            className={key === variant ? "is-active" : ""}
-            aria-pressed={key === variant}
-            key={key}
-            onClick={() => onChange(key)}
-            type="button"
-          >{item.label}</button>
-        ))}
-      </div>
-    </aside>
-  );
-}
-
 function WeddingApp() {
-  const [variant, setVariant] = useState(getVariant);
+  const [variant] = useState(getVariant);
   const [toast, setToast] = useState({ message: "", tone: "success" });
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
 
   useEffect(() => {
     document.documentElement.dataset.variant = variant;
-    document.title = `${weddingContent.couple.groom} · ${weddingContent.couple.bride} | ${VARIANTS[variant].label}`;
+    document.title = `${weddingContent.couple.groom} · ${weddingContent.couple.bride} | ${VARIANTS[variant].title}`;
     const params = new URLSearchParams(window.location.search);
-    params.set("variant", variant);
-    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+    if (variant === "quiet") params.set("variant", "quiet");
+    else params.delete("variant");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
   }, [variant]);
 
   const notify = (message, tone = "success") => {
@@ -932,7 +910,6 @@ function WeddingApp() {
 
   return (
     <main className={`app-shell ${captureMode ? "is-capture" : ""}`}>
-      {!captureMode && <VariantSwitcher variant={variant} onChange={setVariant} />}
       <div className="invitation-stage">
         {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
       </div>
@@ -941,18 +918,6 @@ function WeddingApp() {
         {toast.tone === "error" ? <WarningCircle aria-hidden="true" weight="bold" /> : <Check aria-hidden="true" weight="bold" />}
         <span>{toast.message}</span>
       </div>
-      {!captureMode && (
-        <button className="copy-review-link" type="button" onClick={async () => {
-          try {
-            await copyText(window.location.href);
-            notify("현재 시안 링크를 복사했습니다.");
-          } catch {
-            notify("현재 시안 링크를 복사하지 못했습니다.", "error");
-          }
-        }}>
-          <Copy aria-hidden="true" /> 현재 시안 링크 복사
-        </button>
-      )}
     </main>
   );
 }

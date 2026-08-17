@@ -10,6 +10,16 @@ const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 const guestbookApi = await readFile(new URL("../src/guestbook-api.js", import.meta.url), "utf8");
 
+test("Pastel Letter is the fixed public default while Quiet remains an explicit regression route", () => {
+  assert.match(app, /return value === "quiet" \? "quiet" : "pastel";/);
+  assert.match(app, /if \(variant === "quiet"\) params\.set\("variant", "quiet"\);/);
+  assert.match(app, /else params\.delete\("variant"\);/);
+  assert.match(app, /title: "모바일 청첩장"/);
+  assert.doesNotMatch(app, /function VariantSwitcher/);
+  assert.doesNotMatch(app, /디자인 시안 선택|Wedding card design review|현재 시안 링크 복사|2 · Pastel Letter/);
+  assert.doesNotMatch(css, /\.variant-switcher|\.variant-tabs|\.copy-review-link/);
+});
+
 test("user-confirmed wedding facts are represented without filling unknown fields", () => {
   assert.deepEqual(weddingContent.couple, { groom: "김종인", bride: "유지혜" });
   assert.deepEqual(weddingContent.event, {

@@ -40,7 +40,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   border: 0;
 }
 
-.app-shell { min-height: 100vh; padding: 100px 24px 72px; }
+.app-shell { min-height: 100vh; padding: 24px 24px 72px; }
 .app-shell.is-capture { padding: 0; background: #fff; }
 .invitation-stage { width: min(100%, 430px); margin: 0 auto; }
 .invitation { width: 100%; overflow: hidden; box-shadow: 0 24px 80px rgba(34, 36, 38, .13); -webkit-user-select: none; user-select: none; }
@@ -62,40 +62,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   letter-spacing: .08em;
   text-align: center;
 }
-
-.variant-switcher {
-  position: fixed;
-  z-index: 20;
-  top: 18px;
-  left: 50%;
-  display: flex;
-  width: min(calc(100vw - 32px), 720px);
-  min-height: 66px;
-  padding: 10px 12px 10px 16px;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  transform: translateX(-50%);
-  background: rgba(255, 255, 255, .96);
-  border: 1px solid rgba(34, 42, 48, .11);
-  box-shadow: 0 12px 34px rgba(36, 44, 50, .12);
-  border-radius: 14px;
-}
-.variant-switcher > div:first-child { display: grid; gap: 2px; }
-.variant-switcher strong { font-size: 13px; }
-.variant-switcher span { color: #777; font-size: 12px; }
-.variant-tabs { display: flex; gap: 5px; }
-.variant-tabs button {
-  min-height: 44px;
-  padding: 0 12px;
-  color: #57595b;
-  background: transparent;
-  border: 1px solid #dedede;
-  border-radius: 9px;
-  cursor: pointer;
-  font-size: 12px;
-}
-.variant-tabs button.is-active { color: #fff; background: #29313a; border-color: #29313a; }
 
 .image-slot { position: relative; margin: 0; overflow: hidden; background: #d8d2cb; }
 .image-slot img { width: 100%; height: 100%; display: block; object-fit: cover; }
@@ -465,16 +431,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
 .toast.is-error { background: #713b3b; }
 .toast svg { width: 15px; height: 15px; }
-.copy-review-link { display: flex; min-height: 44px; margin: 22px auto 0; padding: 0 14px; align-items: center; gap: 7px; color: #fff; background: #30383f; border: 0; border-radius: 9px; cursor: pointer; font-size: 13px; }
-
 @media (max-width: 600px) {
-  .app-shell { padding: 88px 0 0; }
-  .variant-switcher { top: 10px; width: calc(100vw - 20px); min-height: 68px; padding-left: 12px; }
-  .variant-switcher > div:first-child span { display: none; }
-  .variant-tabs button { padding: 0 8px; font-size: 12px; }
+  .app-shell { padding: 0; }
   .invitation-stage { width: 100%; max-width: 430px; }
   .invitation { box-shadow: none; }
-  .copy-review-link { margin-bottom: 20px; }
   .bottom-actions.is-pastel { padding-inline: 18px; }
   .gallery-lightbox { padding: calc(72px + env(safe-area-inset-top)) 14px calc(78px + env(safe-area-inset-bottom)); }
   .lightbox-figure { max-width: 100%; max-height: calc(100vh - 150px); }
