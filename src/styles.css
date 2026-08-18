@@ -16,6 +16,7 @@
 html { scroll-behavior: smooth; }
 html { scrollbar-width: none; }
 html::-webkit-scrollbar { display: none; }
+html, body, #root, .app-shell { touch-action: pan-y; }
 
 body {
   margin: 0;
@@ -102,6 +103,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   box-shadow: none;
 }
 .sesang-cameo.is-visible img { animation: sesang-float 3.8s ease-in-out .75s infinite; }
+.is-capture .sesang-cameo img { animation: none !important; }
 
 @keyframes sesang-float {
   0%, 100% { transform: translateY(0) rotate(0); }
@@ -251,6 +253,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   transform-origin: 18% 40%;
   animation: hero-wordmark-enter .72s cubic-bezier(.22, .72, .26, 1) .28s both;
 }
+.is-capture .pastel-hero-wordmark { opacity: 1; animation: none; transition: none; }
 .pastel-hero-wordmark-line { display: block; white-space: nowrap; transform: scaleX(1.04) skewX(-2deg); transform-origin: left center; }
 .pastel-hero-wordmark-line.is-day { margin-top: clamp(5px, 1.6vw, 7px); margin-left: clamp(146px, 39vw, 166px); transform: translateY(-2px) scaleX(1.08) skewX(-1deg); }
 
@@ -509,13 +512,4 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   .app-shell { padding-top: 112px; }
   .invitation-stage { width: 430px; }
   .section-pad { padding-inline: 42px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
-  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-  .section-reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
-  .pastel-hero-wordmark { opacity: 1 !important; animation: none !important; transition: none !important; }
-  .sesang-sticker-motion { opacity: 1 !important; transform: none !important; transition: none !important; }
-  .sesang-cameo img { animation: none !important; }
 }

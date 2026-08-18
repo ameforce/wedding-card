@@ -53,45 +53,36 @@ function getVariant() {
   return value === "quiet" ? "quiet" : "pastel";
 }
 
-function usePhotoZoomGuard() {
-  const photoRef = useRef(null);
-
+function usePageZoomGuard() {
   useEffect(() => {
-    const photoButton = photoRef.current;
-    if (!photoButton) return undefined;
-
     const preventNativeZoom = (event) => event.preventDefault();
     const preventMultiTouchZoom = (event) => {
       if (event.touches.length > 1) event.preventDefault();
     };
 
-    photoButton.addEventListener("gesturestart", preventNativeZoom, { passive: false });
-    photoButton.addEventListener("gesturechange", preventNativeZoom, { passive: false });
-    photoButton.addEventListener("touchstart", preventMultiTouchZoom, { passive: false });
-    photoButton.addEventListener("touchmove", preventMultiTouchZoom, { passive: false });
+    document.addEventListener("gesturestart", preventNativeZoom, { passive: false });
+    document.addEventListener("gesturechange", preventNativeZoom, { passive: false });
+    document.addEventListener("touchstart", preventMultiTouchZoom, { passive: false });
+    document.addEventListener("touchmove", preventMultiTouchZoom, { passive: false });
 
     return () => {
-      photoButton.removeEventListener("gesturestart", preventNativeZoom);
-      photoButton.removeEventListener("gesturechange", preventNativeZoom);
-      photoButton.removeEventListener("touchstart", preventMultiTouchZoom);
-      photoButton.removeEventListener("touchmove", preventMultiTouchZoom);
+      document.removeEventListener("gesturestart", preventNativeZoom);
+      document.removeEventListener("gesturechange", preventNativeZoom);
+      document.removeEventListener("touchstart", preventMultiTouchZoom);
+      document.removeEventListener("touchmove", preventMultiTouchZoom);
     };
   }, []);
-
-  return photoRef;
 }
 
 function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes }) {
   const broken = new URLSearchParams(window.location.search).get("brokenAsset") === "1";
   const [failed, setFailed] = useState(false);
-  const photoButtonRef = usePhotoZoomGuard();
   return (
     <button
       className={`photo-button ${className} ${failed ? "is-fallback" : ""}`}
       type="button"
       aria-label={`${index + 1}번째 사진 크게 보기`}
       ref={(node) => {
-        photoButtonRef.current = node;
         registerTrigger(index, node);
       }}
       onClick={() => openPhoto(index)}
@@ -244,7 +235,7 @@ function PhotoLightbox({ photos, gallery, tone }) {
 
 function SesangCameo({ asset, side }) {
   const nodeRef = useRef(null);
-  const [visible, setVisible] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     if (visible) return undefined;
@@ -286,8 +277,7 @@ function PlaceholderBadge() {
 function ScrollReveal({ children, className = "" }) {
   const nodeRef = useRef(null);
   const [visible, setVisible] = useState(() => (
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-    || new URLSearchParams(window.location.search).get("capture") === "1"
+    new URLSearchParams(window.location.search).get("capture") === "1"
     || !("IntersectionObserver" in window)
   ));
 
@@ -943,6 +933,7 @@ function WeddingApp() {
   }), [runtime.content]);
   const [toast, setToast] = useState({ message: "", tone: "success" });
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
+  usePageZoomGuard();
 
   useEffect(() => {
     document.documentElement.dataset.variant = variant;
