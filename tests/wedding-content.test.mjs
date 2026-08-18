@@ -324,13 +324,15 @@ test("couple-only guestbook admin reports a successful empty state", () => {
   assert.match(app, /state\.status === "ready" \? "새로고침"/);
 });
 
-test("section spacing and reveal motion remain subtle and reduced-motion safe", () => {
+test("public section motion stays active in Chrome while capture mode remains static", () => {
   assert.match(app, /function ScrollReveal/);
   assert.match(app, /new IntersectionObserver/);
-  assert.match(app, /prefers-reduced-motion: reduce/);
+  assert.doesNotMatch(app, /prefers-reduced-motion: reduce/);
   assert.match(css, /\.section-reveal\s*\{[^}]*opacity:\s*0[^}]*translateY\(14px\)/);
   assert.match(css, /\.pastel-invitation > \.section-reveal \+ \.section-reveal\s*\{[^}]*margin-top:\s*28px/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.section-reveal/);
+  assert.doesNotMatch(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /\.is-capture \.pastel-hero-wordmark\s*\{[^}]*animation:\s*none/);
+  assert.match(css, /\.is-capture \.section-reveal\s*\{[^}]*opacity:\s*1[^}]*transform:\s*none/);
 });
 
 test("confirmed subway, shuttle and parking guidance is represented verbatim", () => {
