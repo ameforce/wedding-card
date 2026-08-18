@@ -42,6 +42,6 @@ test("Sesang is an absolute gallery-edge decoration, not a standalone spacer sec
   assert.doesNotMatch(app, /is-sleep|SESANG_STICKERS\.right|SESANG_STICKERS\.sleep/);
 });
 
-test("Sesang float motion remains still when reduced motion is requested", () => {
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.sesang-cameo img \{ animation:\s*none !important; \}/);
+test("Sesang float motion remains still in capture mode", () => {
+  assert.match(css, /\.is-capture \.sesang-cameo img \{ animation:\s*none !important; \}/);
 });

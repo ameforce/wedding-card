@@ -102,7 +102,6 @@ test("static invitation content cannot be selected while editable fields retain 
   assert.match(invitation, /-webkit-user-select:\s*none/);
   assert.match(invitation, /user-select:\s*none/);
   assert.match(css, /\.invitation input,\s*\.invitation textarea,\s*\.invitation \[contenteditable\]:not\(\[contenteditable="false"\]\)\s*\{[^}]*-webkit-user-select:\s*text[^}]*user-select:\s*text/);
-  assert.doesNotMatch(indexHtml, /(?:maximum-scale|user-scalable)\s*=/);
 });
 
 test("guestbook identity inputs stay side by side, top-aligned, and equally tall", () => {
@@ -138,19 +137,20 @@ test("lightbox blocks local native zoom without removing its accessible controls
   assert.match(app, /event\.key === "Escape"/);
 });
 
-test("main-page photo triggers block local native zoom while preserving page scroll and form zoom", () => {
-  const photoButton = rule(".photo-button");
-  const photoZoomGuard = app.match(/function usePhotoZoomGuard\([\s\S]*?\n}\n\nfunction PhotoButton/)?.[0] ?? "";
+test("the public invitation blocks page-wide native zoom while preserving vertical scroll and form editing", () => {
+  const pageTouchContract = rule("html, body, #root, .app-shell");
+  const pageZoomGuard = app.match(/function usePageZoomGuard\([\s\S]*?\n}\n\nfunction PhotoButton/)?.[0] ?? "";
 
-  assert.match(photoButton, /touch-action:\s*pan-y/);
-  assert.match(photoZoomGuard, /function usePhotoZoomGuard/);
-  assert.match(photoZoomGuard, /photoButton\.addEventListener\("gesturestart", preventNativeZoom, \{ passive: false \}\)/);
-  assert.match(photoZoomGuard, /photoButton\.addEventListener\("gesturechange", preventNativeZoom, \{ passive: false \}\)/);
-  assert.match(photoZoomGuard, /photoButton\.addEventListener\("touchstart", preventMultiTouchZoom, \{ passive: false \}\)/);
-  assert.match(photoZoomGuard, /photoButton\.addEventListener\("touchmove", preventMultiTouchZoom, \{ passive: false \}\)/);
-  assert.match(photoZoomGuard, /event\.touches\.length > 1/);
-  assert.match(app, /function PhotoButton[\s\S]*?onDoubleClick=\{\(event\) => event\.preventDefault\(\)\}/);
-  assert.doesNotMatch(indexHtml, /(?:maximum-scale|user-scalable)\s*=/);
+  assert.match(pageTouchContract, /touch-action:\s*pan-y/);
+  assert.match(pageZoomGuard, /function usePageZoomGuard/);
+  assert.match(pageZoomGuard, /document\.addEventListener\("gesturestart", preventNativeZoom, \{ passive: false \}\)/);
+  assert.match(pageZoomGuard, /document\.addEventListener\("gesturechange", preventNativeZoom, \{ passive: false \}\)/);
+  assert.match(pageZoomGuard, /document\.addEventListener\("touchstart", preventMultiTouchZoom, \{ passive: false \}\)/);
+  assert.match(pageZoomGuard, /document\.addEventListener\("touchmove", preventMultiTouchZoom, \{ passive: false \}\)/);
+  assert.match(pageZoomGuard, /event\.touches\.length > 1/);
+  assert.doesNotMatch(app, /function usePhotoZoomGuard/);
+  assert.match(indexHtml, /maximum-scale=1/);
+  assert.match(indexHtml, /user-scalable=no/);
   assert.match(css, /\.invitation input,\s*\.invitation textarea,\s*\.invitation \[contenteditable\]:not\(\[contenteditable="false"\]\)\s*\{[^}]*-webkit-user-select:\s*text[^}]*user-select:\s*text/);
 });
 
