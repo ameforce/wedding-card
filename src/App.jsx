@@ -53,27 +53,6 @@ function getVariant() {
   return value === "quiet" ? "quiet" : "pastel";
 }
 
-function usePageZoomGuard() {
-  useEffect(() => {
-    const preventNativeZoom = (event) => event.preventDefault();
-    const preventMultiTouchZoom = (event) => {
-      if (event.touches.length > 1) event.preventDefault();
-    };
-
-    document.addEventListener("gesturestart", preventNativeZoom, { passive: false });
-    document.addEventListener("gesturechange", preventNativeZoom, { passive: false });
-    document.addEventListener("touchstart", preventMultiTouchZoom, { passive: false });
-    document.addEventListener("touchmove", preventMultiTouchZoom, { passive: false });
-
-    return () => {
-      document.removeEventListener("gesturestart", preventNativeZoom);
-      document.removeEventListener("gesturechange", preventNativeZoom);
-      document.removeEventListener("touchstart", preventMultiTouchZoom);
-      document.removeEventListener("touchmove", preventMultiTouchZoom);
-    };
-  }, []);
-}
-
 function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes }) {
   const broken = new URLSearchParams(window.location.search).get("brokenAsset") === "1";
   const [failed, setFailed] = useState(false);
@@ -933,8 +912,6 @@ function WeddingApp() {
   }), [runtime.content]);
   const [toast, setToast] = useState({ message: "", tone: "success" });
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
-  usePageZoomGuard();
-
   useEffect(() => {
     document.documentElement.dataset.variant = variant;
     document.title = `${runtime.content.couple.groom} · ${runtime.content.couple.bride} | ${VARIANTS[variant].title}`;

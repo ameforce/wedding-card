@@ -4,6 +4,8 @@ import { test } from "node:test";
 
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+const main = await readFile(new URL("../src/main.jsx", import.meta.url), "utf8");
+const mobileZoomGuard = await readFile(new URL("../src/mobile-zoom-guard.js", import.meta.url), "utf8");
 const actions = await readFile(new URL("../src/invitation-actions.js", import.meta.url), "utf8");
 const indexHtml = await readFile(new URL("../index.html", import.meta.url), "utf8");
 
@@ -139,16 +141,18 @@ test("lightbox blocks local native zoom without removing its accessible controls
 
 test("the public invitation blocks page-wide native zoom while preserving vertical scroll and form editing", () => {
   const pageTouchContract = rule("html, body, #root, .app-shell");
-  const pageZoomGuard = app.match(/function usePageZoomGuard\([\s\S]*?\n}\n\nfunction PhotoButton/)?.[0] ?? "";
 
   assert.match(pageTouchContract, /touch-action:\s*pan-y/);
-  assert.match(pageZoomGuard, /function usePageZoomGuard/);
-  assert.match(pageZoomGuard, /document\.addEventListener\("gesturestart", preventNativeZoom, \{ passive: false \}\)/);
-  assert.match(pageZoomGuard, /document\.addEventListener\("gesturechange", preventNativeZoom, \{ passive: false \}\)/);
-  assert.match(pageZoomGuard, /document\.addEventListener\("touchstart", preventMultiTouchZoom, \{ passive: false \}\)/);
-  assert.match(pageZoomGuard, /document\.addEventListener\("touchmove", preventMultiTouchZoom, \{ passive: false \}\)/);
-  assert.match(pageZoomGuard, /event\.touches\.length > 1/);
+  assert.match(mobileZoomGuard, /maxTouchPoints > 0/);
+  assert.match(mobileZoomGuard, /\(pointer: coarse\) and \(hover: none\)/);
+  assert.match(mobileZoomGuard, /targetDocument\.addEventListener\("gesturestart", preventNativeZoom, \{ passive: false \}\)/);
+  assert.match(mobileZoomGuard, /targetDocument\.addEventListener\("gesturechange", preventNativeZoom, \{ passive: false \}\)/);
+  assert.match(mobileZoomGuard, /targetDocument\.addEventListener\("touchstart", preventMultiTouchZoom, \{ passive: false \}\)/);
+  assert.match(mobileZoomGuard, /targetDocument\.addEventListener\("touchmove", preventMultiTouchZoom, \{ passive: false \}\)/);
+  assert.match(mobileZoomGuard, /event\.touches\?\.length > 1/);
+  assert.ok(main.indexOf("installMobilePageZoomGuard();") < main.indexOf("createRoot("));
   assert.doesNotMatch(app, /function usePhotoZoomGuard/);
+  assert.doesNotMatch(app, /function usePageZoomGuard/);
   assert.match(indexHtml, /maximum-scale=1/);
   assert.match(indexHtml, /user-scalable=no/);
   assert.match(css, /\.invitation input,\s*\.invitation textarea,\s*\.invitation \[contenteditable\]:not\(\[contenteditable="false"\]\)\s*\{[^}]*-webkit-user-select:\s*text[^}]*user-select:\s*text/);
