@@ -9,6 +9,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 test("production CI deploys a Worker version without mutating Custom Domain routes", async () => {
   const workflow = await readFile(resolve(root, ".github/workflows/cloudflare.yml"), "utf8");
 
+  assert.match(workflow, /- ['"]hotfix\/\*\*['"]/);
   assert.match(workflow, /npm run upload:cloudflare:version/);
   assert.match(workflow, /npm run deploy:cloudflare:version/);
   assert.doesNotMatch(workflow, /npm run deploy:cloudflare:built/);
