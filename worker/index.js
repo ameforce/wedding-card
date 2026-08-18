@@ -7,6 +7,10 @@ const MEDIA_API_PREFIX = "/api/media";
 // Web Crypto to derive any bits.
 const PASSWORD_ITERATIONS = 100_000;
 const MAX_PASSWORD_ITERATIONS = 100_000;
+const MAX_CONCURRENT_CREDENTIAL_CHECKS = 4;
+const AUTH_FAILURE_LIMIT = 5;
+const AUTH_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_LOCK_MS = 15 * 60 * 1000;
 const MAX_BODY_BYTES = 8_192;
 const MAX_CONTENT_BODY_BYTES = 131_072;
 const MAX_MEDIA_BODY_BYTES = 30 * 1024 * 1024;
@@ -30,6 +34,7 @@ const CONTENT_SECURITY_POLICY = [
 ].join("; ");
 const ACCESS_JWKS_TTL_MS = 5 * 60 * 1000;
 const accessKeyCache = new Map();
+let activeCredentialChecks = 0;
 
 function withSearchPrivacy(response) {
   const headers = new Headers(response.headers);
@@ -100,15 +105,46 @@ async function privacyPreservingRateKey(value) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function enforceGuestbookRateLimit(env, action, actor = "all") {
+function rateLimitError() {
+  return { status: 429, code: "RATE_LIMITED", message: "요청이 많습니다. 잠시 후 다시 시도해 주세요." };
+}
+
+async function requireRateLimit(binding, key) {
+  const result = await binding.limit({ key });
+  if (!result?.success) throw rateLimitError();
+}
+
+async function enforceGuestbookCallerRateLimit(env, request, { authentication = false } = {}) {
   if (env.REQUIRE_GUESTBOOK_RATE_LIMIT !== "1") return;
   if (!env.GUESTBOOK_RATE_LIMITER || typeof env.GUESTBOOK_RATE_LIMITER.limit !== "function") {
     throw { status: 503, code: "RATE_LIMIT_UNAVAILABLE", message: "방명록 보호 기능이 아직 연결되지 않았습니다." };
   }
-  const key = `${action}:${await privacyPreservingRateKey(actor)}`;
-  const result = await env.GUESTBOOK_RATE_LIMITER.limit({ key });
-  if (!result?.success) {
-    throw { status: 429, code: "RATE_LIMITED", message: "요청이 많습니다. 잠시 후 다시 시도해 주세요." };
+  const actor = request.headers.get("cf-connecting-ip")?.trim() || "unknown-client";
+  await requireRateLimit(env.GUESTBOOK_RATE_LIMITER, `caller:${await privacyPreservingRateKey(actor)}`);
+  if (authentication) {
+    await requireRateLimit(env.GUESTBOOK_RATE_LIMITER, "authentication:global");
+  }
+}
+
+async function enforceGuestbookCredentialRateLimit(env, name) {
+  if (env.REQUIRE_GUESTBOOK_RATE_LIMIT !== "1") return;
+  if (!env.GUESTBOOK_CREDENTIAL_RATE_LIMITER
+    || typeof env.GUESTBOOK_CREDENTIAL_RATE_LIMITER.limit !== "function") {
+    throw { status: 503, code: "RATE_LIMIT_UNAVAILABLE", message: "방명록 보호 기능이 아직 연결되지 않았습니다." };
+  }
+  await requireRateLimit(
+    env.GUESTBOOK_CREDENTIAL_RATE_LIMITER,
+    `credential:${await privacyPreservingRateKey(name)}`,
+  );
+}
+
+async function withCredentialVerificationSlot(operation) {
+  if (activeCredentialChecks >= MAX_CONCURRENT_CREDENTIAL_CHECKS) throw rateLimitError();
+  activeCredentialChecks += 1;
+  try {
+    return await operation();
+  } finally {
+    activeCredentialChecks -= 1;
   }
 }
 
@@ -133,13 +169,42 @@ async function readJson(request, maxBytes = MAX_BODY_BYTES) {
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
     throw { status: 415, code: "JSON_REQUIRED", message: "JSON 요청만 허용됩니다." };
   }
-  const length = Number(request.headers.get("content-length") || 0);
-  if (length > maxBytes) throw { status: 413, code: "BODY_TOO_LARGE", message: "요청이 너무 큽니다." };
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > maxBytes) {
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) {
     throw { status: 413, code: "BODY_TOO_LARGE", message: "요청이 너무 큽니다." };
   }
+
+  const reader = request.body?.getReader();
+  const chunks = [];
+  let byteLength = 0;
+  if (reader) {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array)) {
+          throw { status: 400, code: "INVALID_JSON", message: "요청 형식이 올바르지 않습니다." };
+        }
+        byteLength += value.byteLength;
+        if (byteLength > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw { status: 413, code: "BODY_TOO_LARGE", message: "요청이 너무 큽니다." };
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     return JSON.parse(text);
   } catch {
     throw { status: 400, code: "INVALID_JSON", message: "요청 형식이 올바르지 않습니다." };
@@ -180,9 +245,44 @@ function requireDatabase(env) {
 
 async function findEntriesByName(db, name) {
   const result = await db.prepare(
-    "SELECT id, name, message, password_hash, created_at, updated_at FROM guestbook_entries WHERE name = ? LIMIT 2",
+    "SELECT id, name, message, password_hash, created_at, updated_at, auth_failure_count, auth_window_started_at_ms, auth_locked_until_ms FROM guestbook_entries WHERE name = ? LIMIT 2",
   ).bind(name).all();
   return result.results || [];
+}
+
+async function recordCredentialFailure(db, entry, now) {
+  const expiredBefore = now - AUTH_FAILURE_WINDOW_MS;
+  const result = await db.prepare(
+    `UPDATE guestbook_entries SET auth_failure_count = CASE
+      WHEN auth_window_started_at_ms = 0 OR auth_window_started_at_ms <= ? THEN 1
+      ELSE MIN(auth_failure_count + 1, ?)
+    END, auth_window_started_at_ms = CASE
+      WHEN auth_window_started_at_ms = 0 OR auth_window_started_at_ms <= ? THEN ?
+      ELSE auth_window_started_at_ms
+    END, auth_locked_until_ms = CASE
+      WHEN auth_window_started_at_ms = 0 OR auth_window_started_at_ms <= ? THEN 0
+      WHEN auth_failure_count + 1 >= ? THEN ?
+      ELSE auth_locked_until_ms
+    END WHERE id = ? RETURNING auth_failure_count, auth_locked_until_ms`,
+  ).bind(
+    expiredBefore,
+    AUTH_FAILURE_LIMIT,
+    expiredBefore,
+    now,
+    expiredBefore,
+    AUTH_FAILURE_LIMIT,
+    now + AUTH_LOCK_MS,
+    entry.id,
+  ).first();
+  if (!result) throw new Error("guestbook credential failure state was not updated");
+  return result;
+}
+
+async function resetCredentialFailures(db, entry) {
+  if (!Number(entry.auth_failure_count) && !Number(entry.auth_locked_until_ms)) return;
+  await db.prepare(
+    "UPDATE guestbook_entries SET auth_failure_count = 0, auth_window_started_at_ms = 0, auth_locked_until_ms = 0 WHERE id = ?",
+  ).bind(entry.id).run();
 }
 
 async function requireUniqueCredentialMatch(db, name, password) {
@@ -190,23 +290,32 @@ async function requireUniqueCredentialMatch(db, name, password) {
   if (candidates.length !== 1) {
     throw { status: 401, code: "ENTRY_AUTH_FAILED", message: "이름 또는 비밀번호를 확인해 주세요." };
   }
+  const entry = candidates[0];
+  const now = Date.now();
+  if (Number(entry.auth_locked_until_ms) > now) throw rateLimitError();
   let passwordMatches = false;
   try {
-    passwordMatches = await verifyPassword(password, candidates[0].password_hash);
-  } catch {
+    passwordMatches = await withCredentialVerificationSlot(
+      () => verifyPassword(password, entry.password_hash),
+    );
+  } catch (error) {
+    if (error?.status === 429) throw error;
     passwordMatches = false;
   }
   if (!passwordMatches) {
+    const failure = await recordCredentialFailure(db, entry, now);
+    if (Number(failure.auth_locked_until_ms) > now) throw rateLimitError();
     throw { status: 401, code: "ENTRY_AUTH_FAILED", message: "이름 또는 비밀번호를 확인해 주세요." };
   }
-  return candidates[0];
+  await resetCredentialFailures(db, entry);
+  return entry;
 }
 
 async function createEntry(request, env) {
   requireSameOrigin(request);
   const db = requireDatabase(env);
+  await enforceGuestbookCallerRateLimit(env, request);
   const { name, password, message } = normalizeEntry(await readJson(request));
-  await enforceGuestbookRateLimit(env, "create", request.headers.get("cf-connecting-ip")?.trim() || "unknown-client");
   const existingEntries = await findEntriesByName(db, name);
   if (existingEntries.length > 0) {
     return apiError(409, "ENTRY_NAME_IN_USE", "같은 이름으로 작성한 글이 이미 있습니다. 소속이나 별칭을 이름에 덧붙여 구분해 주세요.");
@@ -231,8 +340,9 @@ async function createEntry(request, env) {
 async function unlockEntry(request, env) {
   requireSameOrigin(request);
   const db = requireDatabase(env);
+  await enforceGuestbookCallerRateLimit(env, request, { authentication: true });
   const { name, password } = normalizeEntry(await readJson(request), { requireMessage: false });
-  await enforceGuestbookRateLimit(env, "unlock", name);
+  await enforceGuestbookCredentialRateLimit(env, name);
   const entry = await requireUniqueCredentialMatch(db, name, password);
   return json({ entry: { name: entry.name, message: entry.message, updatedAt: entry.updated_at } });
 }
@@ -240,8 +350,9 @@ async function unlockEntry(request, env) {
 async function updateEntry(request, env) {
   requireSameOrigin(request);
   const db = requireDatabase(env);
+  await enforceGuestbookCallerRateLimit(env, request, { authentication: true });
   const { name, password, message } = normalizeEntry(await readJson(request));
-  await enforceGuestbookRateLimit(env, "update", name);
+  await enforceGuestbookCredentialRateLimit(env, name);
   const entry = await requireUniqueCredentialMatch(db, name, password);
   const updatedAt = new Date().toISOString();
   await db.prepare("UPDATE guestbook_entries SET message = ?, updated_at = ? WHERE id = ?").bind(message, updatedAt, entry.id).run();
@@ -797,6 +908,7 @@ export default {
 export const __test = {
   PASSWORD_ITERATIONS,
   MAX_PASSWORD_ITERATIONS,
+  withCredentialVerificationSlot,
   hashPassword,
   verifyPassword,
   verifyAccessJwt,
