@@ -67,14 +67,54 @@ function database() {
           if (sql.startsWith("INSERT")) {
             const [id, name, message, passwordHash, createdAt, updatedAt] = values;
             if ([...rows.values()].some((entry) => entry.name === name)) throw new Error("UNIQUE constraint failed");
-            rows.set(id, { id, name, message, password_hash: passwordHash, created_at: createdAt, updated_at: updatedAt });
-          } else if (sql.startsWith("UPDATE")) {
+            rows.set(id, {
+              id,
+              name,
+              message,
+              password_hash: passwordHash,
+              created_at: createdAt,
+              updated_at: updatedAt,
+              auth_failure_count: 0,
+              auth_window_started_at_ms: 0,
+              auth_locked_until_ms: 0,
+            });
+          } else if (sql.startsWith("UPDATE guestbook_entries SET message")) {
             const [message, updatedAt, id] = values;
             rows.set(id, { ...rows.get(id), message, updated_at: updatedAt });
+          } else if (sql.startsWith("UPDATE guestbook_entries SET auth_failure_count = 0")) {
+            const [id] = values;
+            rows.set(id, {
+              ...rows.get(id),
+              auth_failure_count: 0,
+              auth_window_started_at_ms: 0,
+              auth_locked_until_ms: 0,
+            });
           }
           return { success: true };
         },
         async first() {
+          if (sql.startsWith("UPDATE guestbook_entries SET auth_failure_count = CASE")) {
+            const [expiredBefore, maximumFailures, , now, , , lockedUntil, id] = values;
+            const entry = rows.get(id);
+            const startsNewWindow = entry.auth_window_started_at_ms === 0
+              || entry.auth_window_started_at_ms <= expiredBefore;
+            const failureCount = startsNewWindow
+              ? 1
+              : Math.min(entry.auth_failure_count + 1, maximumFailures);
+            const next = {
+              ...entry,
+              auth_failure_count: failureCount,
+              auth_window_started_at_ms: startsNewWindow ? now : entry.auth_window_started_at_ms,
+              auth_locked_until_ms: !startsNewWindow && failureCount >= maximumFailures
+                ? lockedUntil
+                : entry.auth_locked_until_ms,
+            };
+            rows.set(id, next);
+            return {
+              auth_failure_count: next.auth_failure_count,
+              auth_locked_until_ms: next.auth_locked_until_ms,
+            };
+          }
           return rows.get(values[0]) || null;
         },
         async all() {
@@ -104,6 +144,20 @@ test("password verifier metadata never asks workerd to exceed its PBKDF2 limit",
   const verifier = await __test.hashPassword("correct horse");
   const unsupported = verifier.replace("$100000$", "$600000$");
   assert.equal(await __test.verifyPassword("correct horse", unsupported), false);
+});
+
+test("credential verification has a bounded per-isolate concurrency ceiling", async () => {
+  assert.equal(typeof __test.withCredentialVerificationSlot, "function");
+  const releases = [];
+  const active = Array.from({ length: 4 }, () => __test.withCredentialVerificationSlot(
+    () => new Promise((resolve) => releases.push(resolve)),
+  ));
+  await assert.rejects(
+    __test.withCredentialVerificationSlot(async () => true),
+    (error) => error?.status === 429 && error?.code === "RATE_LIMITED",
+  );
+  releases.forEach((release) => release(true));
+  assert.deepEqual(await Promise.all(active), [true, true, true, true]);
 });
 
 test("worker source never logs guestbook payloads, passwords, messages, or hashes", async () => {
@@ -265,6 +319,50 @@ test("embedded null characters are rejected before a guestbook write", async () 
   assert.equal(db.rows.size, 0);
 });
 
+test("oversized chunked bodies consume the caller budget and stop at the byte ceiling", async () => {
+  const chunks = [4_096, 4_096, 1, 4_096].map((size) => new Uint8Array(size).fill(0x20));
+  let chunkIndex = 0;
+  let cancelled = false;
+  let limiterCalls = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (chunkIndex >= chunks.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(chunks[chunkIndex]);
+      chunkIndex += 1;
+    },
+    cancel() {
+      cancelled = true;
+    },
+  }, { highWaterMark: 0 });
+  const response = await worker.fetch(new Request("https://example.test/api/guestbook/entries", {
+    method: "POST",
+    duplex: "half",
+    headers: {
+      origin: "https://example.test",
+      "content-type": "application/json",
+      "cf-connecting-ip": "203.0.113.40",
+    },
+    body,
+  }), {
+    GUESTBOOK_DB: database(),
+    REQUIRE_GUESTBOOK_RATE_LIMIT: "1",
+    GUESTBOOK_RATE_LIMITER: {
+      async limit() {
+        limiterCalls += 1;
+        return { success: true };
+      },
+    },
+  });
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).code, "BODY_TOO_LARGE");
+  assert.equal(limiterCalls, 1);
+  assert.equal(cancelled, true);
+  assert.equal(chunkIndex, 3);
+});
+
 test("production guestbook writes fail closed without the rate limiter and never use plaintext names as keys", async () => {
   const db = database();
   const missing = await worker.fetch(request("/api/guestbook/entries", {
@@ -293,7 +391,7 @@ test("production guestbook writes fail closed without the rate limiter and never
     assert.equal(response.status, 429);
   }
   assert.equal(createKeys[0] === createKeys[1], false);
-  assert.match(createKeys[0], /^create:[a-f0-9]{64}$/);
+  assert.match(createKeys[0], /^caller:[a-f0-9]{64}$/);
   assert.equal(createKeys.some((key) => key.includes("203.0.113")), false);
 
   let observedKey = "";
@@ -313,7 +411,96 @@ test("production guestbook writes fail closed without the rate limiter and never
   assert.equal(limited.status, 429);
   assert.equal((await limited.json()).code, "RATE_LIMITED");
   assert.equal(observedKey.includes("비공개 하객 이름"), false);
-  assert.match(observedKey, /^unlock:[a-f0-9]{64}$/);
+  assert.match(observedKey, /^caller:[a-f0-9]{64}$/);
+});
+
+test("different names share caller and authentication budgets before D1 work", async () => {
+  const counts = new Map();
+  const limiter = {
+    async limit({ key }) {
+      const count = (counts.get(key) || 0) + 1;
+      counts.set(key, count);
+      return { success: count <= 30 };
+    },
+  };
+  let limited = 0;
+  for (let index = 0; index < 31; index += 1) {
+    const response = await worker.fetch(request("/api/guestbook/entries/unlock", {
+      method: "POST",
+      headers: { "cf-connecting-ip": "203.0.113.41" },
+      body: JSON.stringify({ name: `공격자-${index}`, password: "1234" }),
+    }), {
+      GUESTBOOK_DB: database(),
+      REQUIRE_GUESTBOOK_RATE_LIMIT: "1",
+      GUESTBOOK_RATE_LIMITER: limiter,
+      GUESTBOOK_CREDENTIAL_RATE_LIMITER: { async limit() { return { success: true }; } },
+    });
+    if (response.status === 429) limited += 1;
+  }
+  assert.equal(limited > 0, true);
+  assert.equal([...counts.keys()].filter((key) => key.startsWith("caller:")).length, 1);
+  assert.equal(counts.has("authentication:global"), true);
+});
+
+test("unlock and update share one privacy-preserving credential budget", async () => {
+  const credentialKeys = [];
+  const env = {
+    GUESTBOOK_DB: database(),
+    REQUIRE_GUESTBOOK_RATE_LIMIT: "1",
+    GUESTBOOK_RATE_LIMITER: { async limit() { return { success: true }; } },
+    GUESTBOOK_CREDENTIAL_RATE_LIMITER: {
+      async limit({ key }) {
+        credentialKeys.push(key);
+        return { success: true };
+      },
+    },
+  };
+  const unlock = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "같은 하객", password: "1234" }),
+  }), env);
+  const update = await worker.fetch(request("/api/guestbook/entries", {
+    method: "PATCH",
+    body: JSON.stringify({ name: "같은 하객", password: "1234", message: "수정" }),
+  }), env);
+  assert.equal(unlock.status, 401);
+  assert.equal(update.status, 401);
+  assert.equal(credentialKeys.length, 2);
+  assert.equal(credentialKeys[0], credentialKeys[1]);
+  assert.match(credentialKeys[0], /^credential:[a-f0-9]{64}$/);
+  assert.equal(credentialKeys[0].includes("같은 하객"), false);
+});
+
+test("five failed guesses lock an existing four-character credential across edge buckets", async () => {
+  const db = database();
+  const env = {
+    GUESTBOOK_DB: db,
+    REQUIRE_GUESTBOOK_RATE_LIMIT: "1",
+    GUESTBOOK_RATE_LIMITER: { async limit() { return { success: true }; } },
+    GUESTBOOK_CREDENTIAL_RATE_LIMITER: { async limit() { return { success: true }; } },
+  };
+  const created = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "네자리 하객", password: "1234", message: "축하합니다" }),
+  }), env);
+  assert.equal(created.status, 201);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const failed = await worker.fetch(request("/api/guestbook/entries/unlock", {
+      method: "POST",
+      headers: { "cf-connecting-ip": `203.0.113.${50 + attempt}` },
+      body: JSON.stringify({ name: "네자리 하객", password: `000${attempt}` }),
+    }), env);
+    assert.equal([401, 429].includes(failed.status), true);
+  }
+
+  const locked = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    headers: { "cf-connecting-ip": "198.51.100.99" },
+    body: JSON.stringify({ name: "네자리 하객", password: "1234" }),
+  }), env);
+  assert.equal(locked.status, 429);
+  assert.equal((await locked.json()).code, "RATE_LIMITED");
 });
 
 test("administrator list fails closed without trusted upstream identity", async () => {

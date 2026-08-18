@@ -77,12 +77,14 @@ export function splitSqlStatements(sql) {
 
 function isAdditiveStatement(statement) {
   const normalized = statement.replace(/\s+/g, " ").trim();
-  return [
+  const additiveSchemaPatterns = [
     /^CREATE TABLE IF NOT EXISTS\b/i,
     /^CREATE (?:UNIQUE )?INDEX IF NOT EXISTS\b/i,
-    /^INSERT OR IGNORE INTO\b/i,
     /^ALTER TABLE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[a-z0-9_]+)\s+ADD COLUMN\b/i,
-  ].some((pattern) => pattern.test(normalized));
+  ];
+  if (additiveSchemaPatterns.some((pattern) => pattern.test(normalized))) return true;
+
+  return /^INSERT OR IGNORE INTO invitation_state\s*\(\s*singleton_id\s*,\s*draft_revision_id\s*,\s*published_revision_id\s*,\s*updated_at\s*\)\s*VALUES\s*\(\s*1\s*,\s*NULL\s*,\s*NULL\s*,\s*'1970-01-01T00:00:00\.000Z'\s*\)$/i.test(normalized);
 }
 
 export function assertAdditiveMigration(sql, filename = "migration.sql") {
