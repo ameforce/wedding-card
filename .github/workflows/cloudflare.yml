@@ -1,0 +1,114 @@
+name: Cloudflare CI/CD
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Reject destructive D1 migrations
+        run: npm run check:migrations
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run UI tests
+        run: npm run test:ui
+
+      - name: Build production assets
+        run: npm run build
+
+      - name: Run Worker and deployment tests
+        run: npm run test:sites
+
+      - name: Validate the Cloudflare bundle
+        run: npm run cloudflare:dry-run:built
+
+  deploy:
+    name: Deploy production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://wdcard.enmsoftware.com/
+    concurrency:
+      group: cloudflare-production
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check out the exact main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build the trusted main commit
+        run: npm run build
+
+      - name: Capture recovery points
+        id: recovery
+        run: node scripts/cloudflare-deployment-state.mjs capture
+
+      - name: Recheck additive-only migrations
+        run: npm run check:migrations
+
+      - name: Apply remote D1 migrations
+        run: npm run d1:migrations:apply
+
+      - name: Deploy Worker and Static Assets
+        id: deploy
+        run: >-
+          npm run deploy:cloudflare:built --
+          --strict
+          --tag "$GITHUB_SHA"
+          --message "GitHub Actions $GITHUB_SHA"
+
+      - name: Verify the active Worker version
+        run: node scripts/cloudflare-deployment-state.mjs verify "$GITHUB_SHA"
+
+      - name: Run bounded production canary
+        env:
+          WEDDING_CANARY_ALLOW_PRODUCTION_WRITE: "1"
+          WEDDING_CANARY_ALLOW_D1_ADMIN_READ: "1"
+        run: npm run canary:production
+
+      - name: Roll back Worker after post-deploy failure
+        if: ${{ failure() && steps.deploy.outcome == 'success' && steps.recovery.outputs.previous_worker_version != '' }}
+        run: >-
+          node scripts/cloudflare-deployment-state.mjs rollback
+          "${{ steps.recovery.outputs.previous_worker_version }}"
+          "$GITHUB_SHA"

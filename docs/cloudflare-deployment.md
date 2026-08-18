@@ -6,6 +6,26 @@ Use a direct Cloudflare Worker Custom Domain for `https://wdcard.enmsoftware.com
 
 This is the confirmed architecture decision. Production is live at `https://wdcard.enmsoftware.com/` with the D1 content-revision API, private R2 media contract, Access JWT verification, and content/guestbook administrator UI. The production bindings and custom domain in `wrangler.jsonc` are the deployment source of truth; sensitive Access values remain deployment-only secrets.
 
+GitHub Actions is the sole production deployment controller. ENM Jenkins and Cloudflare Git Builds are intentionally outside this project's deploy path. Pull requests receive validation only and never receive Cloudflare credentials; a protected `main` push runs the serialized production deployment in the GitHub `production` Environment.
+
+## GitHub Actions deployment contract
+
+`.github/workflows/cloudflare.yml` pins GitHub-owned actions to full commit SHAs and uses the exact Node version in `.node-version`. Its two jobs are deliberately separated:
+
+1. `Verify` runs for pull requests to `develop` or `main`, and again for `main`: locked install, migration policy, lint, UI tests, production build, Worker tests, and a Wrangler dry-run.
+2. `Deploy production` runs only after a successful `main` push verification. It rebuilds the trusted commit, records the active Worker version and a D1 Time Travel bookmark, applies additive D1 migrations, deploys with the 40-character Git SHA as the Worker tag, reads the active version back, and runs the bounded production canary.
+
+The GitHub `production` Environment must be restricted to `main` and contain only these secrets:
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN`: a dedicated, expiring token scoped to this account with Workers Scripts Write, D1 Write, Workers R2 Storage Write, and Account Settings Read. Do not reuse a human global API key.
+
+Protect `main` so changes arrive through a pull request and require the `Verify` check. Keep force pushes and branch deletion disabled. Repository Actions policy should allow GitHub-owned actions only and require actions to be pinned to a full commit SHA.
+
+The deploy job never receives a Cloudflare Access administrator JWT. Its unattended canary therefore proves public delivery and security headers, the guestbook create/unlock/update lifecycle, remote D1 persistence and exact cleanup, plus unauthenticated administrator rejection. It must report the administrator result as `access-denied`, not as an authenticated administrator read. The latter remains an attended check with a short-lived allowlisted Access token.
+
+If a check after `wrangler deploy` fails, the workflow rolls Worker traffic back to the exact version captured before deployment and verifies that version is active. It does not automatically restore D1: `scripts/check-d1-migrations.mjs` allows only additive, backward-compatible migration forms so the previous Worker can continue operating. Use the recorded D1 bookmark only for an explicitly reviewed recovery operation.
+
 ## Fit with the current repository
 
 - `dist/client/` contains the Vite SPA assets.
