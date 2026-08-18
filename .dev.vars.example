@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local Cloudflare Worker testing. Never commit real values.
+ACCESS_TEAM_DOMAIN=
+ACCESS_AUD=
+WEDDING_ADMIN_EMAILS=

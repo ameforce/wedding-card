@@ -1,0 +1,42 @@
+{
+  "name": "wedding-card",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "check:content": "node scripts/check-content.mjs",
+    "build": "node scripts/check-content.mjs && vite build && node scripts/prepare-sites-build.mjs",
+    "build:design": "cross-env ALLOW_DESIGN_PLACEHOLDERS=1 npm run build",
+    "deploy:cloudflare": "npm run build && wrangler deploy",
+    "deploy:cloudflare:verified": "npm run deploy:cloudflare && npm run canary:production",
+    "canary:production": "node scripts/post-deploy-canary.mjs",
+    "cloudflare:dry-run": "npm run build:design && wrangler deploy --dry-run",
+    "lint": "eslint .",
+    "optimize:assets": "node scripts/optimize-assets.mjs",
+    "preview": "vite preview",
+    "test:ui": "node --test tests/sesang-sticker-layout.test.mjs tests/wedding-content.test.mjs tests/text-alignment.test.mjs tests/invitation-actions.test.mjs tests/admin-content.test.mjs",
+    "test:sites": "node --test tests/sites-worker.test.mjs tests/guestbook-worker.test.mjs tests/content-worker.test.mjs tests/post-deploy-canary.test.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/cormorant-garamond": "^5.3.0",
+    "@fontsource-variable/noto-sans-kr": "^5.3.0",
+    "@fontsource-variable/noto-serif-kr": "^5.3.0",
+    "@fontsource/allison": "^5.3.0",
+    "@phosphor-icons/react": "^2.1.10",
+    "@vitejs/plugin-react": "5.0.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "vite": "6.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "cross-env": "^10.1.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^16.4.0",
+    "sharp": "0.35.3",
+    "wrangler": "^4.123.0"
+  }
+}

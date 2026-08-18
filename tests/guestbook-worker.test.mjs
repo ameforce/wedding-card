@@ -1,0 +1,372 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import worker, { __test } from "../worker/index.js";
+
+function request(path, init = {}) {
+  return new Request(`https://example.test${path}`, {
+    ...init,
+    headers: {
+      origin: "https://example.test",
+      "content-type": "application/json",
+      ...init.headers,
+    },
+  });
+}
+
+function base64Url(value) {
+  const bytes = typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value);
+  return Buffer.from(bytes).toString("base64url");
+}
+
+async function accessFixture(email = "bride@example.test") {
+  const keys = await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const kid = crypto.randomUUID();
+  const teamOrigin = "https://wedding-test.cloudflareaccess.com";
+  const audience = "wedding-access-audience";
+  const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT", kid }));
+  const now = Math.floor(Date.now() / 1000);
+  const claims = base64Url(JSON.stringify({
+    iss: teamOrigin,
+    aud: [audience],
+    email,
+    iat: now - 5,
+    exp: now + 300,
+  }));
+  const input = `${header}.${claims}`;
+  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", keys.privateKey, new TextEncoder().encode(input));
+  const publicJwk = await crypto.subtle.exportKey("jwk", keys.publicKey);
+  return {
+    assertion: `${input}.${base64Url(signature)}`,
+    jwks: { keys: [{ ...publicJwk, kid, alg: "RS256", use: "sig" }] },
+    env: {
+      ADMIN_AUTH_MODE: "cloudflare-access-jwt",
+      ACCESS_TEAM_DOMAIN: "wedding-test.cloudflareaccess.com",
+      ACCESS_AUD: audience,
+      WEDDING_ADMIN_EMAILS: "groom@example.test,bride@example.test",
+    },
+  };
+}
+
+function database() {
+  const rows = new Map();
+  return {
+    rows,
+    prepare(sql) {
+      let values = [];
+      return {
+        bind(...nextValues) {
+          values = nextValues;
+          return this;
+        },
+        async run() {
+          if (sql.startsWith("INSERT")) {
+            const [id, name, message, passwordHash, createdAt, updatedAt] = values;
+            if ([...rows.values()].some((entry) => entry.name === name)) throw new Error("UNIQUE constraint failed");
+            rows.set(id, { id, name, message, password_hash: passwordHash, created_at: createdAt, updated_at: updatedAt });
+          } else if (sql.startsWith("UPDATE")) {
+            const [message, updatedAt, id] = values;
+            rows.set(id, { ...rows.get(id), message, updated_at: updatedAt });
+          }
+          return { success: true };
+        },
+        async first() {
+          return rows.get(values[0]) || null;
+        },
+        async all() {
+          if (sql.includes("WHERE name = ?")) {
+            return { results: [...rows.values()].filter((entry) => entry.name === values[0]).slice(0, 2) };
+          }
+          return { results: [...rows.values()] };
+        },
+      };
+    },
+  };
+}
+
+test("password verifiers are salted PBKDF2 values and reject the wrong password", async () => {
+  const first = await __test.hashPassword("correct horse");
+  const second = await __test.hashPassword("correct horse");
+  assert.notEqual(first, second);
+  assert.match(first, /^pbkdf2-sha256\$100000\$/);
+  assert.equal(first.includes("correct horse"), false);
+  assert.equal(await __test.verifyPassword("correct horse", first), true);
+  assert.equal(await __test.verifyPassword("wrong horse", first), false);
+});
+
+test("password verifier metadata never asks workerd to exceed its PBKDF2 limit", async () => {
+  assert.equal(__test.PASSWORD_ITERATIONS, 100_000);
+  assert.equal(__test.MAX_PASSWORD_ITERATIONS, 100_000);
+  const verifier = await __test.hashPassword("correct horse");
+  const unsupported = verifier.replace("$100000$", "$600000$");
+  assert.equal(await __test.verifyPassword("correct horse", unsupported), false);
+});
+
+test("worker source never logs guestbook payloads, passwords, messages, or hashes", async () => {
+  const source = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /console\.(?:log|info|warn|error|debug)\s*\(/);
+  assert.doesNotMatch(source, /JSON\.stringify\([^)]*password_hash/);
+});
+
+test("public guestbook has no list endpoint and fails closed without D1", async () => {
+  const listResponse = await worker.fetch(request("/api/guestbook/entries", { method: "GET" }), {});
+  assert.equal(listResponse.status, 405);
+
+  const createResponse = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "eightchars", message: "축하합니다" }),
+  }), {});
+  assert.equal(createResponse.status, 503);
+  assert.equal((await createResponse.json()).code, "GUESTBOOK_UNAVAILABLE");
+});
+
+test("authors can create, unlock, and edit only with the matching name and password", async () => {
+  const db = database();
+  const env = { GUESTBOOK_DB: db };
+  const createResponse = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "eightchars", message: "축하합니다" }),
+  }), env);
+  assert.equal(createResponse.status, 201);
+  const createPayload = await createResponse.json();
+  assert.equal("id" in createPayload, false);
+  const { retention } = createPayload;
+  assert.equal(retention, "permanent");
+  const [id] = db.rows.keys();
+  const stored = db.rows.get(id);
+  assert.equal(stored.message, "축하합니다");
+  assert.equal(stored.password_hash.includes("eightchars"), false);
+
+  const denied = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "wrongpass" }),
+  }), env);
+  assert.equal(denied.status, 401);
+
+  const deniedUpdate = await worker.fetch(request("/api/guestbook/entries", {
+    method: "PATCH",
+    body: JSON.stringify({ name: "하객", password: "wrongpass", message: "변조 시도" }),
+  }), env);
+  assert.equal(deniedUpdate.status, 401);
+  assert.equal(db.rows.get(id).message, "축하합니다");
+
+  const unlocked = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "eightchars" }),
+  }), env);
+  assert.equal(unlocked.status, 200);
+  const unlockedPayload = await unlocked.json();
+  assert.equal(unlockedPayload.entry.message, "축하합니다");
+  assert.equal("id" in unlockedPayload.entry, false);
+
+  const updated = await worker.fetch(request("/api/guestbook/entries", {
+    method: "PATCH",
+    body: JSON.stringify({ name: "하객", password: "eightchars", message: "두 분 행복하세요" }),
+  }), env);
+  assert.equal(updated.status, 200);
+  assert.equal(db.rows.get(id).message, "두 분 행복하세요");
+});
+
+test("duplicate normalized names are rejected and authentication failures stay generic", async () => {
+  const db = database();
+  const env = { GUESTBOOK_DB: db };
+  const first = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "A하객", password: "first-pass", message: "첫 메시지" }),
+  }), env);
+  assert.equal(first.status, 201);
+
+  const duplicate = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "  Ａ하객  ", password: "second-pass", message: "두 번째 메시지" }),
+  }), env);
+  assert.equal(duplicate.status, 409);
+  const duplicatePayload = await duplicate.json();
+  assert.equal(duplicatePayload.code, "ENTRY_NAME_IN_USE");
+  assert.match(duplicatePayload.message, /소속이나 별칭/);
+
+  const missingName = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "없는 하객", password: "first-pass" }),
+  }), env);
+  const wrongPassword = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "A하객", password: "wrong-pass" }),
+  }), env);
+  assert.equal(missingName.status, 401);
+  assert.equal(wrongPassword.status, 401);
+  assert.deepEqual(await missingName.json(), await wrongPassword.json());
+});
+
+test("unsafe legacy duplicate names fail closed instead of selecting an entry", async () => {
+  const db = database();
+  const verifier = await __test.hashPassword("shared-pass");
+  for (const id of ["legacy-one", "legacy-two"]) {
+    db.rows.set(id, {
+      id,
+      name: "동명이인",
+      message: id,
+      password_hash: verifier,
+      created_at: "2026-08-17T00:00:00.000Z",
+      updated_at: "2026-08-17T00:00:00.000Z",
+    });
+  }
+  const response = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "동명이인", password: "shared-pass" }),
+  }), { GUESTBOOK_DB: db });
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), {
+    code: "ENTRY_AUTH_FAILED",
+    message: "이름 또는 비밀번호를 확인해 주세요.",
+  });
+});
+
+test("guestbook accepts a four-character password and rejects shorter values", async () => {
+  const db = database();
+  const env = { GUESTBOOK_DB: db };
+
+  const rejected = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "abc", message: "축하합니다" }),
+  }), env);
+  assert.equal(rejected.status, 400);
+  assert.equal((await rejected.json()).code, "INVALID_PASSWORD");
+
+  const accepted = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "abcd", message: "축하합니다" }),
+  }), env);
+  assert.equal(accepted.status, 201);
+  assert.equal((await accepted.json()).retention, "permanent");
+});
+
+test("embedded null characters are rejected before a guestbook write", async () => {
+  const db = database();
+  const env = { GUESTBOOK_DB: db };
+
+  const invalidName = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "\u0000", password: "abcd", message: "축하합니다" }),
+  }), env);
+  assert.equal(invalidName.status, 400);
+  assert.equal((await invalidName.json()).code, "INVALID_NAME");
+
+  const invalidMessage = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "abcd", message: "축하\u0000합니다" }),
+  }), env);
+  assert.equal(invalidMessage.status, 400);
+  assert.equal((await invalidMessage.json()).code, "INVALID_MESSAGE");
+  assert.equal(db.rows.size, 0);
+});
+
+test("production guestbook writes fail closed without the rate limiter and never use plaintext names as keys", async () => {
+  const db = database();
+  const missing = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "abcd", message: "축하합니다" }),
+  }), { GUESTBOOK_DB: db, REQUIRE_GUESTBOOK_RATE_LIMIT: "1" });
+  assert.equal(missing.status, 503);
+  assert.equal((await missing.json()).code, "RATE_LIMIT_UNAVAILABLE");
+
+  const createKeys = [];
+  for (const ip of ["203.0.113.10", "203.0.113.11"]) {
+    const response = await worker.fetch(request("/api/guestbook/entries", {
+      method: "POST",
+      headers: { "cf-connecting-ip": ip },
+      body: JSON.stringify({ name: `하객-${ip}`, password: "abcd", message: "축하합니다" }),
+    }), {
+      GUESTBOOK_DB: db,
+      REQUIRE_GUESTBOOK_RATE_LIMIT: "1",
+      GUESTBOOK_RATE_LIMITER: {
+        async limit({ key }) {
+          createKeys.push(key);
+          return { success: false };
+        },
+      },
+    });
+    assert.equal(response.status, 429);
+  }
+  assert.equal(createKeys[0] === createKeys[1], false);
+  assert.match(createKeys[0], /^create:[a-f0-9]{64}$/);
+  assert.equal(createKeys.some((key) => key.includes("203.0.113")), false);
+
+  let observedKey = "";
+  const limited = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "비공개 하객 이름", password: "abcd" }),
+  }), {
+    GUESTBOOK_DB: db,
+    REQUIRE_GUESTBOOK_RATE_LIMIT: "1",
+    GUESTBOOK_RATE_LIMITER: {
+      async limit({ key }) {
+        observedKey = key;
+        return { success: false };
+      },
+    },
+  });
+  assert.equal(limited.status, 429);
+  assert.equal((await limited.json()).code, "RATE_LIMITED");
+  assert.equal(observedKey.includes("비공개 하객 이름"), false);
+  assert.match(observedKey, /^unlock:[a-f0-9]{64}$/);
+});
+
+test("administrator list fails closed without trusted upstream identity", async () => {
+  const response = await worker.fetch(request("/api/guestbook/admin/entries", { method: "GET" }), {
+    GUESTBOOK_DB: database(),
+  });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).code, "ADMIN_AUTH_UNAVAILABLE");
+});
+
+test("administrator list requires an asserted allowlisted identity", async () => {
+  const db = database();
+  db.rows.set("entry-id", {
+    id: "entry-id",
+    name: "하객",
+    message: "비공개 메시지",
+    password_hash: "not returned",
+    created_at: "2026-08-17T00:00:00.000Z",
+    updated_at: "2026-08-17T00:00:00.000Z",
+  });
+  const fixture = await accessFixture();
+  const env = { GUESTBOOK_DB: db, ...fixture.env };
+  const denied = await worker.fetch(request("/api/guestbook/admin/entries", { method: "GET" }), env);
+  assert.equal(denied.status, 401);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const allowed = await worker.fetch(request("/api/guestbook/admin/entries", {
+      method: "GET",
+      headers: { "cf-access-jwt-assertion": fixture.assertion },
+    }), env);
+    assert.equal(allowed.status, 200);
+    const payload = await allowed.json();
+    assert.deepEqual(payload.entries, [{
+      id: "entry-id",
+      name: "하객",
+      message: "비공개 메시지",
+      createdAt: "2026-08-17T00:00:00.000Z",
+      updatedAt: "2026-08-17T00:00:00.000Z",
+    }]);
+    assert.equal(JSON.stringify(payload).includes("password_hash"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("administrator allowlist fails closed unless exactly two distinct deployment emails are configured", async () => {
+  const fixture = await accessFixture("groom@example.test");
+  const env = { GUESTBOOK_DB: database(), ...fixture.env, WEDDING_ADMIN_EMAILS: "groom@example.test,bride@example.test,extra@example.test" };
+  const response = await worker.fetch(request("/api/guestbook/admin/entries", {
+    method: "GET",
+    headers: { "cf-access-jwt-assertion": fixture.assertion },
+  }), env);
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).code, "ADMIN_AUTH_REQUIRED");
+});

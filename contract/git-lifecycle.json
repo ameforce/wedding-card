@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "contract_id": "codex.commit.git-lifecycle",
+  "plan_schema_version": 2,
+  "policy_pointers": {
+    "global_agents": {
+      "file": "AGENTS.md",
+      "selector": "GIT-LIFECYCLE-ROUTING",
+      "required_tokens": [
+        "$commit",
+        "canonical lifecycle contract"
+      ]
+    },
+    "codex_app": {
+      "file": "config.toml",
+      "selector": "desktop.git-commit-instructions",
+      "required_tokens": [
+        "$commit",
+        "canonical Git lifecycle contract"
+      ]
+    }
+  },
+  "work_branch_prefixes": [
+    "fix",
+    "chore",
+    "feat",
+    "refact"
+  ],
+  "tag_template": "v{version}",
+  "integration": {
+    "strategy": "no-ff",
+    "parents": [
+      "production",
+      "develop"
+    ],
+    "require_exact_merge_parents": true,
+    "require_annotated_tag": true,
+    "require_remote_readback": true,
+    "cleanup_task_branches": true
+  },
+  "lanes": {
+    "hotfix": {
+      "branch_template": "hotfix/v{version}",
+      "version_lane": "patch",
+      "lane_base": "production",
+      "work_branch_base": "lane",
+      "pr_base": "lane",
+      "integration_only": false,
+      "allowed_lane_commit_types": []
+    },
+    "release": {
+      "branch_template": "release/v{version}",
+      "version_lane": "minor_or_approved_major",
+      "lane_base": "updated_develop",
+      "work_branch_base": "develop",
+      "pr_base": "develop",
+      "integration_only": true,
+      "allowed_lane_commit_types": [
+        "chore"
+      ]
+    }
+  }
+}
