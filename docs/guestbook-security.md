@@ -8,7 +8,7 @@ The browser never receives a guestbook list, password hash, database credential,
 - `GET /api/guestbook/entries` is always rejected.
 - `GET /api/guestbook/admin/entries` is the only list endpoint and fails closed unless a Cloudflare Access JWT passes signature, issuer, audience, expiry, and exact two-email allowlist validation inside the Worker.
 
-Author passwords are length-validated at 4–72 characters, then processed with PBKDF2-HMAC-SHA256 at 100,000 iterations and a random 128-bit salt. This is the maximum supported by the deployed workerd runtime. The encoded verifier carries its iteration count, and the Worker rejects unsupported metadata before derivation; plaintext passwords are neither stored nor logged. Comparisons scan every derived byte.
+Author passwords are intentionally length-validated at 4–72 characters to keep guest entry practical, then processed with PBKDF2-HMAC-SHA256 at 100,000 iterations and a random 128-bit salt. This is the maximum supported by the deployed workerd runtime. The encoded verifier carries its iteration count, and the Worker rejects unsupported metadata before derivation; plaintext passwords are neither stored nor logged. Comparisons scan every derived byte. The short minimum is compensated by a shared five-per-minute unlock/update credential budget, a 15-minute D1-backed lock after five failures in one 15-minute window, and a four-check per-isolate PBKDF2 concurrency ceiling. A successful authentication resets only that entry's failure state.
 
 Public create, unlock, and update responses never expose the internal entry id. Lookup and update return the same generic authentication failure for a missing name, wrong password, or unsafe legacy duplicate. A D1 unique index provides the final duplicate-name race guard.
 
@@ -23,4 +23,6 @@ Production requires all of the following before guestbook use:
 
 Until D1 and the identity gateway are attached, public writes return `503` and administrator reads return `503`; no in-memory or public fallback is used.
 
-Production sets `REQUIRE_GUESTBOOK_RATE_LIMIT=1` and binds `GUESTBOOK_RATE_LIMITER` through Wrangler. Calls are limited to 30 requests per minute per Cloudflare location and action key: create uses a SHA-256 transform of Cloudflare's connecting-client address, while unlock/update use a SHA-256 transform of the normalized author name. Plaintext addresses, names, messages, or passwords are never sent to the limiter. If the required binding is missing, public writes fail closed with `503`.
+Production sets `REQUIRE_GUESTBOOK_RATE_LIMIT=1` and binds both `GUESTBOOK_RATE_LIMITER` and `GUESTBOOK_CREDENTIAL_RATE_LIMITER` through Wrangler. Before any public body is read, all guestbook mutations consume one 30-per-minute SHA-256 caller budget; unlock/update also consume one shared 30-per-minute authentication-class budget per Cloudflare location. After bounded parsing, unlock and update consume the same five-per-minute SHA-256 normalized-name credential budget. Plaintext addresses, names, messages, or passwords are never sent to either limiter. A missing required binding fails the affected public operation closed with `503`.
+
+Every JSON body is read through a byte-counted stream and canceled as soon as its route limit is exceeded. `Content-Length` is only an early rejection optimization, not the body-size security boundary.
