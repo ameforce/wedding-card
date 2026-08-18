@@ -18,6 +18,8 @@ jobs:
     name: Verify
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      cloudflare-artifact-digest: ${{ steps.upload-artifact.outputs.artifact-digest }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,6 +51,23 @@ jobs:
       - name: Validate the Cloudflare bundle
         run: npm run cloudflare:dry-run:built
 
+      - name: Seal verified production assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: node scripts/cloudflare-artifact.mjs create
+
+      - name: Upload verified production assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: upload-artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cloudflare-production-${{ github.sha }}
+          path: |
+            dist/client
+            dist/cloudflare-artifact-manifest.json
+            dist/cloudflare-artifact.sha256
+          if-no-files-found: error
+          retention-days: 3
+
   deploy:
     name: Deploy production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -61,9 +80,6 @@ jobs:
     concurrency:
       group: cloudflare-production
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Check out the exact main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,32 +90,58 @@ jobs:
           node-version-file: .node-version
           cache: npm
 
-      - name: Install locked dependencies
+      - name: Download verified production assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cloudflare-production-${{ github.sha }}
+          path: dist
+
+      - name: Verify promoted artifact identity before install
+        env:
+          EXPECTED_ARTIFACT_DIGEST: ${{ needs.verify.outputs.cloudflare-artifact-digest }}
+        run: |
+          test -n "$EXPECTED_ARTIFACT_DIGEST"
+          sha256sum --strict --check dist/cloudflare-artifact.sha256
+
+      - name: Install locked dependencies without production credentials
         run: npm ci
-
-      - name: Build the trusted main commit
-        run: npm run build
-
-      - name: Capture recovery points
-        id: recovery
-        run: node scripts/cloudflare-deployment-state.mjs capture
 
       - name: Recheck additive-only migrations
         run: npm run check:migrations
 
+      - name: Verify deployment inputs after install and checks
+        run: sha256sum --strict --check dist/cloudflare-artifact.sha256
+
+      - name: Capture recovery points
+        id: recovery
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/cloudflare-deployment-state.mjs capture
+
       - name: Apply remote D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npm run d1:migrations:apply
 
       - name: Upload Worker and Static Assets version
         id: upload
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: >-
           npm run upload:cloudflare:version --
           --strict
+          --no-bundle
           --tag "$GITHUB_SHA"
           --message "GitHub Actions $GITHUB_SHA"
 
       - name: Activate the uploaded Worker version
         id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: >-
           npm run deploy:cloudflare:version --
           --version-tag "$GITHUB_SHA"
@@ -108,16 +150,24 @@ jobs:
           --message "GitHub Actions $GITHUB_SHA"
 
       - name: Verify the active Worker version
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: node scripts/cloudflare-deployment-state.mjs verify "$GITHUB_SHA"
 
       - name: Run bounded production canary
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           WEDDING_CANARY_ALLOW_PRODUCTION_WRITE: "1"
           WEDDING_CANARY_ALLOW_D1_ADMIN_READ: "1"
         run: npm run canary:production
 
       - name: Roll back Worker after post-deploy failure
         if: ${{ failure() && steps.upload.outcome == 'success' && steps.recovery.outputs.previous_worker_version != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: >-
           node scripts/cloudflare-deployment-state.mjs restore-if-changed
           "${{ steps.recovery.outputs.previous_worker_version }}"

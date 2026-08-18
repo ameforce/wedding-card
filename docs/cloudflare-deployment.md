@@ -12,8 +12,8 @@ GitHub Actions is the sole production deployment controller. ENM Jenkins and Clo
 
 `.github/workflows/cloudflare.yml` pins GitHub-owned actions to full commit SHAs and uses the exact Node version in `.node-version`. Its two jobs are deliberately separated:
 
-1. `Verify` runs for pull requests to `develop` or `main`, and again for `main`: locked install, migration policy, lint, UI tests, production build, Worker tests, and a Wrangler dry-run.
-2. `Deploy production` runs only after a successful `main` push verification. It rebuilds the trusted commit, records the active Worker version and a D1 Time Travel bookmark, applies additive D1 migrations, uploads a Worker version with the 40-character Git SHA as its tag, activates that tag at 100%, reads the active version back, and runs the bounded production canary. The version-only path preserves the already provisioned Custom Domain and does not require or mutate Zone routes.
+1. `Verify` runs for pull requests to `develop` or `main`, and again for `main`: locked install, migration policy, lint, UI tests, one production build, Worker tests, and a Wrangler dry-run. On `main`, it seals the built Static Assets plus the Worker, Wrangler configuration, migrations, lock metadata, and credential-bearing deployment scripts with a per-file SHA-256 manifest and GNU-compatible checksum document, then uploads the exact Static Assets artifact through a full-SHA-pinned GitHub action.
+2. `Deploy production` runs only after a successful `main` push verification. It downloads the same-run SHA-named artifact, relies on GitHub's artifact digest validation, and verifies every sealed build and deployment input with the runner's `sha256sum` both before and after the credential-free install and migration check. It does not rebuild, and it uploads the verified standalone Worker with Wrangler bundling disabled. Only then does it record the active Worker version and a D1 Time Travel bookmark, apply additive D1 migrations, upload and activate a Worker version tagged with the 40-character Git SHA, read the active version back, and run the bounded production canary. Cloudflare credentials exist only on the individual steps that call the Cloudflare control plane. The version-only path preserves the already provisioned Custom Domain and does not require or mutate Zone routes.
 
 The GitHub `production` Environment must be restricted to `main` and contain only these secrets:
 
@@ -32,7 +32,7 @@ If a check after `wrangler deploy` fails, the workflow rolls Worker traffic back
 - `dist/server/index.js` is prepared from `worker/index.js`; it serves `/api/guestbook/*`, `/api/content`, `/api/admin/*`, and private-R2-backed `/api/media/*`, then falls back to the SPA shell for unknown HTML routes.
 - `dist/.openai/hosting.json` declares the `GUESTBOOK_DB` D1 binding and `WEDDING_MEDIA` R2 binding, while migrations are copied to `dist/.openai/drizzle/`.
 - `/admin/guestbook`, `/admin/content`, and their administrator APIs fail closed unless the Cloudflare Access JWT signature, issuer, audience, expiry, and exact two-address deployment allowlist are valid.
-- Public guestbook writes fail closed in production unless the Wrangler `GUESTBOOK_RATE_LIMITER` binding is present; counter keys never contain plaintext visitor names.
+- Public guestbook writes fail closed in production unless the required Wrangler caller and credential limiter bindings are present; counter keys never contain plaintext visitor addresses or names.
 
 Cloudflare Workers Static Assets deploys Worker code and static assets as one unit. A Custom Domain makes the Worker the origin for the full hostname and lets Cloudflare manage the required DNS record and certificate. D1 is exposed to the Worker through an environment binding, which matches the repository's `env.GUESTBOOK_DB` contract without another network hop.
 

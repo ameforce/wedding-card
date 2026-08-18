@@ -12,8 +12,8 @@ import {
 test("all checked-in D1 migrations are additive", async () => {
   const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
   assert.deepEqual(await checkMigrationDirectory(resolve(root, "migrations")), {
-    fileCount: 4,
-    statementCount: 10,
+    fileCount: 5,
+    statementCount: 13,
   });
 });
 
@@ -22,11 +22,22 @@ test("the guard accepts the narrow additive migration forms", () => {
     -- semicolons inside values are not statement boundaries
     CREATE TABLE IF NOT EXISTS example (id TEXT PRIMARY KEY, value TEXT);
     CREATE UNIQUE INDEX IF NOT EXISTS example_value_idx ON example (value);
-    INSERT OR IGNORE INTO example (id, value) VALUES ('one', 'safe; value');
     ALTER TABLE example ADD COLUMN created_at TEXT;
   `;
-  assert.equal(assertAdditiveMigration(sql), 4);
-  assert.equal(splitSqlStatements(sql).length, 4);
+  assert.equal(assertAdditiveMigration(sql), 3);
+  assert.equal(splitSqlStatements(sql).length, 3);
+});
+
+test("the guard accepts only the exact invitation-state bootstrap insert", () => {
+  const bootstrap = `
+    INSERT OR IGNORE INTO invitation_state (
+      singleton_id,
+      draft_revision_id,
+      published_revision_id,
+      updated_at
+    ) VALUES (1, NULL, NULL, '1970-01-01T00:00:00.000Z');
+  `;
+  assert.equal(assertAdditiveMigration(bootstrap), 1);
 });
 
 for (const destructive of [
@@ -36,6 +47,9 @@ for (const destructive of [
   "ALTER TABLE invitation_state DROP COLUMN draft_revision_id;",
   "CREATE TABLE invitation_state (id INTEGER);",
   "INSERT OR REPLACE INTO invitation_state VALUES (1);",
+  "INSERT OR IGNORE INTO example (id, value) VALUES ('one', 'safe') RETURNING id;",
+  "INSERT OR IGNORE INTO example (id, value) SELECT id, value FROM source;",
+  "INSERT OR IGNORE INTO invitation_state (singleton_id, draft_revision_id, published_revision_id, updated_at) VALUES (1, NULL, NULL, '1970-01-01T00:00:00.000Z') ON CONFLICT(singleton_id) DO UPDATE SET published_revision_id = NULL;",
 ]) {
   test(`the guard rejects destructive or non-idempotent SQL: ${destructive.split(" ")[0]}`, () => {
     assert.throws(() => assertAdditiveMigration(destructive), /비증분 SQL/);
