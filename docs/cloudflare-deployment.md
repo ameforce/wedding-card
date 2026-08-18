@@ -13,12 +13,12 @@ GitHub Actions is the sole production deployment controller. ENM Jenkins and Clo
 `.github/workflows/cloudflare.yml` pins GitHub-owned actions to full commit SHAs and uses the exact Node version in `.node-version`. Its two jobs are deliberately separated:
 
 1. `Verify` runs for pull requests to `develop` or `main`, and again for `main`: locked install, migration policy, lint, UI tests, production build, Worker tests, and a Wrangler dry-run.
-2. `Deploy production` runs only after a successful `main` push verification. It rebuilds the trusted commit, records the active Worker version and a D1 Time Travel bookmark, applies additive D1 migrations, deploys with the 40-character Git SHA as the Worker tag, reads the active version back, and runs the bounded production canary.
+2. `Deploy production` runs only after a successful `main` push verification. It rebuilds the trusted commit, records the active Worker version and a D1 Time Travel bookmark, applies additive D1 migrations, uploads a Worker version with the 40-character Git SHA as its tag, activates that tag at 100%, reads the active version back, and runs the bounded production canary. The version-only path preserves the already provisioned Custom Domain and does not require or mutate Zone routes.
 
 The GitHub `production` Environment must be restricted to `main` and contain only these secrets:
 
 - `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`: a dedicated, expiring token scoped to this account with Workers Scripts Write, D1 Write, Workers R2 Storage Write, and Account Settings Read. Do not reuse a human global API key.
+- `CLOUDFLARE_API_TOKEN`: a dedicated, expiring token scoped to this account with Workers Scripts Write, D1 Write, Workers R2 Storage Write, and Account Settings Read. It intentionally has no Zone permission because CI must not mutate the Custom Domain route. Do not reuse a human global API key.
 
 Protect `main` so changes arrive through a pull request and require the `Verify` check. Keep force pushes and branch deletion disabled. Repository Actions policy should allow GitHub-owned actions only and require actions to be pinned to a full commit SHA.
 
