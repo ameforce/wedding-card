@@ -5,6 +5,7 @@ on:
     branches:
       - develop
       - main
+      - "hotfix/**"
   push:
     branches:
       - main
@@ -89,12 +90,21 @@ jobs:
       - name: Apply remote D1 migrations
         run: npm run d1:migrations:apply
 
-      - name: Deploy Worker and Static Assets
-        id: deploy
+      - name: Upload Worker and Static Assets version
+        id: upload
         run: >-
-          npm run deploy:cloudflare:built --
+          npm run upload:cloudflare:version --
           --strict
           --tag "$GITHUB_SHA"
+          --message "GitHub Actions $GITHUB_SHA"
+
+      - name: Activate the uploaded Worker version
+        id: deploy
+        run: >-
+          npm run deploy:cloudflare:version --
+          --version-tag "$GITHUB_SHA"
+          --percentage 100
+          --yes
           --message "GitHub Actions $GITHUB_SHA"
 
       - name: Verify the active Worker version
@@ -107,8 +117,8 @@ jobs:
         run: npm run canary:production
 
       - name: Roll back Worker after post-deploy failure
-        if: ${{ failure() && steps.deploy.outcome == 'success' && steps.recovery.outputs.previous_worker_version != '' }}
+        if: ${{ failure() && steps.upload.outcome == 'success' && steps.recovery.outputs.previous_worker_version != '' }}
         run: >-
-          node scripts/cloudflare-deployment-state.mjs rollback
+          node scripts/cloudflare-deployment-state.mjs restore-if-changed
           "${{ steps.recovery.outputs.previous_worker_version }}"
           "$GITHUB_SHA"
