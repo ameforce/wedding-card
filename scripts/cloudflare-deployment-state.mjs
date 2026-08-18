@@ -138,6 +138,15 @@ async function rollback(cwd, previousWorkerVersion, failedCommitSha) {
   console.log(`[cloudflare] Worker 롤백 검증 완료: ${restoredVersion}`);
 }
 
+async function restoreIfChanged(cwd, previousWorkerVersion, failedCommitSha) {
+  const activeVersion = productionVersionId(await readStatus(cwd));
+  if (activeVersion === previousWorkerVersion) {
+    console.log(`[cloudflare] 운영 버전이 변경되지 않아 롤백을 생략합니다: ${activeVersion}`);
+    return;
+  }
+  await rollback(cwd, previousWorkerVersion, failedCommitSha);
+}
+
 const isCli = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 if (isCli) {
   const cwd = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -146,9 +155,9 @@ if (isCli) {
     ? capture(cwd)
     : command === "verify"
       ? verify(cwd, first)
-      : command === "rollback"
-        ? rollback(cwd, first, second)
-        : Promise.reject(new Error("사용법: cloudflare-deployment-state.mjs <capture|verify|rollback> [...args]"));
+      : command === "restore-if-changed"
+        ? restoreIfChanged(cwd, first, second)
+        : Promise.reject(new Error("사용법: cloudflare-deployment-state.mjs <capture|verify|restore-if-changed> [...args]"));
   action.catch((error) => {
     console.error(`[cloudflare] 실패: ${error.message}`);
     process.exitCode = 1;
