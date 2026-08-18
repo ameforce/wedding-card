@@ -53,16 +53,49 @@ function getVariant() {
   return value === "quiet" ? "quiet" : "pastel";
 }
 
+function usePhotoZoomGuard() {
+  const photoRef = useRef(null);
+
+  useEffect(() => {
+    const photoButton = photoRef.current;
+    if (!photoButton) return undefined;
+
+    const preventNativeZoom = (event) => event.preventDefault();
+    const preventMultiTouchZoom = (event) => {
+      if (event.touches.length > 1) event.preventDefault();
+    };
+
+    photoButton.addEventListener("gesturestart", preventNativeZoom, { passive: false });
+    photoButton.addEventListener("gesturechange", preventNativeZoom, { passive: false });
+    photoButton.addEventListener("touchstart", preventMultiTouchZoom, { passive: false });
+    photoButton.addEventListener("touchmove", preventMultiTouchZoom, { passive: false });
+
+    return () => {
+      photoButton.removeEventListener("gesturestart", preventNativeZoom);
+      photoButton.removeEventListener("gesturechange", preventNativeZoom);
+      photoButton.removeEventListener("touchstart", preventMultiTouchZoom);
+      photoButton.removeEventListener("touchmove", preventMultiTouchZoom);
+    };
+  }, []);
+
+  return photoRef;
+}
+
 function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes }) {
   const broken = new URLSearchParams(window.location.search).get("brokenAsset") === "1";
   const [failed, setFailed] = useState(false);
+  const photoButtonRef = usePhotoZoomGuard();
   return (
     <button
       className={`photo-button ${className} ${failed ? "is-fallback" : ""}`}
       type="button"
       aria-label={`${index + 1}번째 사진 크게 보기`}
-      ref={(node) => registerTrigger(index, node)}
+      ref={(node) => {
+        photoButtonRef.current = node;
+        registerTrigger(index, node);
+      }}
       onClick={() => openPhoto(index)}
+      onDoubleClick={(event) => event.preventDefault()}
     >
       {!failed && (
         <img

@@ -138,6 +138,22 @@ test("lightbox blocks local native zoom without removing its accessible controls
   assert.match(app, /event\.key === "Escape"/);
 });
 
+test("main-page photo triggers block local native zoom while preserving page scroll and form zoom", () => {
+  const photoButton = rule(".photo-button");
+  const photoZoomGuard = app.match(/function usePhotoZoomGuard\([\s\S]*?\n}\n\nfunction PhotoButton/)?.[0] ?? "";
+
+  assert.match(photoButton, /touch-action:\s*pan-y/);
+  assert.match(photoZoomGuard, /function usePhotoZoomGuard/);
+  assert.match(photoZoomGuard, /photoButton\.addEventListener\("gesturestart", preventNativeZoom, \{ passive: false \}\)/);
+  assert.match(photoZoomGuard, /photoButton\.addEventListener\("gesturechange", preventNativeZoom, \{ passive: false \}\)/);
+  assert.match(photoZoomGuard, /photoButton\.addEventListener\("touchstart", preventMultiTouchZoom, \{ passive: false \}\)/);
+  assert.match(photoZoomGuard, /photoButton\.addEventListener\("touchmove", preventMultiTouchZoom, \{ passive: false \}\)/);
+  assert.match(photoZoomGuard, /event\.touches\.length > 1/);
+  assert.match(app, /function PhotoButton[\s\S]*?onDoubleClick=\{\(event\) => event\.preventDefault\(\)\}/);
+  assert.doesNotMatch(indexHtml, /(?:maximum-scale|user-scalable)\s*=/);
+  assert.match(css, /\.invitation input,\s*\.invitation textarea,\s*\.invitation \[contenteditable\]:not\(\[contenteditable="false"\]\)\s*\{[^}]*-webkit-user-select:\s*text[^}]*user-select:\s*text/);
+});
+
 test("visible invitation, copied and shared copy omit KST while calendar semantics remain internal", () => {
   assert.doesNotMatch(app, /KST|timezone\.label/);
   assert.doesNotMatch(actions, /KST|timezone\.label/);
