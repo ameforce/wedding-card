@@ -66,7 +66,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .image-slot { position: relative; margin: 0; overflow: hidden; background: #d8d2cb; }
 .image-slot img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .image-slot.is-fallback { background: #d9d4ce; }
-.photo-button { position: relative; display: block; padding: 0; overflow: hidden; background: #d8d2cb; border: 0; cursor: zoom-in; }
+.photo-button { position: relative; display: block; padding: 0; overflow: hidden; background: #d8d2cb; border: 0; cursor: zoom-in; touch-action: pan-y; }
 .photo-button img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .3s ease, filter .3s ease; }
 .photo-button:hover img, .photo-button:focus-visible img { filter: saturate(.94) contrast(.98); transform: scale(1.025); }
 .photo-button.is-fallback { background: #d9d4ce; cursor: default; }
