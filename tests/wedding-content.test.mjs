@@ -156,6 +156,17 @@ test("Pastel hero uses the approved local photo derivatives without reusing a ga
   }
 });
 
+test("priority photos remain hidden until the selected URL has loaded and decoded", async () => {
+  const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(app, /await image\.decode\?\.\(\)/);
+  assert.match(app, /image\.getAttribute\("src"\) === imageSource/);
+  assert.match(app, /is-image-ready.*is-image-pending/);
+  assert.match(css, /\.photo-button\.is-image-pending img\s*\{[^}]*opacity:\s*0/);
+  assert.match(css, /\.photo-button\.is-image-ready img\s*\{[^}]*opacity:\s*1/);
+  assert.match(css, /\.invitation-loading-hero\s*\{[^}]*aspect-ratio:\s*4\s*\/\s*5/);
+});
+
 test("all supplied map links are safe HTTPS destinations", () => {
   assert.deepEqual(weddingContent.venue.mapLinks, {
     naver: "https://naver.me/GOPesFwZ",

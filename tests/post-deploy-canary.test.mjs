@@ -17,12 +17,14 @@ function fixture({ failUpdate = false, authenticatedAdmin = false } = {}) {
     const method = options.method || "GET";
     calls.push({ path: url.pathname, method, headers: options.headers });
     if (url.pathname === "/" && method === "GET") {
-      return new Response(`<link rel="canonical" href="${BASE}">`, {
+      return new Response(`<link rel="canonical" href="${BASE}"><template id="wedding-public-bootstrap"></template>`, {
         status: 200,
         headers: {
           "content-security-policy": "default-src 'self'; frame-ancestors 'self'",
           "x-content-type-options": "nosniff",
           "x-robots-tag": "noindex, nofollow",
+          "x-wedding-content-source": "cloudflare-published",
+          "x-wedding-revision": "published",
         },
       });
     }

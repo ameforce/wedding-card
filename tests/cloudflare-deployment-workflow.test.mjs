@@ -29,6 +29,11 @@ test("production CI deploys a Worker version without mutating Custom Domain rout
   assert.doesNotMatch(deployJob, /^ {4}env:\s*\n\s+CLOUDFLARE_API_TOKEN:/m);
   assert.doesNotMatch(deployJob, /Install locked dependencies[\s\S]{0,300}CLOUDFLARE_API_TOKEN/);
   assert.match(workflow, /cloudflare-deployment-state\.mjs restore-if-changed/);
+  assert.match(deployJob, /npx playwright install --with-deps chromium/);
+  assert.match(deployJob, /npm run canary:production/);
+
+  const artifactSource = await readFile(resolve(root, "scripts/cloudflare-artifact.mjs"), "utf8");
+  assert.match(artifactSource, /scripts\/post-deploy-render-canary\.mjs/);
 });
 
 test("Cloudflare artifact manifest rejects changed or additional build files", async (context) => {

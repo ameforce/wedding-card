@@ -16,6 +16,9 @@ const MAX_CONTENT_BODY_BYTES = 131_072;
 const MAX_MEDIA_BODY_BYTES = 30 * 1024 * 1024;
 const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 const GUESTBOOK_RETENTION = "permanent";
+const PUBLIC_BOOTSTRAP_SCHEMA_VERSION = 1;
+const PUBLIC_BOOTSTRAP_MARKER = "<!-- WEDDING_PUBLIC_BOOTSTRAP -->";
+const PUBLIC_BOOTSTRAP_ID = "wedding-public-bootstrap";
 const SEARCH_ROBOTS_DIRECTIVE = "noindex, nofollow, noarchive, nosnippet, noimageindex";
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -71,6 +74,18 @@ function bytesToBase64(bytes) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
+}
+
+function bytesToBase64Url(bytes) {
+  return bytesToBase64(bytes).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 function base64ToBytes(value) {
@@ -556,6 +571,116 @@ async function getInvitationRevision(db, id) {
   }
 }
 
+function invitationFromPublishedRow(row) {
+  if (!row) return null;
+  try {
+    return {
+      revisionId: row.id,
+      publishedAt: row.published_at,
+      document: JSON.parse(row.content_json),
+    };
+  } catch {
+    throw { status: 500, code: "CONTENT_CORRUPTED", message: "저장된 초대장 콘텐츠를 읽지 못했습니다." };
+  }
+}
+
+async function getPublishedInvitationPayload(env) {
+  const db = requireContentDatabase(env);
+  const row = await db.prepare(
+    `SELECT revision.id, revision.content_json, revision.published_at
+       FROM invitation_state AS state
+      JOIN invitation_revisions AS revision ON revision.id = state.published_revision_id
+      WHERE state.singleton_id = 1 AND revision.status = 'published'
+      LIMIT 1`,
+  ).first();
+  return invitationFromPublishedRow(row);
+}
+
+function publicBootstrapPayload(published) {
+  return published
+    ? {
+      schemaVersion: PUBLIC_BOOTSTRAP_SCHEMA_VERSION,
+      source: "cloudflare-published",
+      revisionId: published.revisionId,
+      publishedAt: published.publishedAt,
+      document: published.document,
+    }
+    : {
+      schemaVersion: PUBLIC_BOOTSTRAP_SCHEMA_VERSION,
+      source: "bundled-fallback",
+      revisionId: null,
+      publishedAt: null,
+      document: null,
+    };
+}
+
+function bootstrapHero(published, url) {
+  if (url.searchParams.get("variant") === "quiet") {
+    return {
+      src: "/assets/photos/quiet-hero-480.webp",
+      srcSet: "/assets/photos/quiet-hero-480.webp 480w, /assets/photos/quiet-hero-960.webp 960w",
+      sizes: "198px",
+    };
+  }
+  const hero = published?.document?.photos?.pastel?.hero;
+  if (typeof hero?.src === "string" && hero.src) {
+    return {
+      src: hero.src,
+      srcSet: typeof hero.srcSet === "string" ? hero.srcSet : "",
+      sizes: typeof hero.sizes === "string" ? hero.sizes : "(min-width: 768px) 430px, 100vw",
+    };
+  }
+  return {
+    src: "/assets/photos/pastel-hero-480.webp",
+    srcSet: "/assets/photos/pastel-hero-480.webp 480w, /assets/photos/pastel-hero-960.webp 960w",
+    sizes: "(min-width: 768px) 430px, 100vw",
+  };
+}
+
+async function injectPublicBootstrap(response, published, url) {
+  const html = await response.text();
+  const markerCount = html.split(PUBLIC_BOOTSTRAP_MARKER).length - 1;
+  if (markerCount !== 1) {
+    return new Response(null, {
+      status: 503,
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "text/html; charset=utf-8",
+        "x-wedding-content-source": "bundled-fallback",
+      },
+    });
+  }
+
+  const bootstrap = publicBootstrapPayload(published);
+  const encoded = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(bootstrap)));
+  const hero = bootstrapHero(published, url);
+  const preloadAttributes = [
+    `href="${escapeHtmlAttribute(hero.src)}"`,
+    "rel=\"preload\"",
+    "as=\"image\"",
+    "type=\"image/webp\"",
+    "fetchpriority=\"high\"",
+  ];
+  if (hero.srcSet) preloadAttributes.push(`imagesrcset="${escapeHtmlAttribute(hero.srcSet)}"`);
+  if (hero.sizes) preloadAttributes.push(`imagesizes="${escapeHtmlAttribute(hero.sizes)}"`);
+  const injection = [
+    `<template id="${PUBLIC_BOOTSTRAP_ID}" data-schema-version="${PUBLIC_BOOTSTRAP_SCHEMA_VERSION}">${encoded}</template>`,
+    `<link ${preloadAttributes.join(" ")} />`,
+  ].join("\n    ");
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("cache-control", "no-store");
+  headers.set("content-type", "text/html; charset=utf-8");
+  headers.set("x-wedding-content-source", bootstrap.source);
+  if (bootstrap.revisionId) headers.set("x-wedding-revision", bootstrap.revisionId);
+  else headers.delete("x-wedding-revision");
+  return new Response(html.replace(PUBLIC_BOOTSTRAP_MARKER, injection), {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 async function runDatabaseBatch(db, statements) {
   if (typeof db.batch === "function") return db.batch(statements);
   const results = [];
@@ -564,11 +689,9 @@ async function runDatabaseBatch(db, statements) {
 }
 
 async function getPublishedInvitation(env) {
-  const db = requireContentDatabase(env);
-  const state = await getInvitationState(db);
-  const revision = await getInvitationRevision(db, state?.published_revision_id);
-  if (!revision) return apiError(503, "CONTENT_NOT_PUBLISHED", "공개된 초대장 콘텐츠가 아직 없습니다.");
-  return json({ revisionId: revision.id, publishedAt: revision.publishedAt, document: revision.document });
+  const published = await getPublishedInvitationPayload(env);
+  if (!published) return apiError(503, "CONTENT_NOT_PUBLISHED", "공개된 초대장 콘텐츠가 아직 없습니다.");
+  return json(published);
 }
 
 async function getAdminInvitation(request, env) {
@@ -892,16 +1015,34 @@ export default {
       return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
     }
 
-    const response = await env.ASSETS.fetch(request);
-
-    if (response.status !== 404 || !acceptsHtml || !["GET", "HEAD"].includes(request.method)) {
-      return withSearchPrivacy(response);
+    if (!acceptsHtml || !["GET", "HEAD"].includes(request.method)) {
+      return withSearchPrivacy(await env.ASSETS.fetch(request));
     }
 
-    const indexUrl = new URL(request.url);
-    indexUrl.pathname = "/";
-    indexUrl.search = "";
-    return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
+    if (request.method === "HEAD") {
+      const response = await env.ASSETS.fetch(request);
+      if (response.status !== 404) return withSearchPrivacy(response);
+      const indexUrl = new URL(request.url);
+      indexUrl.pathname = "/";
+      indexUrl.search = "";
+      return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
+    }
+
+    const [assetResult, publishedResult] = await Promise.allSettled([
+      env.ASSETS.fetch(request),
+      getPublishedInvitationPayload(env),
+    ]);
+    if (assetResult.status === "rejected") throw assetResult.reason;
+    let response = assetResult.value;
+    if (response.status === 404) {
+      const indexUrl = new URL(request.url);
+      indexUrl.pathname = "/";
+      indexUrl.search = "";
+      response = await env.ASSETS.fetch(new Request(indexUrl, request));
+    }
+    if (response.status !== 200) return withSearchPrivacy(response);
+    const published = publishedResult.status === "fulfilled" ? publishedResult.value : null;
+    return withSearchPrivacy(await injectPublicBootstrap(response, published, url));
   },
 };
 
@@ -913,4 +1054,6 @@ export const __test = {
   verifyPassword,
   verifyAccessJwt,
   validateInvitationDocument,
+  getPublishedInvitationPayload,
+  injectPublicBootstrap,
 };

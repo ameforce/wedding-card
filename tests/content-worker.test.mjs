@@ -60,11 +60,14 @@ function invitationDatabase() {
   };
   const revisions = new Map();
   const mediaSets = new Map();
+  const queries = [];
   return {
     state,
     revisions,
     mediaSets,
+    queries,
     prepare(sql) {
+      queries.push(sql);
       let values = [];
       return {
         bind(...nextValues) {
@@ -72,6 +75,9 @@ function invitationDatabase() {
           return this;
         },
         async first() {
+          if (sql.includes("JOIN invitation_revisions AS revision")) {
+            return state.published_revision_id ? revisions.get(state.published_revision_id) || null : null;
+          }
           if (sql.includes("FROM invitation_state")) return { ...state };
           if (sql.includes("FROM invitation_revisions")) return revisions.get(values[0]) || null;
           if (sql.includes("FROM invitation_media_sets")) {
@@ -157,6 +163,71 @@ test("public content fails closed until an invitation revision is published", as
   });
   assert.equal(response.status, 503);
   assert.equal((await response.json()).code, "CONTENT_NOT_PUBLISHED");
+});
+
+test("public HTML atomically injects one published revision and preloads its hero", async () => {
+  const db = invitationDatabase();
+  const document = confirmedDocument();
+  document.photos.pastel.hero = {
+    ...document.photos.pastel.hero,
+    src: "/api/media/invitation/media-id/pastel-hero/480.webp",
+    srcSet: "/api/media/invitation/media-id/pastel-hero/480.webp 480w, /api/media/invitation/media-id/pastel-hero/960.webp 960w",
+    alt: "새로 공개한 대표 사진",
+  };
+  db.state.published_revision_id = "published-42";
+  db.revisions.set("published-42", {
+    id: "published-42",
+    content_json: JSON.stringify(document),
+    status: "published",
+    created_at: "2026-08-30T00:00:00.000Z",
+    created_by: "admin@example.test",
+    published_at: "2026-08-30T00:00:00.000Z",
+  });
+  const response = await worker.fetch(request("/?capture=1", {
+    method: "GET",
+    headers: { accept: "text/html" },
+  }), {
+    GUESTBOOK_DB: db,
+    ASSETS: { fetch: async () => new Response("<head><!-- WEDDING_PUBLIC_BOOTSTRAP --></head><body>app</body>") },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("x-wedding-content-source"), "cloudflare-published");
+  assert.equal(response.headers.get("x-wedding-revision"), "published-42");
+  const html = await response.text();
+  const encoded = html.match(/<template id="wedding-public-bootstrap"[^>]*>([^<]+)<\/template>/)?.[1];
+  assert.ok(encoded);
+  const bootstrap = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  assert.equal(bootstrap.schemaVersion, 1);
+  assert.equal(bootstrap.source, "cloudflare-published");
+  assert.equal(bootstrap.revisionId, "published-42");
+  assert.equal(bootstrap.document.photos.pastel.hero.alt, "새로 공개한 대표 사진");
+  assert.match(html, /href="\/api\/media\/invitation\/media-id\/pastel-hero\/480\.webp"/);
+  assert.match(html, /rel="preload"/);
+  assert.equal(db.queries.filter((sql) => sql.includes("JOIN invitation_revisions AS revision")).length, 1);
+  assert.equal(db.queries.filter((sql) => sql.includes("SELECT draft_revision_id, published_revision_id")).length, 0);
+});
+
+test("public HTML selects a permanent bundled fallback when D1 is unavailable", async () => {
+  const response = await worker.fetch(request("/", {
+    method: "GET",
+    headers: { accept: "text/html" },
+  }), {
+    ASSETS: { fetch: async () => new Response("<head><!-- WEDDING_PUBLIC_BOOTSTRAP --></head><body>app</body>") },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-wedding-content-source"), "bundled-fallback");
+  assert.equal(response.headers.get("x-wedding-revision"), null);
+  const html = await response.text();
+  const encoded = html.match(/<template id="wedding-public-bootstrap"[^>]*>([^<]+)<\/template>/)?.[1];
+  const bootstrap = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  assert.deepEqual(bootstrap, {
+    schemaVersion: 1,
+    source: "bundled-fallback",
+    revisionId: null,
+    publishedAt: null,
+    document: null,
+  });
 });
 
 test("Access-authenticated admins can save a draft and publish an immutable revision", async () => {
