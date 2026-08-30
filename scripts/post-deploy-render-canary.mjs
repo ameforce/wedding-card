@@ -141,16 +141,27 @@ export function validateRenderEvidence({
   invariant(dom.revision === expectedRevision, "렌더링 revision이 /api/content와 다릅니다.");
   invariant(dom.ready === true && dom.naturalWidth > 0, "Pastel hero가 decode 완료 상태로 표시되지 않았습니다.");
 
-  const observedPaths = observations
+  const visibilitySamples = [
+    ...observations,
+    {
+      src: dom.src,
+      currentSrc: dom.currentSrc,
+      opacity: dom.opacity,
+      ready: dom.ready,
+      sample: "final-dom",
+    },
+  ];
+  const observedPaths = visibilitySamples
     .flatMap((entry) => [entry.src, entry.currentSrc])
     .filter(Boolean)
     .map((value) => pathname(value, baseUrl));
   const requestPaths = requests.map((value) => pathname(value, baseUrl));
   invariant(!observedPaths.some((value) => BUNDLED_PASTEL_HERO.test(value)), "published 세션에서 bundled hero가 DOM에 관찰되었습니다.");
   invariant(!requestPaths.some((value) => BUNDLED_PASTEL_HERO.test(value)), "published 세션에서 bundled hero가 네트워크로 요청되었습니다.");
-  const firstVisible = observations.find((entry) => Number(entry.opacity) > 0 && entry.ready);
-  invariant(firstVisible, "최초로 표시된 hero 관찰값이 없습니다.");
-  invariant(expectedPaths.includes(pathname(firstVisible.currentSrc || firstVisible.src, baseUrl)), "최초로 표시된 hero가 현재 published 이미지가 아닙니다.");
+  invariant(Number(dom.opacity) > 0, "최종 hero가 표시 상태가 아닙니다.");
+  const firstVisible = visibilitySamples.find((entry) => Number(entry.opacity) > 0 && entry.ready);
+  invariant(firstVisible, "표시 가능한 hero 증거가 없습니다.");
+  invariant(expectedPaths.includes(pathname(firstVisible.currentSrc || firstVisible.src, baseUrl)), "표시된 hero가 현재 published 이미지가 아닙니다.");
   invariant(expectedPaths.includes(pathname(dom.currentSrc || dom.src, baseUrl)), "최종 hero가 현재 published 이미지가 아닙니다.");
   invariant(consoleErrors.length === 0, `브라우저 console 오류가 발생했습니다: ${consoleErrors.join(" | ")}`);
   invariant(pageErrors.length === 0, `브라우저 page 오류가 발생했습니다: ${pageErrors.join(" | ")}`);
@@ -162,6 +173,7 @@ export function formatRenderDiagnostic({
   responseHeaders,
   dom,
   observations = [],
+  requests = [],
   requestFailures = [],
   responseFailures = [],
   consoleErrors = [],
@@ -172,11 +184,21 @@ export function formatRenderDiagnostic({
     response: responseHeaders || null,
     dom: dom || null,
     observations: observations.slice(-10),
+    requests: requests.slice(-10),
     requestFailures: requestFailures.slice(-10),
     responseFailures: responseFailures.slice(-10),
     consoleErrors: consoleErrors.slice(-10),
     pageErrors: pageErrors.slice(-10),
   });
+}
+
+export function validateRenderScenario({ name, ...renderEvidence }) {
+  try {
+    return validateRenderEvidence(renderEvidence);
+  } catch (error) {
+    const diagnostic = formatRenderDiagnostic({ name, ...renderEvidence });
+    throw new Error(`[${name}] ${error.message}; diagnostics=${diagnostic}`, { cause: error });
+  }
 }
 
 async function expectedPublication(fetchImpl, baseUrl) {
@@ -379,7 +401,8 @@ export async function runPostDeployRenderCanary({
         expectedWorkerTag: targetWorkerTag,
         expectedWorkerVersion: targetWorkerVersion,
       });
-      validateRenderEvidence({
+      validateRenderScenario({
+        name: config.name,
         baseUrl: normalizedBaseUrl,
         expectedWorkerTag: targetWorkerTag,
         expectedWorkerVersion: targetWorkerVersion,
