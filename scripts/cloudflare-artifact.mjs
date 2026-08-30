@@ -12,6 +12,7 @@ const DEPLOYMENT_SOURCE_TARGETS = [
   "scripts/check-d1-migrations.mjs",
   "scripts/cloudflare-artifact.mjs",
   "scripts/cloudflare-deployment-state.mjs",
+  "scripts/post-deploy-render-canary.mjs",
   "scripts/post-deploy-canary.mjs",
   "worker/index.js",
   "wrangler.jsonc",

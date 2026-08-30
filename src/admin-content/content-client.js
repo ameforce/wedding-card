@@ -39,7 +39,7 @@ export function getEmbeddedContentPreviewConfig({ search = "", embedded = false,
 
 function fallbackPublicContent(staticContent) {
   return {
-    source: "bundled-static",
+    source: "bundled-fallback",
     revisionId: null,
     publishedAt: null,
     content: staticContent,
@@ -269,9 +269,9 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
 
   return {
     mode: "cloudflare",
-    async getPublicContent() {
+    async getPublicContent({ signal } = {}) {
       try {
-        const payload = await requestJson(fetchImpl, "/api/content");
+        const payload = await requestJson(fetchImpl, "/api/content", { signal });
         return {
           source: "cloudflare-published",
           revisionId: payload.revisionId ?? null,
