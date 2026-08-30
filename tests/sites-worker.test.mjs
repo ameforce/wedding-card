@@ -38,7 +38,7 @@ test("falls back to index.html for an unknown app route", async () => {
         fetch: async (request) => {
           const url = new URL(request.url);
           calls.push(url.pathname + url.search);
-          return new Response(url.pathname === "/" ? "app" : "missing", {
+          return new Response(url.pathname === "/" ? "<!-- WEDDING_PUBLIC_BOOTSTRAP -->app" : "missing", {
             status: url.pathname === "/" ? 200 : 404,
           });
         },
@@ -48,6 +48,8 @@ test("falls back to index.html for an unknown app route", async () => {
 
   assert.equal(response.status, 200);
   assertSecurityHeaders(response);
+  assert.equal(response.headers.get("x-wedding-content-source"), "bundled-fallback");
+  assert.match(await response.text(), /id="wedding-public-bootstrap"/);
   assert.deepEqual(calls, ["/flow/step-two?source=share", "/"]);
 });
 
@@ -104,6 +106,7 @@ test("routes protected admin pages through the Worker SPA fallback", async () =>
 
 test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/index.html", import.meta.url));
+  assert.match(await readFile(new URL("../dist/client/index.html", import.meta.url), "utf8"), /WEDDING_PUBLIC_BOOTSTRAP/);
   const staticHeaders = await readFile(new URL("../dist/client/_headers", import.meta.url), "utf8");
   assert.match(staticHeaders, /X-Robots-Tag:\s*noindex, nofollow, noarchive, nosnippet, noimageindex/);
   assert.match(staticHeaders, /Content-Security-Policy:.*frame-ancestors 'self'/);

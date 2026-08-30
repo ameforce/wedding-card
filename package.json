@@ -1,6 +1,6 @@
 {
   "name": "wedding-card",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "upload:cloudflare:version": "wrangler versions upload",
     "deploy:cloudflare:version": "wrangler versions deploy",
     "deploy:cloudflare:verified": "npm run deploy:cloudflare && npm run canary:production",
-    "canary:production": "node scripts/post-deploy-canary.mjs",
+    "canary:production": "node scripts/post-deploy-render-canary.mjs && node scripts/post-deploy-canary.mjs",
     "cloudflare:dry-run": "npm run build && npm run cloudflare:dry-run:built",
     "cloudflare:dry-run:built": "wrangler versions upload --dry-run",
     "check:migrations": "node scripts/check-d1-migrations.mjs",
@@ -22,7 +22,7 @@
     "optimize:assets": "node scripts/optimize-assets.mjs",
     "preview": "vite preview",
     "test:ui": "node --test tests/sesang-sticker-layout.test.mjs tests/wedding-content.test.mjs tests/text-alignment.test.mjs tests/mobile-zoom-guard.test.mjs tests/invitation-actions.test.mjs tests/admin-content.test.mjs",
-    "test:sites": "node --test tests/sites-worker.test.mjs tests/guestbook-worker.test.mjs tests/content-worker.test.mjs tests/post-deploy-canary.test.mjs tests/d1-migrations.test.mjs tests/cloudflare-deployment-state.test.mjs tests/cloudflare-deployment-workflow.test.mjs"
+    "test:sites": "node --test tests/sites-worker.test.mjs tests/guestbook-worker.test.mjs tests/content-worker.test.mjs tests/post-deploy-render-canary.test.mjs tests/post-deploy-canary.test.mjs tests/d1-migrations.test.mjs tests/cloudflare-deployment-state.test.mjs tests/cloudflare-deployment-workflow.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/cormorant-garamond": "^5.3.0",
@@ -42,6 +42,7 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^16.4.0",
+    "playwright": "1.62.1",
     "sharp": "0.35.3",
     "wrangler": "^4.123.0"
   }

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "review_profile",
+  "repository": "https://github.com/ameforce/wedding-card.git",
+  "rules": [
+    {
+      "id": "public-content-bootstrap",
+      "triggers": [
+        "index.html",
+        "src/**",
+        "worker/**",
+        "tests/**"
+      ],
+      "direct_execution_paths": [
+        "worker/index.js",
+        "src/admin-content/public-bootstrap.js"
+      ],
+      "changed_contract_consumers": [
+        "src/App.jsx",
+        "src/admin-content/content-client.js",
+        "src/admin-content/public-content.jsx",
+        "src/styles.css"
+      ],
+      "build_package_artifact_paths": [
+        "index.html",
+        "package.json",
+        "package-lock.json",
+        "scripts/cloudflare-artifact.mjs"
+      ],
+      "release_deploy_consumers": [
+        ".github/workflows/cloudflare.yml",
+        "scripts/post-deploy-canary.mjs",
+        "scripts/post-deploy-render-canary.mjs"
+      ],
+      "evidence": "The public HTML bootstrap, runtime-managed image identity, Cloudflare Worker response, browser render canary, and production deploy workflow form one release-critical contract."
+    }
+  ]
+}
