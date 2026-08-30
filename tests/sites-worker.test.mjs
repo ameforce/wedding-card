@@ -102,6 +102,7 @@ test("does not turn missing API or write requests into the app shell", async () 
 test("routes protected admin pages through the Worker SPA fallback", async () => {
   const wrangler = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
   assert.equal(wrangler.assets.run_worker_first, true);
+  assert.equal(wrangler.version_metadata.binding, "CF_VERSION_METADATA");
 });
 
 test("emits the files required by Sites packaging", async () => {

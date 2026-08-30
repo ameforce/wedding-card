@@ -164,6 +164,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           WEDDING_CANARY_ALLOW_PRODUCTION_WRITE: "1"
           WEDDING_CANARY_ALLOW_D1_ADMIN_READ: "1"
+          WEDDING_CANARY_EXPECTED_WORKER_TAG: ${{ github.sha }}
         run: npm run canary:production
 
       - name: Roll back Worker after post-deploy failure
