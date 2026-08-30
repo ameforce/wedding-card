@@ -67,7 +67,13 @@ test("render canary samples final computed visibility after CSS-only transitions
     observations: [
       { src: "/api/media/invitation/id/pastel-hero/480.webp", currentSrc: "/api/media/invitation/id/pastel-hero/960.webp", opacity: "0", ready: true },
     ],
-  })), /표시 가능한 hero 증거/);
+  })), /최종 hero가 표시 상태/);
+  assert.throws(() => validateRenderEvidence(evidence({
+    dom: { ...evidence().dom, opacity: "0" },
+    observations: [
+      { src: "/api/media/invitation/id/pastel-hero/480.webp", currentSrc: "/api/media/invitation/id/pastel-hero/960.webp", opacity: "1", ready: true },
+    ],
+  })), /최종 hero가 표시 상태/);
 });
 
 test("render validation failures name the scenario and preserve diagnostics", () => {

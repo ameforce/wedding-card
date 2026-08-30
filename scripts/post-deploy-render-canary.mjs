@@ -158,6 +158,7 @@ export function validateRenderEvidence({
   const requestPaths = requests.map((value) => pathname(value, baseUrl));
   invariant(!observedPaths.some((value) => BUNDLED_PASTEL_HERO.test(value)), "published 세션에서 bundled hero가 DOM에 관찰되었습니다.");
   invariant(!requestPaths.some((value) => BUNDLED_PASTEL_HERO.test(value)), "published 세션에서 bundled hero가 네트워크로 요청되었습니다.");
+  invariant(Number(dom.opacity) > 0, "최종 hero가 표시 상태가 아닙니다.");
   const firstVisible = visibilitySamples.find((entry) => Number(entry.opacity) > 0 && entry.ready);
   invariant(firstVisible, "표시 가능한 hero 증거가 없습니다.");
   invariant(expectedPaths.includes(pathname(firstVisible.currentSrc || firstVisible.src, baseUrl)), "표시된 hero가 현재 published 이미지가 아닙니다.");
