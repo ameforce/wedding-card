@@ -189,11 +189,14 @@ test("public HTML atomically injects one published revision and preloads its her
   }), {
     GUESTBOOK_DB: db,
     ASSETS: { fetch: async () => new Response("<head><!-- WEDDING_PUBLIC_BOOTSTRAP --></head><body>app</body>") },
+    CF_VERSION_METADATA: { id: "worker-version-42", tag: "a".repeat(40), timestamp: "2026-08-31T00:00:00.000Z" },
   });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("x-wedding-content-source"), "cloudflare-published");
   assert.equal(response.headers.get("x-wedding-revision"), "published-42");
+  assert.equal(response.headers.get("x-wedding-worker-version"), "worker-version-42");
+  assert.equal(response.headers.get("x-wedding-worker-tag"), "a".repeat(40));
   const html = await response.text();
   const encoded = html.match(/<template id="wedding-public-bootstrap"[^>]*>([^<]+)<\/template>/)?.[1];
   assert.ok(encoded);
