@@ -17,6 +17,7 @@ test("production state requires one version with 100 percent traffic", () => {
   assert.equal(productionVersionId(status()), VERSION);
   assert.throws(() => productionVersionId({ versions: [] }), /단일 Worker 버전/);
   assert.throws(() => productionVersionId(status(90)), /100%/);
+  assert.throws(() => productionVersionId({ versions: [{ version_id: "unsafe\noutput=value", percentage: 100 }] }), /형식/);
 });
 
 test("deployment verification binds the active version tag and message to the exact commit", () => {
