@@ -80,15 +80,15 @@ test("render validation failures name the scenario and preserve diagnostics", ()
   assert.throws(() => validateRenderScenario({
     name: "cold-400ms",
     ...evidence({
-      dom: { ...evidence().dom, opacity: "0" },
       observations: [],
+      requests: [`${BASE}assets/photos/pastel-hero-480.webp`],
       requestFailures: ["net::ERR_FAILED https://example.test/hero.webp"],
     }),
   }), (error) => {
     assert.match(error.message, /^\[cold-400ms\]/);
     assert.match(error.message, /diagnostics=/);
     assert.match(error.message, /ERR_FAILED/);
-    assert.match(error.message, /"opacity":"0"/);
+    assert.match(error.message, /assets\/photos\/pastel-hero-480\.webp/);
     return true;
   });
 });
