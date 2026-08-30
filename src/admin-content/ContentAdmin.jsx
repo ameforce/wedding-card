@@ -41,20 +41,28 @@ function CopyField({ label, lines, onChange, hint }) {
 }
 
 function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy }) {
+  const [replacementAlt, setReplacementAlt] = useState("");
+  const replacementReady = replacementAlt.trim().length > 0;
   return (
     <article className="content-admin-photo-card">
       <img src={photo.src} alt="" style={{ objectPosition: photo.position }} />
       <div>
         <strong>{title}</strong>
-        <label className="content-admin-file">
+        <Field label="현재 사진 대체 텍스트" value={photo.alt} onChange={(value) => onMetaChange("alt", value)} />
+        <Field
+          label="새 사진 대체 텍스트"
+          value={replacementAlt}
+          onChange={setReplacementAlt}
+          hint="사진을 교체할 때마다 새 사진에 맞는 설명을 다시 입력해야 합니다."
+        />
+        <label className={`content-admin-file ${replacementReady ? "" : "is-disabled"}`}>
           <span>{busy ? "이미지 처리 중…" : "사진 교체"}</span>
-          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => {
+          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || !replacementReady} onChange={async (event) => {
             const file = event.target.files?.[0];
-            if (file) void onUpload(slot, file);
+            if (file && await onUpload(slot, file, replacementAlt.trim())) setReplacementAlt("");
             event.target.value = "";
           }} />
         </label>
-        <Field label="대체 텍스트" value={photo.alt} onChange={(value) => onMetaChange("alt", value)} />
         <Field label="초점 위치" value={photo.position} onChange={(value) => onMetaChange("position", value)} hint="예: 50% 58%" />
       </div>
     </article>
@@ -195,18 +203,24 @@ export function ContentAdmin() {
     }
   };
 
-  const uploadPhoto = async (slot, file) => {
+  const uploadPhoto = async (slot, file, replacementAlt) => {
+    if (!replacementAlt.trim()) {
+      setStatus({ tone: "error", message: "새 사진에 맞는 대체 텍스트를 먼저 입력해 주세요." });
+      return false;
+    }
     setUploadingSlot(slot);
     try {
       const isHero = slot === "pastel-hero";
       const index = isHero ? -1 : Number(slot.replace("pastel-gallery-", ""));
       const current = isHero ? editingDocument.photos.pastel.hero : editingDocument.photos.pastel.gallery[index];
-      const result = await adapter.uploadPhoto({ slot, file, alt: current.alt, position: current.position });
+      const result = await adapter.uploadPhoto({ slot, file, alt: replacementAlt.trim(), position: current.position });
       update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], result.photo);
       setMediaUsage(result.usage || await adapter.getMediaUsage());
       setStatus({ tone: "success", message: "새 사진을 초안에 넣었습니다. 초점과 설명을 확인해 주세요." });
+      return true;
     } catch (error) {
       showAdminError(error, "사진을 처리하지 못했습니다.");
+      return false;
     } finally {
       setUploadingSlot("");
     }

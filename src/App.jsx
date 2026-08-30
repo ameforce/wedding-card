@@ -55,12 +55,29 @@ function getVariant() {
 
 function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "", priority = false, sizes }) {
   const broken = new URLSearchParams(window.location.search).get("brokenAsset") === "1";
-  const [failed, setFailed] = useState(false);
+  const imageSource = broken ? "/assets/design/missing-image.png" : photo.src;
+  const [imageState, setImageState] = useState(() => ({ source: imageSource, failed: false, ready: !priority }));
+  const currentImageState = imageState.source === imageSource
+    ? imageState
+    : { source: imageSource, failed: false, ready: !priority };
+  const { failed, ready } = currentImageState;
+  const markReady = async (event) => {
+    const image = event.currentTarget;
+    try {
+      await image.decode?.();
+    } catch {
+      // A successful load remains usable when decode() is unsupported or rejects.
+    }
+    if (image.getAttribute("src") === imageSource) {
+      setImageState({ source: imageSource, failed: false, ready: true });
+    }
+  };
   return (
     <button
-      className={`photo-button ${className} ${failed ? "is-fallback" : ""}`}
+      className={`photo-button ${className} ${failed ? "is-fallback" : ""} ${ready ? "is-image-ready" : "is-image-pending"}`}
       type="button"
       aria-label={`${index + 1}번째 사진 크게 보기`}
+      aria-busy={priority && !ready ? "true" : undefined}
       ref={(node) => {
         registerTrigger(index, node);
       }}
@@ -69,7 +86,8 @@ function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "",
     >
       {!failed && (
         <img
-          src={broken ? "/assets/design/missing-image.png" : photo.src}
+          key={imageSource}
+          src={imageSource}
           srcSet={broken ? undefined : photo.srcSet}
           sizes={sizes ?? photo.sizes}
           alt={photo.alt}
@@ -77,11 +95,25 @@ function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "",
           decoding="async"
           fetchPriority={priority ? "high" : "auto"}
           style={{ objectPosition: photo.position }}
-          onError={() => setFailed(true)}
+          onLoad={markReady}
+          onError={() => setImageState({ source: imageSource, failed: true, ready: false })}
         />
       )}
       <span className="sr-only">사진 크게 보기</span>
     </button>
+  );
+}
+
+function InvitationLoadingShell({ captureMode }) {
+  return (
+    <main className={`app-shell invitation-loading-shell ${captureMode ? "is-capture" : ""}`} data-content-source="pending" aria-busy="true">
+      <div className="invitation-stage">
+        <div className="invitation-loading-paper">
+          <div className="invitation-loading-hero" />
+          <span className="sr-only" role="status">초대장을 불러오는 중입니다.</span>
+        </div>
+      </div>
+    </main>
   );
 }
 
@@ -913,6 +945,7 @@ function WeddingApp() {
   const [toast, setToast] = useState({ message: "", tone: "success" });
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
   useEffect(() => {
+    if (runtime.status !== "ready") return;
     document.documentElement.dataset.variant = variant;
     document.title = `${runtime.content.couple.groom} · ${runtime.content.couple.bride} | ${VARIANTS[variant].title}`;
     const params = new URLSearchParams(window.location.search);
@@ -920,7 +953,7 @@ function WeddingApp() {
     else params.delete("variant");
     const query = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
-  }, [runtime.content.couple.bride, runtime.content.couple.groom, variant]);
+  }, [runtime.content.couple.bride, runtime.content.couple.groom, runtime.status, variant]);
 
   const notify = (message, tone = "success") => {
     setToast({ message, tone });
@@ -928,9 +961,15 @@ function WeddingApp() {
     window.__weddingToastTimer = window.setTimeout(() => setToast({ message: "", tone: "success" }), 2800);
   };
 
+  if (runtime.status !== "ready") return <InvitationLoadingShell captureMode={captureMode} />;
+
   return (
     <WeddingRuntimeContext.Provider value={{ content: runtime.content, photos: runtimePhotos }}>
-    <main className={`app-shell ${captureMode ? "is-capture" : ""}`}>
+    <main
+      className={`app-shell ${captureMode ? "is-capture" : ""}`}
+      data-content-source={runtime.source}
+      data-content-revision={runtime.revisionId || ""}
+    >
       <div className="invitation-stage">
         {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
       </div>

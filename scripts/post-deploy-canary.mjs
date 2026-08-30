@@ -166,8 +166,12 @@ async function verifyPublicInvitation(fetchImpl, baseUrl) {
   invariant((response.headers.get("x-content-type-options") || "").toLowerCase() === "nosniff", "공개 초대장의 nosniff 헤더가 없습니다.");
   const csp = response.headers.get("content-security-policy") || "";
   invariant(/frame-ancestors\s+'self'/i.test(csp), "공개 초대장의 frame-ancestors CSP가 없습니다.");
+  invariant(response.headers.get("x-wedding-content-source") === "cloudflare-published", "공개 초대장 HTML이 published bootstrap을 사용하지 않습니다.");
+  const htmlRevision = response.headers.get("x-wedding-revision") || "";
+  invariant(htmlRevision, "공개 초대장 HTML의 revision 헤더가 없습니다.");
   const html = await response.text();
   invariant(html.includes("https://wdcard.enmsoftware.com/"), "공개 초대장 canonical URL을 확인하지 못했습니다.");
+  invariant(html.includes('id="wedding-public-bootstrap"'), "공개 초대장 HTML bootstrap을 확인하지 못했습니다.");
 
   const contentResponse = await fetchImpl(new URL("/api/content", baseUrl), {
     redirect: "error",
@@ -176,7 +180,8 @@ async function verifyPublicInvitation(fetchImpl, baseUrl) {
   });
   invariant(contentResponse.status === 200, `공개 콘텐츠 API 응답이 HTTP ${contentResponse.status}입니다.`);
   invariant(/noindex/i.test(contentResponse.headers.get("x-robots-tag") || ""), "공개 콘텐츠 API의 검색 차단 헤더가 없습니다.");
-  await contentResponse.json();
+  const content = await contentResponse.json();
+  invariant(content.revisionId === htmlRevision, "공개 초대장 HTML과 콘텐츠 API revision이 다릅니다.");
 }
 
 async function requestGuestbook(fetchImpl, baseUrl, path, method, payload, expectedStatus) {

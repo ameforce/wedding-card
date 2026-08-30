@@ -112,6 +112,9 @@ jobs:
       - name: Verify deployment inputs after install and checks
         run: sha256sum --strict --check dist/cloudflare-artifact.sha256
 
+      - name: Install Chromium for the rendered production canary
+        run: npx playwright install --with-deps chromium
+
       - name: Capture recovery points
         id: recovery
         env:

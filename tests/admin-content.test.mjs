@@ -16,6 +16,20 @@ import {
   isAdminAuthRequiredError,
   LOCAL_REVIEW_STORAGE_KEY,
 } from "../src/admin-content/content-client.js";
+import {
+  initialPublicContentState,
+  PUBLIC_CONTENT_TIMEOUT_MS,
+  readPublicBootstrap,
+} from "../src/admin-content/public-bootstrap.js";
+
+function bootstrapRoot(payload, schemaVersion = "1") {
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  return {
+    getElementById() {
+      return { dataset: { schemaVersion }, content: { textContent: encoded } };
+    },
+  };
+}
 
 function memoryStorage() {
   const values = new Map();
@@ -61,6 +75,41 @@ test("development review keeps draft and published content as separate explicit 
   await adapter.publish(saved.draftRevisionId);
   assert.equal((await adapter.getPublicContent()).content.venue.name, "검토용 예식장");
   assert.equal(storage.values.has(LOCAL_REVIEW_STORAGE_KEY), true);
+});
+
+test("public bootstrap selects exactly one published or bundled source before React", () => {
+  const document = createContentDocument(weddingContent);
+  document.content.venue.name = "D1 공개 예식장";
+  const published = readPublicBootstrap(weddingContent, bootstrapRoot({
+    schemaVersion: 1,
+    source: "cloudflare-published",
+    revisionId: "published-42",
+    publishedAt: "2026-08-30T00:00:00.000Z",
+    document,
+  }));
+  assert.equal(published.status, "ready");
+  assert.equal(published.source, "cloudflare-published");
+  assert.equal(published.revisionId, "published-42");
+  assert.equal(published.content.venue.name, "D1 공개 예식장");
+
+  const fallback = readPublicBootstrap(weddingContent, bootstrapRoot({
+    schemaVersion: 1,
+    source: "bundled-fallback",
+    revisionId: null,
+    publishedAt: null,
+    document: null,
+  }));
+  assert.equal(fallback.status, "ready");
+  assert.equal(fallback.source, "bundled-fallback");
+  assert.equal(fallback.content, weddingContent);
+});
+
+test("missing, invalid, and embedded bootstrap states stay neutral until one source settles", () => {
+  assert.equal(initialPublicContentState({ staticContent: weddingContent, root: { getElementById: () => null } }).status, "pending");
+  assert.equal(initialPublicContentState({ staticContent: weddingContent, root: bootstrapRoot({}, "2") }).status, "pending");
+  assert.equal(initialPublicContentState({ previewDraft: true, staticContent: weddingContent }).source, "pending");
+  assert.equal(initialPublicContentState({ localReview: true, staticContent: weddingContent }).source, "pending");
+  assert.equal(PUBLIC_CONTENT_TIMEOUT_MS, 3_000);
 });
 
 test("production draft persists for administrator reloads and moves the public pointer only on publish", async () => {
@@ -212,9 +261,13 @@ test("the admin UI labels local review and keeps publish behind an explicit save
   assert.match(source, /미저장 변경.*저장된 초안.*공개본/s);
   assert.match(source, /CONTENT_PREVIEW_READY_MESSAGE_TYPE/);
   assert.match(previewSource, /event\.source !== window\.parent/);
-  assert.match(previewSource, /receivedLivePreview/);
+  assert.match(previewSource, /source:\s*"admin-live-preview"/);
+  assert.match(previewSource, /if \(previewDraft\)/);
   assert.doesNotMatch(previewSource, /getAdminState\(\)/);
   assert.match(source, /\/api\/admin\/media|uploadPhoto/);
+  assert.match(source, /새 사진 대체 텍스트/);
+  assert.match(source, /replacementAlt\.trim\(\)/);
+  assert.doesNotMatch(source, /alt:\s*current\.alt/);
   assert.match(source, /사진 저장 공간/);
   assert.match(source, /2GB에 도달하면 추가 업로드가 자동으로 차단/);
   assert.match(source, /관리자 인증이 필요합니다/);
