@@ -39,7 +39,7 @@ const ACCESS_JWKS_TTL_MS = 5 * 60 * 1000;
 const accessKeyCache = new Map();
 let activeCredentialChecks = 0;
 
-function withSearchPrivacy(response) {
+function withSearchPrivacy(response, env) {
   const headers = new Headers(response.headers);
   headers.set("x-robots-tag", SEARCH_ROBOTS_DIRECTIVE);
   headers.set("content-security-policy", CONTENT_SECURITY_POLICY);
@@ -47,6 +47,12 @@ function withSearchPrivacy(response) {
   headers.set("referrer-policy", "strict-origin-when-cross-origin");
   headers.set("x-content-type-options", "nosniff");
   headers.set("x-frame-options", "SAMEORIGIN");
+  if (typeof env?.CF_VERSION_METADATA?.id === "string" && env.CF_VERSION_METADATA.id) {
+    headers.set("x-wedding-worker-version", env.CF_VERSION_METADATA.id);
+  }
+  if (typeof env?.CF_VERSION_METADATA?.tag === "string" && env.CF_VERSION_METADATA.tag) {
+    headers.set("x-wedding-worker-tag", env.CF_VERSION_METADATA.tag);
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -1004,12 +1010,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith(API_PREFIX)) {
-      return withSearchPrivacy(await handleGuestbook(request, env, url));
+      return withSearchPrivacy(await handleGuestbook(request, env, url), env);
     }
     if (url.pathname === CONTENT_API_PREFIX
       || url.pathname.startsWith(`${ADMIN_API_PREFIX}/`)
       || url.pathname.startsWith(`${MEDIA_API_PREFIX}/`)) {
-      return withSearchPrivacy(await handleContent(request, env, url));
+      return withSearchPrivacy(await handleContent(request, env, url), env);
     }
 
     const acceptsHtml = request.headers.get("accept")?.includes("text/html");
@@ -1021,20 +1027,20 @@ export default {
       const indexUrl = new URL(request.url);
       indexUrl.pathname = "/";
       indexUrl.search = "";
-      return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
+      return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)), env);
     }
 
     if (!acceptsHtml || !["GET", "HEAD"].includes(request.method)) {
-      return withSearchPrivacy(await env.ASSETS.fetch(request));
+      return withSearchPrivacy(await env.ASSETS.fetch(request), env);
     }
 
     if (request.method === "HEAD") {
       const response = await env.ASSETS.fetch(request);
-      if (response.status !== 404) return withSearchPrivacy(response);
+      if (response.status !== 404) return withSearchPrivacy(response, env);
       const indexUrl = new URL(request.url);
       indexUrl.pathname = "/";
       indexUrl.search = "";
-      return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
+      return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)), env);
     }
 
     const publicAssetRequest = unconditionalPublicHtmlRequest(request);
@@ -1050,9 +1056,9 @@ export default {
       indexUrl.search = "";
       response = await env.ASSETS.fetch(unconditionalPublicHtmlRequest(request, indexUrl));
     }
-    if (response.status !== 200) return withSearchPrivacy(response);
+    if (response.status !== 200) return withSearchPrivacy(response, env);
     const published = publishedResult.status === "fulfilled" ? publishedResult.value : null;
-    return withSearchPrivacy(await injectPublicBootstrap(response, published, url));
+    return withSearchPrivacy(await injectPublicBootstrap(response, published, url), env);
   },
 };
 

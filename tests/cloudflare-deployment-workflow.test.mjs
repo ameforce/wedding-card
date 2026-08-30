@@ -14,6 +14,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 test("production CI deploys a Worker version without mutating Custom Domain routes", async () => {
   const workflow = await readFile(resolve(root, ".github/workflows/cloudflare.yml"), "utf8");
+  const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   const deployJob = workflow.split(/^ {2}deploy:/m)[1] ?? "";
 
   assert.match(workflow, /- ['"]hotfix\/\*\*['"]/);
@@ -31,9 +32,12 @@ test("production CI deploys a Worker version without mutating Custom Domain rout
   assert.match(workflow, /cloudflare-deployment-state\.mjs restore-if-changed/);
   assert.match(deployJob, /npx playwright install --with-deps chromium/);
   assert.match(deployJob, /npm run canary:production/);
+  assert.match(deployJob, /WEDDING_CANARY_EXPECTED_WORKER_TAG: \$\{\{ github\.sha \}\}/);
+  assert.match(deployJob, /WEDDING_CANARY_EXPECTED_WORKER_VERSION: \$\{\{ steps\.active-version\.outputs\.active_worker_version \}\}/);
 
   const artifactSource = await readFile(resolve(root, "scripts/cloudflare-artifact.mjs"), "utf8");
   assert.match(artifactSource, /scripts\/post-deploy-render-canary\.mjs/);
+  assert.equal(packageJson.scripts["deploy:cloudflare:verified"], undefined);
 });
 
 test("Cloudflare artifact manifest rejects changed or additional build files", async (context) => {

@@ -1,9 +1,15 @@
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import { activeDeploymentIdentity } from "./cloudflare-deployment-state.mjs";
 
 const DEFAULT_BASE_URL = "https://wdcard.enmsoftware.com/";
 const HTTP_TIMEOUT_MS = 20_000;
 const RENDER_TIMEOUT_MS = 30_000;
+const VERSION_PROBE_TIMEOUT_MS = 10_000;
+const VERSION_CONVERGENCE_ATTEMPTS = 12;
+const VERSION_CONVERGENCE_INTERVAL_MS = 5_000;
+const GIT_SHA = /^[a-f0-9]{40}$/u;
+const WORKER_VERSION_ID = /^[a-f0-9-]{36}$/u;
 const BUNDLED_PASTEL_HERO = /^\/assets\/photos\/pastel-hero-(?:480|960)\.webp$/u;
 
 function invariant(condition, message) {
@@ -25,6 +31,81 @@ function pathname(value, baseUrl) {
   return new URL(value, baseUrl).pathname;
 }
 
+function expectedWorkerTag(value) {
+  const tag = String(value || "").trim().toLowerCase();
+  invariant(GIT_SHA.test(tag), "WEDDING_CANARY_EXPECTED_WORKER_TAG는 정확한 40자 Git SHA여야 합니다.");
+  return tag;
+}
+
+function expectedWorkerVersion(value) {
+  const version = String(value || "").trim().toLowerCase();
+  invariant(WORKER_VERSION_ID.test(version), "WEDDING_CANARY_EXPECTED_WORKER_VERSION은 exact Worker version ID여야 합니다.");
+  return version;
+}
+
+export async function resolveExpectedWorkerIdentity({
+  expectedTag,
+  expectedVersion,
+  readActiveIdentity = activeDeploymentIdentity,
+}) {
+  const hasTag = Boolean(String(expectedTag || "").trim());
+  const hasVersion = Boolean(String(expectedVersion || "").trim());
+  invariant(hasTag === hasVersion, "expected Worker tag와 version ID는 함께 제공해야 합니다.");
+  const identity = hasTag ? { workerTag: expectedTag, workerVersion: expectedVersion } : await readActiveIdentity();
+  return {
+    workerTag: expectedWorkerTag(identity.workerTag),
+    workerVersion: expectedWorkerVersion(identity.workerVersion),
+  };
+}
+
+export async function waitForWorkerVersion({
+  baseUrl,
+  expectedTag,
+  expectedVersion,
+  fetchImpl = globalThis.fetch,
+  logger = console,
+  sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
+  attempts = VERSION_CONVERGENCE_ATTEMPTS,
+  intervalMs = VERSION_CONVERGENCE_INTERVAL_MS,
+  timeoutMs = VERSION_PROBE_TIMEOUT_MS,
+  now = Date.now,
+}) {
+  const targetTag = expectedWorkerTag(expectedTag);
+  const targetVersion = expectedWorkerVersion(expectedVersion);
+  invariant(Number.isInteger(attempts) && attempts > 0, "Worker version probe 횟수가 올바르지 않습니다.");
+  const observations = [];
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const probeUrl = new URL(baseUrl);
+    probeUrl.searchParams.set("workerVersionProbe", `${attempt}-${now()}`);
+    try {
+      const response = await fetchImpl(probeUrl, {
+        redirect: "error",
+        headers: {
+          accept: "text/html",
+          "cache-control": "no-cache",
+          pragma: "no-cache",
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const observation = {
+        attempt,
+        status: response.status,
+        tag: response.headers.get("x-wedding-worker-tag") || "missing",
+        version: response.headers.get("x-wedding-worker-version") || "missing",
+      };
+      observations.push(observation);
+      if (response.status === 200 && observation.tag === targetTag && observation.version === targetVersion) {
+        logger.info(`[production-render-canary] custom-domain version 수렴: attempt=${attempt} tag=${targetTag} version=${targetVersion}`);
+        return { workerTag: targetTag, workerVersion: targetVersion, observations };
+      }
+    } catch (error) {
+      observations.push({ attempt, error: error.message });
+    }
+    if (attempt < attempts) await sleep(intervalMs);
+  }
+  throw new Error(`커스텀 도메인이 배포 Worker tag=${targetTag}, version=${targetVersion}로 수렴하지 않았습니다. observations=${JSON.stringify(observations)}`);
+}
+
 function expectedHeroPaths(document, baseUrl) {
   const hero = document?.photos?.pastel?.hero;
   invariant(typeof hero?.src === "string" && hero.src, "공개 콘텐츠에 Pastel hero src가 없습니다.");
@@ -40,6 +121,8 @@ function expectedHeroPaths(document, baseUrl) {
 
 export function validateRenderEvidence({
   baseUrl,
+  expectedWorkerTag: targetWorkerTag,
+  expectedWorkerVersion: targetWorkerVersion,
   expectedRevision,
   expectedPaths,
   responseHeaders,
@@ -49,26 +132,73 @@ export function validateRenderEvidence({
   consoleErrors,
   pageErrors,
 }) {
+  invariant(responseHeaders.status === 200, `HTML document 응답이 HTTP ${responseHeaders.status}입니다.`);
+  invariant(responseHeaders.workerTag === targetWorkerTag, `HTML Worker tag가 배포 SHA와 다릅니다: ${responseHeaders.workerTag || "missing"}`);
+  invariant(responseHeaders.workerVersion === targetWorkerVersion, `HTML Worker version ID가 활성 버전과 다릅니다: ${responseHeaders.workerVersion || "missing"}`);
   invariant(responseHeaders.source === "cloudflare-published", `HTML bootstrap source가 published가 아닙니다: ${responseHeaders.source || "missing"}`);
   invariant(responseHeaders.revision === expectedRevision, "HTML bootstrap revision 헤더가 /api/content와 다릅니다.");
   invariant(dom.source === "cloudflare-published", `렌더링 source가 published가 아닙니다: ${dom.source || "missing"}`);
   invariant(dom.revision === expectedRevision, "렌더링 revision이 /api/content와 다릅니다.");
   invariant(dom.ready === true && dom.naturalWidth > 0, "Pastel hero가 decode 완료 상태로 표시되지 않았습니다.");
 
-  const observedPaths = observations
+  const visibilitySamples = [
+    ...observations,
+    {
+      src: dom.src,
+      currentSrc: dom.currentSrc,
+      opacity: dom.opacity,
+      ready: dom.ready,
+      sample: "final-dom",
+    },
+  ];
+  const observedPaths = visibilitySamples
     .flatMap((entry) => [entry.src, entry.currentSrc])
     .filter(Boolean)
     .map((value) => pathname(value, baseUrl));
   const requestPaths = requests.map((value) => pathname(value, baseUrl));
   invariant(!observedPaths.some((value) => BUNDLED_PASTEL_HERO.test(value)), "published 세션에서 bundled hero가 DOM에 관찰되었습니다.");
   invariant(!requestPaths.some((value) => BUNDLED_PASTEL_HERO.test(value)), "published 세션에서 bundled hero가 네트워크로 요청되었습니다.");
-  const firstVisible = observations.find((entry) => Number(entry.opacity) > 0 && entry.ready);
-  invariant(firstVisible, "최초로 표시된 hero 관찰값이 없습니다.");
-  invariant(expectedPaths.includes(pathname(firstVisible.currentSrc || firstVisible.src, baseUrl)), "최초로 표시된 hero가 현재 published 이미지가 아닙니다.");
+  invariant(Number(dom.opacity) > 0, "최종 hero가 표시 상태가 아닙니다.");
+  const firstVisible = visibilitySamples.find((entry) => Number(entry.opacity) > 0 && entry.ready);
+  invariant(firstVisible, "표시 가능한 hero 증거가 없습니다.");
+  invariant(expectedPaths.includes(pathname(firstVisible.currentSrc || firstVisible.src, baseUrl)), "표시된 hero가 현재 published 이미지가 아닙니다.");
   invariant(expectedPaths.includes(pathname(dom.currentSrc || dom.src, baseUrl)), "최종 hero가 현재 published 이미지가 아닙니다.");
   invariant(consoleErrors.length === 0, `브라우저 console 오류가 발생했습니다: ${consoleErrors.join(" | ")}`);
   invariant(pageErrors.length === 0, `브라우저 page 오류가 발생했습니다: ${pageErrors.join(" | ")}`);
   return true;
+}
+
+export function formatRenderDiagnostic({
+  name,
+  responseHeaders,
+  dom,
+  observations = [],
+  requests = [],
+  requestFailures = [],
+  responseFailures = [],
+  consoleErrors = [],
+  pageErrors = [],
+}) {
+  return JSON.stringify({
+    scenario: name,
+    response: responseHeaders || null,
+    dom: dom || null,
+    observations: observations.slice(-10),
+    requests: requests.slice(-10),
+    requestFailures: requestFailures.slice(-10),
+    responseFailures: responseFailures.slice(-10),
+    consoleErrors: consoleErrors.slice(-10),
+    pageErrors: pageErrors.slice(-10),
+  });
+}
+
+export function validateRenderScenario({ name, ...renderEvidence }) {
+  try {
+    return validateRenderEvidence(renderEvidence);
+  } catch (error) {
+    const diagnostic = formatRenderDiagnostic({ name, ...renderEvidence });
+    throw new Error(`[${name}] ${error.message}; diagnostics=${diagnostic}`, { cause: error });
+  }
 }
 
 async function expectedPublication(fetchImpl, baseUrl) {
@@ -120,40 +250,8 @@ async function installHeroObserver(page) {
   });
 }
 
-async function collectScenario({ browser, baseUrl, latencyMs = 0, warm = false }) {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
-  if (latencyMs > 0) {
-    await context.route("**/*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, latencyMs));
-      await route.continue();
-    });
-  }
-  const page = await context.newPage();
-  const requests = [];
-  const consoleErrors = [];
-  const pageErrors = [];
-  page.on("request", (request) => requests.push(request.url()));
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => pageErrors.push(error.message));
-  await installHeroObserver(page);
-
-  let response = await page.goto(baseUrl.href, { waitUntil: "domcontentloaded", timeout: RENDER_TIMEOUT_MS });
-  if (warm) {
-    requests.length = 0;
-    consoleErrors.length = 0;
-    pageErrors.length = 0;
-    response = await page.reload({ waitUntil: "domcontentloaded", timeout: RENDER_TIMEOUT_MS });
-  }
-  invariant(response, "공개 초대장 document 응답을 받지 못했습니다.");
-  await page.waitForFunction(() => {
-    const root = document.querySelector("main[data-content-source='cloudflare-published']");
-    const image = document.querySelector(".pastel-hero-photo.is-image-ready img");
-    return Boolean(root && image?.complete && image.naturalWidth > 0);
-  }, null, { timeout: RENDER_TIMEOUT_MS });
-  await page.waitForTimeout(250);
-  const evidence = await page.evaluate(() => {
+async function readRenderState(page) {
+  return page.evaluate(() => {
     const root = document.querySelector("main[data-content-source]");
     const image = document.querySelector(".pastel-hero-photo img");
     return {
@@ -163,49 +261,164 @@ async function collectScenario({ browser, baseUrl, latencyMs = 0, warm = false }
         src: image?.getAttribute("src") || "",
         currentSrc: image?.currentSrc || "",
         naturalWidth: image?.naturalWidth || 0,
+        opacity: image ? getComputedStyle(image).opacity : "",
         ready: image?.closest(".photo-button")?.classList.contains("is-image-ready") === true,
       },
       observations: window.__weddingHeroObservations || [],
     };
   });
-  const result = {
-    responseHeaders: {
-      source: response.headers()["x-wedding-content-source"] || "",
-      revision: response.headers()["x-wedding-revision"] || "",
-    },
-    ...evidence,
-    requests,
-    consoleErrors,
-    pageErrors,
-  };
-  await context.close();
-  return result;
+}
+
+async function collectScenario({
+  name,
+  browser,
+  baseUrl,
+  expectedWorkerTag: targetWorkerTag,
+  expectedWorkerVersion: targetWorkerVersion,
+  latencyMs = 0,
+  warm = false,
+}) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
+  if (latencyMs > 0) {
+    await context.route("**/*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, latencyMs));
+      await route.continue();
+    });
+  }
+  const page = await context.newPage();
+  const requests = [];
+  const requestFailures = [];
+  const responseFailures = [];
+  const consoleErrors = [];
+  const pageErrors = [];
+  page.on("request", (request) => requests.push(request.url()));
+  page.on("requestfailed", (request) => requestFailures.push(`${request.failure()?.errorText || "unknown"} ${request.url()}`));
+  page.on("response", (response) => {
+    if (response.status() >= 400) responseFailures.push(`${response.status()} ${response.url()}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await installHeroObserver(page);
+
+  let response;
+  let evidence = { dom: null, observations: [] };
+  let responseHeaders = null;
+  try {
+    response = await page.goto(baseUrl.href, { waitUntil: "domcontentloaded", timeout: RENDER_TIMEOUT_MS });
+    if (warm) {
+      requests.length = 0;
+      requestFailures.length = 0;
+      responseFailures.length = 0;
+      consoleErrors.length = 0;
+      pageErrors.length = 0;
+      response = await page.reload({ waitUntil: "domcontentloaded", timeout: RENDER_TIMEOUT_MS });
+    }
+    invariant(response, "공개 초대장 document 응답을 받지 못했습니다.");
+    const headers = response.headers();
+    responseHeaders = {
+      status: response.status(),
+      source: headers["x-wedding-content-source"] || "",
+      revision: headers["x-wedding-revision"] || "",
+      workerTag: headers["x-wedding-worker-tag"] || "",
+      workerVersion: headers["x-wedding-worker-version"] || "",
+    };
+    invariant(responseHeaders.status === 200, `HTML document 응답이 HTTP ${responseHeaders.status}입니다.`);
+    invariant(responseHeaders.workerTag === targetWorkerTag, `HTML Worker tag가 배포 SHA와 다릅니다: ${responseHeaders.workerTag || "missing"}`);
+    invariant(responseHeaders.workerVersion === targetWorkerVersion, `HTML Worker version ID가 활성 버전과 다릅니다: ${responseHeaders.workerVersion || "missing"}`);
+    await page.waitForFunction(() => {
+      const root = document.querySelector("main[data-content-source='cloudflare-published']");
+      const image = document.querySelector(".pastel-hero-photo.is-image-ready img");
+      return Boolean(root && image?.complete && image.naturalWidth > 0);
+    }, null, { timeout: RENDER_TIMEOUT_MS });
+    await page.waitForTimeout(250);
+    evidence = await readRenderState(page);
+    return {
+      responseHeaders,
+      ...evidence,
+      requests,
+      requestFailures,
+      responseFailures,
+      consoleErrors,
+      pageErrors,
+    };
+  } catch (error) {
+    try {
+      evidence = await readRenderState(page);
+    } catch {
+      evidence = { dom: null, observations: [] };
+    }
+    const diagnostic = formatRenderDiagnostic({
+      name,
+      responseHeaders,
+      ...evidence,
+      requestFailures,
+      responseFailures,
+      consoleErrors,
+      pageErrors,
+    });
+    throw new Error(`[${name}] ${error.message}; diagnostics=${diagnostic}`, { cause: error });
+  } finally {
+    await context.close();
+  }
 }
 
 export async function runPostDeployRenderCanary({
   baseUrl = process.env.WEDDING_CANARY_BASE_URL || DEFAULT_BASE_URL,
+  expectedTag = process.env.WEDDING_CANARY_EXPECTED_WORKER_TAG,
+  expectedVersion = process.env.WEDDING_CANARY_EXPECTED_WORKER_VERSION,
   browserType = chromium,
   fetchImpl = globalThis.fetch,
   logger = console,
+  readActiveIdentity = activeDeploymentIdentity,
 } = {}) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  const {
+    workerTag: targetWorkerTag,
+    workerVersion: targetWorkerVersion,
+  } = await resolveExpectedWorkerIdentity({ expectedTag, expectedVersion, readActiveIdentity });
+  const convergence = await waitForWorkerVersion({
+    baseUrl: normalizedBaseUrl,
+    expectedTag: targetWorkerTag,
+    expectedVersion: targetWorkerVersion,
+    fetchImpl,
+    logger,
+  });
   const expected = await expectedPublication(fetchImpl, normalizedBaseUrl);
   const browser = await browserType.launch({ headless: true });
   try {
-    const scenarios = [
-      ["warm-cache", await collectScenario({ browser, baseUrl: normalizedBaseUrl, warm: true })],
-      ["cold-400ms", await collectScenario({ browser, baseUrl: normalizedBaseUrl, latencyMs: 400 })],
+    const scenarioConfigs = [
+      { name: "warm-cache", warm: true },
+      { name: "cold-400ms", latencyMs: 400 },
     ];
-    for (const [name, evidence] of scenarios) {
-      validateRenderEvidence({
+    const scenarios = [];
+    for (const config of scenarioConfigs) {
+      const evidence = await collectScenario({
+        ...config,
+        browser,
         baseUrl: normalizedBaseUrl,
+        expectedWorkerTag: targetWorkerTag,
+        expectedWorkerVersion: targetWorkerVersion,
+      });
+      validateRenderScenario({
+        name: config.name,
+        baseUrl: normalizedBaseUrl,
+        expectedWorkerTag: targetWorkerTag,
+        expectedWorkerVersion: targetWorkerVersion,
         expectedRevision: expected.revisionId,
         expectedPaths: expected.expectedPaths,
         ...evidence,
       });
-      logger.info(`[production-render-canary] ${name} 통과: revision=${expected.revisionId}`);
+      scenarios.push(config.name);
+      logger.info(`[production-render-canary] ${config.name} 통과: revision=${expected.revisionId} version=${evidence.responseHeaders.workerVersion}`);
     }
-    return { revisionId: expected.revisionId, scenarios: scenarios.map(([name]) => name) };
+    return {
+      revisionId: expected.revisionId,
+      workerTag: targetWorkerTag,
+      workerVersion: convergence.workerVersion,
+      scenarios,
+    };
   } finally {
     await browser.close();
   }
