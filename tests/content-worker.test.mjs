@@ -208,6 +208,42 @@ test("public HTML atomically injects one published revision and preloads its her
   assert.equal(db.queries.filter((sql) => sql.includes("SELECT draft_revision_id, published_revision_id")).length, 0);
 });
 
+test("public HTML ignores stale asset validators and removes them from the transformed response", async () => {
+  const seenRequests = [];
+  const response = await worker.fetch(request("/", {
+    method: "GET",
+    headers: {
+      accept: "text/html",
+      "if-none-match": "\"stale-bundled-html\"",
+      "if-modified-since": "Sat, 29 Aug 2026 00:00:00 GMT",
+    },
+  }), {
+    ASSETS: {
+      fetch: async (assetRequest) => {
+        seenRequests.push(assetRequest);
+        if (assetRequest.headers.has("if-none-match") || assetRequest.headers.has("if-modified-since")) {
+          return new Response(null, { status: 304 });
+        }
+        return new Response("<head><!-- WEDDING_PUBLIC_BOOTSTRAP --></head><body>app</body>", {
+          headers: {
+            etag: "\"bundled-html\"",
+            "last-modified": "Sat, 29 Aug 2026 00:00:00 GMT",
+          },
+        });
+      },
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(seenRequests.length, 1);
+  assert.equal(seenRequests[0].headers.get("if-none-match"), null);
+  assert.equal(seenRequests[0].headers.get("if-modified-since"), null);
+  assert.equal(response.headers.get("etag"), null);
+  assert.equal(response.headers.get("last-modified"), null);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.match(await response.text(), /id="wedding-public-bootstrap"/);
+});
+
 test("public HTML selects a permanent bundled fallback when D1 is unavailable", async () => {
   const response = await worker.fetch(request("/", {
     method: "GET",

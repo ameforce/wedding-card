@@ -669,6 +669,8 @@ async function injectPublicBootstrap(response, published, url) {
   ].join("\n    ");
   const headers = new Headers(response.headers);
   headers.delete("content-length");
+  headers.delete("etag");
+  headers.delete("last-modified");
   headers.set("cache-control", "no-store");
   headers.set("content-type", "text/html; charset=utf-8");
   headers.set("x-wedding-content-source", bootstrap.source);
@@ -679,6 +681,13 @@ async function injectPublicBootstrap(response, published, url) {
     statusText: response.statusText,
     headers,
   });
+}
+
+function unconditionalPublicHtmlRequest(request, target = request.url) {
+  const headers = new Headers(request.headers);
+  headers.delete("if-none-match");
+  headers.delete("if-modified-since");
+  return new Request(new Request(target, request), { headers });
 }
 
 async function runDatabaseBatch(db, statements) {
@@ -1028,8 +1037,9 @@ export default {
       return withSearchPrivacy(await env.ASSETS.fetch(new Request(indexUrl, request)));
     }
 
+    const publicAssetRequest = unconditionalPublicHtmlRequest(request);
     const [assetResult, publishedResult] = await Promise.allSettled([
-      env.ASSETS.fetch(request),
+      env.ASSETS.fetch(publicAssetRequest),
       getPublishedInvitationPayload(env),
     ]);
     if (assetResult.status === "rejected") throw assetResult.reason;
@@ -1038,7 +1048,7 @@ export default {
       const indexUrl = new URL(request.url);
       indexUrl.pathname = "/";
       indexUrl.search = "";
-      response = await env.ASSETS.fetch(new Request(indexUrl, request));
+      response = await env.ASSETS.fetch(unconditionalPublicHtmlRequest(request, indexUrl));
     }
     if (response.status !== 200) return withSearchPrivacy(response);
     const published = publishedResult.status === "fulfilled" ? publishedResult.value : null;
