@@ -12,7 +12,6 @@
     "deploy:cloudflare:built": "wrangler deploy",
     "upload:cloudflare:version": "wrangler versions upload",
     "deploy:cloudflare:version": "wrangler versions deploy",
-    "deploy:cloudflare:verified": "npm run deploy:cloudflare && npm run canary:production",
     "canary:production": "node scripts/post-deploy-render-canary.mjs && node scripts/post-deploy-canary.mjs",
     "cloudflare:dry-run": "npm run build && npm run cloudflare:dry-run:built",
     "cloudflare:dry-run:built": "wrangler versions upload --dry-run",

@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import { activeDeploymentIdentity } from "./cloudflare-deployment-state.mjs";
 
 const DEFAULT_BASE_URL = "https://wdcard.enmsoftware.com/";
 const HTTP_TIMEOUT_MS = 20_000;
@@ -40,6 +41,21 @@ function expectedWorkerVersion(value) {
   const version = String(value || "").trim().toLowerCase();
   invariant(WORKER_VERSION_ID.test(version), "WEDDING_CANARY_EXPECTED_WORKER_VERSION은 exact Worker version ID여야 합니다.");
   return version;
+}
+
+export async function resolveExpectedWorkerIdentity({
+  expectedTag,
+  expectedVersion,
+  readActiveIdentity = activeDeploymentIdentity,
+}) {
+  const hasTag = Boolean(String(expectedTag || "").trim());
+  const hasVersion = Boolean(String(expectedVersion || "").trim());
+  invariant(hasTag === hasVersion, "expected Worker tag와 version ID는 함께 제공해야 합니다.");
+  const identity = hasTag ? { workerTag: expectedTag, workerVersion: expectedVersion } : await readActiveIdentity();
+  return {
+    workerTag: expectedWorkerTag(identity.workerTag),
+    workerVersion: expectedWorkerVersion(identity.workerVersion),
+  };
 }
 
 export async function waitForWorkerVersion({
@@ -333,10 +349,13 @@ export async function runPostDeployRenderCanary({
   browserType = chromium,
   fetchImpl = globalThis.fetch,
   logger = console,
+  readActiveIdentity = activeDeploymentIdentity,
 } = {}) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-  const targetWorkerTag = expectedWorkerTag(expectedTag);
-  const targetWorkerVersion = expectedWorkerVersion(expectedVersion);
+  const {
+    workerTag: targetWorkerTag,
+    workerVersion: targetWorkerVersion,
+  } = await resolveExpectedWorkerIdentity({ expectedTag, expectedVersion, readActiveIdentity });
   const convergence = await waitForWorkerVersion({
     baseUrl: normalizedBaseUrl,
     expectedTag: targetWorkerTag,

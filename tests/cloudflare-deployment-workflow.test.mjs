@@ -14,6 +14,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 test("production CI deploys a Worker version without mutating Custom Domain routes", async () => {
   const workflow = await readFile(resolve(root, ".github/workflows/cloudflare.yml"), "utf8");
+  const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   const deployJob = workflow.split(/^ {2}deploy:/m)[1] ?? "";
 
   assert.match(workflow, /- ['"]hotfix\/\*\*['"]/);
@@ -36,6 +37,7 @@ test("production CI deploys a Worker version without mutating Custom Domain rout
 
   const artifactSource = await readFile(resolve(root, "scripts/cloudflare-artifact.mjs"), "utf8");
   assert.match(artifactSource, /scripts\/post-deploy-render-canary\.mjs/);
+  assert.equal(packageJson.scripts["deploy:cloudflare:verified"], undefined);
 });
 
 test("Cloudflare artifact manifest rejects changed or additional build files", async (context) => {

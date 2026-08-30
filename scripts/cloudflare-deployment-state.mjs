@@ -7,6 +7,7 @@ const WORKER_NAME = "wedding-card";
 const DATABASE_NAME = "wedding-card-guestbook-db";
 const COMMAND_TIMEOUT_MS = 60_000;
 const WORKER_VERSION_ID = /^[0-9a-f-]{36}$/u;
+const PROJECT_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -125,6 +126,15 @@ async function verify(cwd, commitSha) {
   console.log(`[cloudflare] 운영 버전 검증 완료: ${activeVersionId}, commit ${commitSha}`);
 }
 
+export async function activeDeploymentIdentity(cwd = PROJECT_ROOT) {
+  const status = await readStatus(cwd);
+  const activeVersionId = productionVersionId(status);
+  const version = await readVersion(cwd, activeVersionId);
+  const commitSha = version?.annotations?.["workers/tag"];
+  assertDeploymentMatchesCommit(status, version, commitSha);
+  return { workerTag: commitSha, workerVersion: activeVersionId };
+}
+
 async function rollback(cwd, previousWorkerVersion, failedCommitSha) {
   invariant(/^[0-9a-f-]{36}$/.test(previousWorkerVersion), "롤백할 Worker version ID 형식이 올바르지 않습니다.");
   invariant(/^[0-9a-f]{40}$/.test(failedCommitSha), "실패한 Git commit SHA 형식이 올바르지 않습니다.");
@@ -153,7 +163,7 @@ async function restoreIfChanged(cwd, previousWorkerVersion, failedCommitSha) {
 
 const isCli = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 if (isCli) {
-  const cwd = resolve(fileURLToPath(new URL("..", import.meta.url)));
+  const cwd = PROJECT_ROOT;
   const [command, first, second] = process.argv.slice(2);
   const action = command === "capture"
     ? capture(cwd)

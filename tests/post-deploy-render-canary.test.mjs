@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   formatRenderDiagnostic,
+  resolveExpectedWorkerIdentity,
   validateRenderEvidence,
   waitForWorkerVersion,
 } from "../scripts/post-deploy-render-canary.mjs";
@@ -120,6 +121,17 @@ test("render canary bounds version convergence failure and reports observed vers
     logger: { info() {} },
     now: () => 123,
   }), new RegExp(`수렴하지 않았습니다.*${STALE_VERSION}`));
+});
+
+test("standalone render canary reads the exact active identity when CI inputs are absent", async () => {
+  const identity = await resolveExpectedWorkerIdentity({
+    readActiveIdentity: async () => ({ workerTag: TARGET_SHA, workerVersion: TARGET_VERSION }),
+  });
+  assert.deepEqual(identity, { workerTag: TARGET_SHA, workerVersion: TARGET_VERSION });
+  await assert.rejects(resolveExpectedWorkerIdentity({
+    expectedTag: TARGET_SHA,
+    readActiveIdentity: async () => assert.fail("partial explicit identity must not query the control plane"),
+  }), /함께 제공/);
 });
 
 test("render timeout diagnostics retain the response, DOM, and network failure boundary", () => {

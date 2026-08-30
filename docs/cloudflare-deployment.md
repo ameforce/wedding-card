@@ -24,6 +24,8 @@ Protect `main` so changes arrive through a pull request and require the `Verify`
 
 The deploy job never receives a Cloudflare Access administrator JWT. Its unattended canary therefore proves public delivery and security headers, the guestbook create/unlock/update lifecycle, remote D1 persistence and exact cleanup, plus unauthenticated administrator rejection. It must report the administrator result as `access-denied`, not as an authenticated administrator read. The latter remains an attended check with a short-lived allowlisted Access token.
 
+An attended standalone `npm run canary:production` reads the current active Worker tag and exact version ID from the Cloudflare control plane when the two GitHub Actions identity variables are absent, then proves that the custom domain serves that pair. It therefore requires the same narrowly scoped Cloudflare credentials already needed for remote D1 read-back. Supplying only one identity variable is rejected. Direct production deployment scripts are intentionally unsupported; production changes flow only through the protected `main` GitHub Actions workflow.
+
 If a check after `wrangler deploy` fails, the workflow rolls Worker traffic back to the exact version captured before deployment and verifies that version is active. It does not automatically restore D1: `scripts/check-d1-migrations.mjs` allows only additive, backward-compatible migration forms so the previous Worker can continue operating. Use the recorded D1 bookmark only for an explicitly reviewed recovery operation.
 
 ## Fit with the current repository
