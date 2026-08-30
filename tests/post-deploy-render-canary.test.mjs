@@ -5,6 +5,7 @@ import {
   formatRenderDiagnostic,
   resolveExpectedWorkerIdentity,
   validateRenderEvidence,
+  validateRenderScenario,
   waitForWorkerVersion,
 } from "../scripts/post-deploy-render-canary.mjs";
 
@@ -34,6 +35,7 @@ function evidence(overrides = {}) {
       src: "/api/media/invitation/id/pastel-hero/480.webp",
       currentSrc: "/api/media/invitation/id/pastel-hero/960.webp",
       naturalWidth: 960,
+      opacity: "1",
       ready: true,
     },
     observations: [
@@ -52,6 +54,37 @@ function evidence(overrides = {}) {
 
 test("render canary accepts only the published revision and its decoded hero", () => {
   assert.equal(validateRenderEvidence(evidence()), true);
+});
+
+test("render canary samples final computed visibility after CSS-only transitions", () => {
+  assert.equal(validateRenderEvidence(evidence({
+    observations: [
+      { src: "/api/media/invitation/id/pastel-hero/480.webp", currentSrc: "/api/media/invitation/id/pastel-hero/960.webp", opacity: "0", ready: true },
+    ],
+  })), true);
+  assert.throws(() => validateRenderEvidence(evidence({
+    dom: { ...evidence().dom, opacity: "0" },
+    observations: [
+      { src: "/api/media/invitation/id/pastel-hero/480.webp", currentSrc: "/api/media/invitation/id/pastel-hero/960.webp", opacity: "0", ready: true },
+    ],
+  })), /표시 가능한 hero 증거/);
+});
+
+test("render validation failures name the scenario and preserve diagnostics", () => {
+  assert.throws(() => validateRenderScenario({
+    name: "cold-400ms",
+    ...evidence({
+      dom: { ...evidence().dom, opacity: "0" },
+      observations: [],
+      requestFailures: ["net::ERR_FAILED https://example.test/hero.webp"],
+    }),
+  }), (error) => {
+    assert.match(error.message, /^\[cold-400ms\]/);
+    assert.match(error.message, /diagnostics=/);
+    assert.match(error.message, /ERR_FAILED/);
+    assert.match(error.message, /"opacity":"0"/);
+    return true;
+  });
 });
 
 test("render canary rejects any bundled hero observation or request", () => {
