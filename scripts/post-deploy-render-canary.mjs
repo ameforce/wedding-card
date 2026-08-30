@@ -8,6 +8,7 @@ const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const VERSION_CONVERGENCE_ATTEMPTS = 12;
 const VERSION_CONVERGENCE_INTERVAL_MS = 5_000;
 const GIT_SHA = /^[a-f0-9]{40}$/u;
+const WORKER_VERSION_ID = /^[a-f0-9-]{36}$/u;
 const BUNDLED_PASTEL_HERO = /^\/assets\/photos\/pastel-hero-(?:480|960)\.webp$/u;
 
 function invariant(condition, message) {
@@ -35,9 +36,16 @@ function expectedWorkerTag(value) {
   return tag;
 }
 
+function expectedWorkerVersion(value) {
+  const version = String(value || "").trim().toLowerCase();
+  invariant(WORKER_VERSION_ID.test(version), "WEDDING_CANARY_EXPECTED_WORKER_VERSION은 exact Worker version ID여야 합니다.");
+  return version;
+}
+
 export async function waitForWorkerVersion({
   baseUrl,
   expectedTag,
+  expectedVersion,
   fetchImpl = globalThis.fetch,
   logger = console,
   sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
@@ -47,6 +55,7 @@ export async function waitForWorkerVersion({
   now = Date.now,
 }) {
   const targetTag = expectedWorkerTag(expectedTag);
+  const targetVersion = expectedWorkerVersion(expectedVersion);
   invariant(Number.isInteger(attempts) && attempts > 0, "Worker version probe 횟수가 올바르지 않습니다.");
   const observations = [];
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -69,16 +78,16 @@ export async function waitForWorkerVersion({
         version: response.headers.get("x-wedding-worker-version") || "missing",
       };
       observations.push(observation);
-      if (response.status === 200 && observation.tag === targetTag) {
-        logger.info(`[production-render-canary] custom-domain version 수렴: attempt=${attempt} tag=${targetTag} version=${observation.version}`);
-        return { workerTag: targetTag, workerVersion: observation.version, observations };
+      if (response.status === 200 && observation.tag === targetTag && observation.version === targetVersion) {
+        logger.info(`[production-render-canary] custom-domain version 수렴: attempt=${attempt} tag=${targetTag} version=${targetVersion}`);
+        return { workerTag: targetTag, workerVersion: targetVersion, observations };
       }
     } catch (error) {
       observations.push({ attempt, error: error.message });
     }
     if (attempt < attempts) await sleep(intervalMs);
   }
-  throw new Error(`커스텀 도메인이 배포 Worker tag=${targetTag}로 수렴하지 않았습니다. observations=${JSON.stringify(observations)}`);
+  throw new Error(`커스텀 도메인이 배포 Worker tag=${targetTag}, version=${targetVersion}로 수렴하지 않았습니다. observations=${JSON.stringify(observations)}`);
 }
 
 function expectedHeroPaths(document, baseUrl) {
@@ -97,6 +106,7 @@ function expectedHeroPaths(document, baseUrl) {
 export function validateRenderEvidence({
   baseUrl,
   expectedWorkerTag: targetWorkerTag,
+  expectedWorkerVersion: targetWorkerVersion,
   expectedRevision,
   expectedPaths,
   responseHeaders,
@@ -108,7 +118,7 @@ export function validateRenderEvidence({
 }) {
   invariant(responseHeaders.status === 200, `HTML document 응답이 HTTP ${responseHeaders.status}입니다.`);
   invariant(responseHeaders.workerTag === targetWorkerTag, `HTML Worker tag가 배포 SHA와 다릅니다: ${responseHeaders.workerTag || "missing"}`);
-  invariant(responseHeaders.workerVersion, "HTML Worker version ID가 없습니다.");
+  invariant(responseHeaders.workerVersion === targetWorkerVersion, `HTML Worker version ID가 활성 버전과 다릅니다: ${responseHeaders.workerVersion || "missing"}`);
   invariant(responseHeaders.source === "cloudflare-published", `HTML bootstrap source가 published가 아닙니다: ${responseHeaders.source || "missing"}`);
   invariant(responseHeaders.revision === expectedRevision, "HTML bootstrap revision 헤더가 /api/content와 다릅니다.");
   invariant(dom.source === "cloudflare-published", `렌더링 source가 published가 아닙니다: ${dom.source || "missing"}`);
@@ -221,7 +231,15 @@ async function readRenderState(page) {
   });
 }
 
-async function collectScenario({ name, browser, baseUrl, expectedWorkerTag: targetWorkerTag, latencyMs = 0, warm = false }) {
+async function collectScenario({
+  name,
+  browser,
+  baseUrl,
+  expectedWorkerTag: targetWorkerTag,
+  expectedWorkerVersion: targetWorkerVersion,
+  latencyMs = 0,
+  warm = false,
+}) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   if (latencyMs > 0) {
     await context.route("**/*", async (route) => {
@@ -270,6 +288,7 @@ async function collectScenario({ name, browser, baseUrl, expectedWorkerTag: targ
     };
     invariant(responseHeaders.status === 200, `HTML document 응답이 HTTP ${responseHeaders.status}입니다.`);
     invariant(responseHeaders.workerTag === targetWorkerTag, `HTML Worker tag가 배포 SHA와 다릅니다: ${responseHeaders.workerTag || "missing"}`);
+    invariant(responseHeaders.workerVersion === targetWorkerVersion, `HTML Worker version ID가 활성 버전과 다릅니다: ${responseHeaders.workerVersion || "missing"}`);
     await page.waitForFunction(() => {
       const root = document.querySelector("main[data-content-source='cloudflare-published']");
       const image = document.querySelector(".pastel-hero-photo.is-image-ready img");
@@ -310,15 +329,18 @@ async function collectScenario({ name, browser, baseUrl, expectedWorkerTag: targ
 export async function runPostDeployRenderCanary({
   baseUrl = process.env.WEDDING_CANARY_BASE_URL || DEFAULT_BASE_URL,
   expectedTag = process.env.WEDDING_CANARY_EXPECTED_WORKER_TAG,
+  expectedVersion = process.env.WEDDING_CANARY_EXPECTED_WORKER_VERSION,
   browserType = chromium,
   fetchImpl = globalThis.fetch,
   logger = console,
 } = {}) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   const targetWorkerTag = expectedWorkerTag(expectedTag);
+  const targetWorkerVersion = expectedWorkerVersion(expectedVersion);
   const convergence = await waitForWorkerVersion({
     baseUrl: normalizedBaseUrl,
     expectedTag: targetWorkerTag,
+    expectedVersion: targetWorkerVersion,
     fetchImpl,
     logger,
   });
@@ -336,10 +358,12 @@ export async function runPostDeployRenderCanary({
         browser,
         baseUrl: normalizedBaseUrl,
         expectedWorkerTag: targetWorkerTag,
+        expectedWorkerVersion: targetWorkerVersion,
       });
       validateRenderEvidence({
         baseUrl: normalizedBaseUrl,
         expectedWorkerTag: targetWorkerTag,
+        expectedWorkerVersion: targetWorkerVersion,
         expectedRevision: expected.revisionId,
         expectedPaths: expected.expectedPaths,
         ...evidence,

@@ -153,6 +153,7 @@ jobs:
           --message "GitHub Actions $GITHUB_SHA"
 
       - name: Verify the active Worker version
+        id: active-version
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -165,6 +166,7 @@ jobs:
           WEDDING_CANARY_ALLOW_PRODUCTION_WRITE: "1"
           WEDDING_CANARY_ALLOW_D1_ADMIN_READ: "1"
           WEDDING_CANARY_EXPECTED_WORKER_TAG: ${{ github.sha }}
+          WEDDING_CANARY_EXPECTED_WORKER_VERSION: ${{ steps.active-version.outputs.active_worker_version }}
         run: npm run canary:production
 
       - name: Roll back Worker after post-deploy failure

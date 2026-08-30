@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const WORKER_NAME = "wedding-card";
 const DATABASE_NAME = "wedding-card-guestbook-db";
 const COMMAND_TIMEOUT_MS = 60_000;
+const WORKER_VERSION_ID = /^[0-9a-f-]{36}$/u;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -78,7 +79,7 @@ export function productionVersionId(status) {
   invariant(status.versions.length === 1, "운영 트래픽이 단일 Worker 버전에 100% 배정되어 있지 않습니다.");
   const [version] = status.versions;
   invariant(version?.percentage === 100, "운영 Worker 버전의 트래픽 비율이 100%가 아닙니다.");
-  invariant(typeof version.version_id === "string" && version.version_id.length > 0, "운영 Worker version ID가 없습니다.");
+  invariant(typeof version.version_id === "string" && WORKER_VERSION_ID.test(version.version_id), "운영 Worker version ID 형식이 올바르지 않습니다.");
   return version.version_id;
 }
 
@@ -118,6 +119,9 @@ async function verify(cwd, commitSha) {
   const status = await readStatus(cwd);
   const activeVersionId = productionVersionId(status);
   assertDeploymentMatchesCommit(status, await readVersion(cwd, activeVersionId), commitSha);
+  if (process.env.GITHUB_OUTPUT) {
+    await appendFile(process.env.GITHUB_OUTPUT, `active_worker_version=${activeVersionId}\n`, "utf8");
+  }
   console.log(`[cloudflare] 운영 버전 검증 완료: ${activeVersionId}, commit ${commitSha}`);
 }
 
