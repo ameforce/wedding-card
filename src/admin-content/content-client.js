@@ -382,7 +382,7 @@ export function createLocalReviewContentAdapter({
     async republish(revisionId) {
       const current = load();
       const target = (current.revisions || []).find((revision) => revision.id === revisionId);
-      if (!target || !["archived", "published"].includes(target.status)) throw new Error("다시 공개할 버전을 찾을 수 없습니다.");
+      if (!target || !["archived", "published"].includes(target.status) || !target.publishedAt) throw new Error("이전에 공개된 버전만 다시 공개할 수 있습니다.");
       const publishedAt = now();
       state = {
         ...current,

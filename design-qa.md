@@ -366,8 +366,8 @@ final result: passed
 
 - `npm run lint`: passed.
 - Targeted admin/content/guestbook tests: 50/50 passed.
-- `npm run test:ui`: 69/69 passed.
-- `npm run test:sites`: 77/77 passed, including the 6-file/14-statement additive migration contract.
+- `npm run test:ui`: 70/70 passed.
+- `npm run test:sites`: 78/78 passed, including the 6-file/14-statement additive migration contract.
 - `npm run build`: passed and produced the Sites worker, hosting config, and bundled D1 migrations.
 - `npm run cloudflare:dry-run`: passed with D1, R2, both rate limiters, Static Assets, and Worker version metadata bound; no production deployment occurred.
 

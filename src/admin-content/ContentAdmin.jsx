@@ -134,6 +134,51 @@ function formatAdminTimestamp(value) {
   }).format(new Date(value)).replaceAll(". ", "-").replace(".", "");
 }
 
+function useDialogFocus({ busy, onCancel }) {
+  const dialogRef = useRef(null);
+  const busyRef = useRef(busy);
+  const cancelRef = useRef(onCancel);
+  useEffect(() => {
+    busyRef.current = busy;
+    cancelRef.current = onCancel;
+  }, [busy, onCancel]);
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const focusable = () => [...(dialog?.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])];
+    (focusable()[0] || dialog)?.focus();
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !busyRef.current) {
+        event.preventDefault();
+        cancelRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = focusable();
+      if (controls.length === 0) {
+        event.preventDefault();
+        dialog?.focus();
+        return;
+      }
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      opener?.focus();
+    };
+  }, []);
+  return dialogRef;
+}
+
 export function deriveAdminWorkflowState({ dirty, draftRevisionId, busy, validationErrors }) {
   const errorCount = Object.keys(validationErrors || {}).length;
   return {
@@ -145,11 +190,12 @@ export function deriveAdminWorkflowState({ dirty, draftRevisionId, busy, validat
 }
 
 function PublishReviewDialog({ diff, currentLabel, publishedLabel, dirty, busy, onCancel, onConfirm }) {
+  const dialogRef = useDialogFocus({ busy, onCancel });
   return createPortal(
     <div className="admin-dialog-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !busy) onCancel();
     }}>
-      <section className="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="publish-review-title">
+      <section ref={dialogRef} className="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="publish-review-title" tabIndex="-1">
         <button type="button" className="admin-dialog-close" onClick={onCancel} disabled={busy} aria-label="게시 확인 닫기"><X aria-hidden="true" /></button>
         <h2 id="publish-review-title">게시 확인</h2>
         <p>게시를 진행하면 변경된 내용이 공개됩니다.</p>
@@ -181,9 +227,12 @@ function PublishReviewDialog({ diff, currentLabel, publishedLabel, dirty, busy, 
 }
 
 function RepublishDialog({ version, busy, onCancel, onConfirm }) {
+  const dialogRef = useDialogFocus({ busy, onCancel });
   return createPortal(
-    <div className="admin-dialog-backdrop" role="presentation">
-      <section className="admin-dialog is-compact" role="dialog" aria-modal="true" aria-labelledby="republish-title">
+    <div className="admin-dialog-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !busy) onCancel();
+    }}>
+      <section ref={dialogRef} className="admin-dialog is-compact" role="dialog" aria-modal="true" aria-labelledby="republish-title" tabIndex="-1">
         <button type="button" className="admin-dialog-close" onClick={onCancel} disabled={busy} aria-label="재공개 확인 닫기"><X aria-hidden="true" /></button>
         <h2 id="republish-title">이 버전을 다시 공개할까요?</h2>
         <p>선택한 {version.label}을 새 공개본으로 전환합니다. 현재 공개본은 이력에 안전하게 보존됩니다.</p>
@@ -222,6 +271,8 @@ export function ContentAdmin() {
   const showAdminError = useCallback((error, fallbackMessage) => {
     if (isAdminAuthRequiredError(error)) {
       setAuthRequired(true);
+      setPublishReviewOpen(false);
+      setRepublishTarget(null);
       setStatus({ tone: "error", message: "승인된 Google 계정으로 다시 로그인해 주세요." });
       return;
     }
@@ -254,6 +305,11 @@ export function ContentAdmin() {
       setBusy(false);
     }
   }, [adapter, localReview, showAdminError]);
+
+  const refreshAdminState = useCallback(() => {
+    if (dirty && !window.confirm("미적용 변경사항을 버리고 저장된 초안을 다시 불러올까요?")) return;
+    void load();
+  }, [dirty, load]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -449,7 +505,7 @@ export function ContentAdmin() {
   ];
 
   return (
-    <AdminShell active="/admin" localReview={localReview} lastUpdated={lastUpdated} onRefresh={load}>
+    <AdminShell active="/admin" localReview={localReview} lastUpdated={lastUpdated} onRefresh={refreshAdminState}>
       <div className="admin-page content-admin-page">
       <header className="content-admin-header admin-page-heading">
         <div>
@@ -460,10 +516,10 @@ export function ContentAdmin() {
             {workflow.errorCount > 0 && <span className="is-error"><Warning aria-hidden="true" />입력 오류 {workflow.errorCount}개</span>}
           </div>
         </div>
-        <div className="content-admin-top-actions">
+        {!authRequired && <div className="content-admin-top-actions">
           <button type="button" onClick={() => void saveDraft()} disabled={!workflow.canApply || Boolean(uploadingSlot)}>임시 적용</button>
           <button type="button" className="is-primary" onClick={() => setPublishReviewOpen(true)} disabled={!workflow.canReview || Boolean(uploadingSlot) || publishDiff.changes.length === 0}>게시</button>
-        </div>
+        </div>}
       </header>
 
       {authRequired ? <AdminReauthentication /> : <div className="content-admin-layout">
@@ -587,7 +643,7 @@ export function ContentAdmin() {
                     <div><strong>{label}</strong><em className={`is-${revision.status}`}>{statusLabel}</em></div>
                     <time dateTime={revision.publishedAt || revision.createdAt || ""}>{formatAdminTimestamp(revision.publishedAt || revision.createdAt)}</time>
                     <small>{revision.id === draftRevisionId ? "현재 작업" : revision.id === publishedRevisionId ? "현재 공개 버전" : revision.publishedAt ? "이 버전으로 공개됨" : "임시 적용"}</small>
-                    {![draftRevisionId, publishedRevisionId].includes(revision.id) && (
+                    {revision.publishedAt && ![draftRevisionId, publishedRevisionId].includes(revision.id) && (
                       <button type="button" onClick={() => setRepublishTarget({ id: revision.id, label })}><ArrowClockwise aria-hidden="true" />이 버전을 다시 공개</button>
                     )}
                   </div>
@@ -598,8 +654,8 @@ export function ContentAdmin() {
         </aside>
       </div>}
 
-      {publishReviewOpen && <PublishReviewDialog diff={publishDiff} currentLabel={draftRevisionId && !dirty ? "현재 초안" : "현재 편집"} publishedLabel="현재 공개" dirty={dirty} busy={busy} onCancel={() => setPublishReviewOpen(false)} onConfirm={() => void publish()} />}
-      {republishTarget && <RepublishDialog version={republishTarget} busy={busy} onCancel={() => setRepublishTarget(null)} onConfirm={() => void republish()} />}
+      {!authRequired && publishReviewOpen && <PublishReviewDialog diff={publishDiff} currentLabel={draftRevisionId && !dirty ? "현재 초안" : "현재 편집"} publishedLabel="현재 공개" dirty={dirty} busy={busy} onCancel={() => setPublishReviewOpen(false)} onConfirm={() => void publish()} />}
+      {!authRequired && republishTarget && <RepublishDialog version={republishTarget} busy={busy} onCancel={() => setRepublishTarget(null)} onConfirm={() => void republish()} />}
       </div>
     </AdminShell>
   );

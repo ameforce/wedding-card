@@ -460,6 +460,20 @@ test("publish review includes every editable parking field and material media de
   assert.doesNotMatch(gallery.current, /\[object Object\]/);
 });
 
+test("authentication, refresh, dialog focus, and rollback guards protect privileged changes", async () => {
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  const client = await readFile(new URL("../src/admin-content/content-client.js", import.meta.url), "utf8");
+  assert.match(source, /setAuthRequired\(true\);\s*setPublishReviewOpen\(false\);\s*setRepublishTarget\(null\)/);
+  assert.match(source, /!authRequired && <div className="content-admin-top-actions">/);
+  assert.match(source, /dirty && !window\.confirm\("미적용 변경사항을 버리고 저장된 초안을 다시 불러올까요\?"\)/);
+  assert.match(source, /function useDialogFocus/);
+  assert.match(source, /event\.key === "Escape"/);
+  assert.match(source, /event\.key !== "Tab"/);
+  assert.match(source, /opener\?\.focus\(\)/);
+  assert.match(source, /revision\.publishedAt && !\[draftRevisionId, publishedRevisionId\]\.includes/);
+  assert.match(client, /!target\.publishedAt/);
+});
+
 test("applied admin content keeps full runtime photo objects", () => {
   const document = createContentDocument(weddingContent);
   document.photos.pastel.hero.alt = "관리자 수정 대체 텍스트";

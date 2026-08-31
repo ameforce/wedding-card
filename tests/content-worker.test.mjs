@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import worker, { __test } from "../worker/index.js";
 import { WEDDING_PHOTOS, weddingContent } from "../src/content.js";
+
+const workerSource = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
 
 function request(path, init = {}) {
   return new Request(`https://example.test${path}`, {
@@ -357,6 +360,10 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("rollback rejects archived drafts that were never public", async () => {
+  assert.match(workerSource, /!target\.publishedAt/);
 });
 
 test("content validation dual-reads schema v1, requires v2 writes, and validates music credits", () => {

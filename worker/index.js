@@ -931,7 +931,7 @@ async function rollbackInvitation(request, env) {
   const payload = await readJson(request);
   const revisionId = typeof payload.revisionId === "string" ? payload.revisionId : "";
   const target = await getInvitationRevision(db, revisionId);
-  if (!target || !["archived", "published"].includes(target.status)) {
+  if (!target || !["archived", "published"].includes(target.status) || !target.publishedAt) {
     return apiError(404, "REVISION_NOT_FOUND", "되돌릴 콘텐츠 버전을 찾을 수 없습니다.");
   }
   validateInvitationDocument(target.document, { publish: true });
