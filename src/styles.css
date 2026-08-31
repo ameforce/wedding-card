@@ -426,11 +426,18 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-field input, .content-admin-field textarea { width: 100%; min-height: 46px; padding: 11px 12px; color: #1f354d; background: #fff; border: 1px solid rgba(59,81,103,.2); border-radius: 10px; outline: none; font: 16px/1.55 "Noto Sans KR Variable", sans-serif; resize: vertical; }
 .content-admin-field input:focus, .content-admin-field textarea:focus { border-color: #6f8eaa; box-shadow: 0 0 0 3px rgba(98,132,163,.14); }
 .content-admin-field small { color: #7a8792; line-height: 1.45; }
+.content-admin-field small.is-error { color: #8b3f49; }
+.content-admin-field input[aria-invalid="true"] { border-color: #b66e76; box-shadow: 0 0 0 3px rgba(182,110,118,.12); }
 .content-admin-photo-list { display: grid; gap: 16px; }
 .content-admin-storage { display: grid; margin: 0 0 16px; padding: 14px 16px; gap: 9px; color: #405970; background: #eef3f6; border: 1px solid rgba(68,98,126,.12); border-radius: 14px; }
 .content-admin-storage > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .content-admin-storage span, .content-admin-storage small { color: #6b7c8d; font-size: 13px; line-height: 1.5; }
 .content-admin-storage progress { width: 100%; height: 9px; overflow: hidden; accent-color: #6486a5; border: 0; border-radius: 999px; }
+.content-admin-music-card { display: grid; gap: 18px; padding: 18px; background: #f6f4f0; border-radius: 16px; }
+.content-admin-music-upload { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid rgba(65,83,104,.12); }
+.content-admin-music-upload > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; }
+.content-admin-music-upload > div span, .content-admin-music-upload > small { color: #71808d; font-size: 13px; line-height: 1.5; }
+.content-admin-music-preview { display: block; width: 100%; min-height: 44px; }
 .content-admin-photo-card { display: grid; grid-template-columns: 136px minmax(0, 1fr); align-items: start; gap: 18px; padding: 16px; background: #f6f4f0; border-radius: 16px; }
 .content-admin-photo-card > img { width: 136px; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 44px 44px 12px 12px; }
 .content-admin-photo-card > div { display: grid; gap: 12px; }
@@ -450,6 +457,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   .content-admin-header { align-items: flex-start; flex-direction: column; }
   .content-admin-layout { grid-template-columns: minmax(0, 1fr); }
   .content-admin-preview { position: relative; top: auto; grid-row: 1; width: min(100%, 430px); margin: 0 auto; }
+  .content-admin-actions { position: static; }
 }
 
 @media (max-width: 560px) {
