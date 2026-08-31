@@ -396,6 +396,9 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.match(source, /ACCESS_LOGOUT_PATH/);
   assert.match(styles, /@media \(max-width: 1024px\)\s*\{[\s\S]*?\.content-admin-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)/);
   assert.match(styles, /\.content-admin-preview iframe\s*\{[^}]*width:\s*390px !important/);
+  assert.match(styles, /\.content-admin-preview-frame\s*\{[^}]*position:\s*relative/);
+  assert.match(styles, /\.content-admin-preview iframe\s*\{[^}]*position:\s*absolute[^}]*left:\s*50%[^}]*transform:\s*translateX\(-50%\) scale\(var\(--content-preview-scale\)\)/);
+  assert.doesNotMatch(styles, /\.content-admin-preview iframe\s*\{[^}]*transform:\s*scale\(/);
 });
 
 test("public music controls and credits resolve from runtime content and reset on track replacement", async () => {

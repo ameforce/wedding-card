@@ -548,8 +548,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-preview-heading span { color: var(--admin-muted); font-size: 12px; }
 .content-admin-preview-expand { display: none; width: 44px; min-height: 44px; padding: 0; align-items: center; justify-content: center; }
 .content-admin-preview-expand svg { width: 18px; height: 18px; }
-.content-admin-preview-frame { display: grid; width: 100%; height: 608px; overflow: hidden; place-items: start center; background: #f7f6f2; border: 1px solid #dce4e9; border-radius: 9px; }
-.content-admin-preview iframe { display: block; width: 390px !important; min-width: 390px; height: 844px; transform: scale(.72); transform-origin: top center; background: #fff; border: 0; }
+.content-admin-preview-frame { position: relative; width: 100%; height: 608px; overflow: hidden; background: #f7f6f2; border: 1px solid #dce4e9; border-radius: 9px; }
+.content-admin-preview iframe { --content-preview-scale: .72; position: absolute; top: 0; left: 50%; display: block; width: 390px !important; min-width: 390px; height: 844px; transform: translateX(-50%) scale(var(--content-preview-scale)); transform-origin: top center; background: #fff; border: 0; }
 .content-admin-preview > p { display: flex; width: fit-content; min-height: 36px; margin: -48px auto 0; padding: 0 12px; position: relative; z-index: 1; align-items: center; gap: 7px; color: #4a6680; background: rgba(255,255,255,.9); border: 1px solid #d6dfe7; border-radius: 7px; font-size: 12px; box-shadow: 0 4px 16px rgba(34,62,87,.08); }
 .content-admin-preview > p svg { width: 15px; height: 15px; }
 .content-admin-history { padding: 16px 14px; }
@@ -626,7 +626,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   .content-admin-preview { position: sticky; bottom: 12px; top: auto; z-index: 20; display: grid; width: auto; margin: 0; grid-row: auto; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 10px; }
   .content-admin-preview-heading { grid-column: 1 / -1; }
   .content-admin-preview-frame { width: 142px; height: 168px; place-items: start center; }
-  .content-admin-preview iframe { transform: scale(.36); }
+  .content-admin-preview iframe { --content-preview-scale: .36; }
   .content-admin-preview > p { margin: 0; }
   .content-admin-history { grid-column: auto; }
   .content-admin-actions { display: flex; position: sticky; bottom: 10px; z-index: 18; padding: 12px; background: rgba(255,255,255,.94); border-top: 1px solid var(--admin-border); }
@@ -652,12 +652,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   .content-admin-preview { bottom: 8px; grid-template-columns: 82px minmax(0,1fr); gap: 7px; padding: 8px; }
   .content-admin-preview-heading { min-height: 24px; }
   .content-admin-preview-frame { width: 82px; height: 96px; }
-  .content-admin-preview iframe { transform: scale(.21); }
+  .content-admin-preview iframe { --content-preview-scale: .21; }
   .content-admin-preview > p { margin: 0; padding-inline: 8px; }
   .content-admin-preview-expand { display: inline-flex; }
   .content-admin-preview.is-expanded { position: fixed; inset: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom)); z-index: 80; display: block; width: auto; max-width: none; margin: 0; overflow: auto; }
   .content-admin-preview.is-expanded .content-admin-preview-frame { width: 100%; height: calc(100dvh - 128px); overflow: auto; }
-  .content-admin-preview.is-expanded iframe { transform: scale(.88); }
+  .content-admin-preview.is-expanded iframe { --content-preview-scale: .88; }
   .content-admin-preview.is-expanded > p { margin: 8px auto 0; }
   .content-admin-history ol { grid-template-columns: minmax(0,1fr); }
   .guestbook-admin-toolbar { grid-template-columns: minmax(0,1fr) 44px; }
@@ -677,7 +677,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 @media (max-width: 390px) {
   .admin-page { padding-inline: 8px; }
   .content-admin-preview-frame { width: 76px; height: 88px; }
-  .content-admin-preview iframe { transform: scale(.195); }
+  .content-admin-preview iframe { --content-preview-scale: .195; }
   .content-admin-preview > p { padding-inline: 8px; font-size: 12px; }
 }
 .pastel-footer { padding: 17px 24px 22px; color: #60768f; font-family: "Noto Serif KR Variable", serif; font-size: 13px; line-height: 1.7; text-align: center; }
