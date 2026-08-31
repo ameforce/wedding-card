@@ -42,12 +42,12 @@ Cloudflare Workers Static Assets deploys Worker code and static assets as one un
 
 - Static application code is deployed through Worker Static Assets.
 - Public invitation content and revision metadata are stored in D1 so administrator edits do not require a code deployment.
-- Uploaded originals and optimized image revisions are stored in a private R2 bucket.
-- Media uploads are reserved atomically in D1 and capped at 2GiB for the entire project before any R2 write. `/admin/content` shows used and remaining capacity; individual originals remain capped at 25MB and each three-file revision at 30MB.
+- Uploaded originals, optimized image revisions, and background MP3 files are stored under immutable keys in a private R2 bucket. Public image and audio responses are exposed only through `/api/media/*`; audio supports `GET`, `HEAD`, and single byte ranges.
+- Photo and audio uploads are reserved atomically in D1 and share a 2GiB project cap before any R2 write. `/admin/content` shows used and remaining capacity; image originals and MP3 files remain capped at 25MB, while each three-file image revision remains capped at 30MB.
 - `/admin/*` and `/api/admin/*` are protected by Access, with the Worker independently validating the Access JWT and the exact two-email allowlist.
 - Content editing uses explicit local/admin draft, preview, and publish states rather than publishing every keystroke. Published D1 revisions and immutable R2 keys provide the rollback substrate; the first production admin release may expose rollback only after its review interaction is accepted.
 
-Changing React components, validation rules, Worker behavior, or the data schema still requires a code deployment. Editing an already modeled phrase, event value, image, order, crop position, or alt text does not.
+Changing React components, validation rules, Worker behavior, or the data schema still requires a code deployment. Editing an already modeled phrase, event value, image, music file, music credit, order, crop position, or alt text does not.
 
 This project intentionally accepts Cloudflare as its only production data plane and does not add a separate backup system. D1 Time Travel and immutable R2 revision keys are recovery conveniences within Cloudflare, not a second backup architecture.
 

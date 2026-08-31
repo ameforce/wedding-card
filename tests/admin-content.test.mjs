@@ -4,8 +4,10 @@ import test from "node:test";
 import { weddingContent } from "../src/content.js";
 import {
   applyContentDocument,
+  CONTENT_SCHEMA_VERSION,
   createContentDocument,
   normalizeContentDocument,
+  validateMusicContent,
 } from "../src/admin-content/content-document.js";
 import {
   ACCESS_LOGOUT_PATH,
@@ -56,6 +58,42 @@ test("admin documents preserve non-editable public and search-privacy contracts"
   assert.deepEqual(normalized.content.accounts, weddingContent.accounts);
   assert.deepEqual(normalized.content.familyContacts, weddingContent.familyContacts);
   assert.equal(normalized.photos.pastel.hero.src.startsWith("/assets/photos/"), true);
+});
+
+test("schema v1 documents remain readable with the bundled music fallback and new writes use v2", () => {
+  const legacy = createContentDocument(weddingContent);
+  legacy.schemaVersion = 1;
+  legacy.content.music = {
+    ...weddingContent.music,
+    title: "schema v1의 검증되지 않은 음악",
+    src: "https://attacker.example/track.mp3",
+  };
+  const normalized = normalizeContentDocument(legacy, weddingContent);
+
+  assert.equal(CONTENT_SCHEMA_VERSION, 2);
+  assert.equal(normalized.schemaVersion, 2);
+  assert.deepEqual(normalized.content.music, weddingContent.music);
+});
+
+test("schema v2 music metadata round-trips and rejects invalid credit URLs", async () => {
+  const document = createContentDocument(weddingContent);
+  document.content.music = {
+    src: "/api/media/invitation/123e4567-e89b-12d3-a456-426614174000/background-music/track.mp3",
+    title: "새 배경 음악",
+    artist: "새 아티스트",
+    sourceUrl: "https://music.example.test/track",
+    licenseLabel: "CC BY 4.0",
+    licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+  };
+  assert.deepEqual(normalizeContentDocument(document, weddingContent).content.music, document.content.music);
+  assert.deepEqual(validateMusicContent(document.content.music), {});
+
+  const adapter = createCloudflareContentAdapter({
+    staticContent: weddingContent,
+    fetchImpl: async () => Response.json({ revisionId: "unexpected" }),
+  });
+  document.content.music.sourceUrl = "http://music.example.test/track";
+  await assert.rejects(adapter.saveDraft(document), /HTTPS/);
 });
 
 test("development review keeps draft and published content as separate explicit states", async () => {
@@ -223,6 +261,52 @@ test("production adapter uses the reviewed Cloudflare API paths and revision env
   ]);
 });
 
+test("production and local adapters accept only bounded MP3 uploads", async () => {
+  const calls = [];
+  const file = new File([new Uint8Array([0x49, 0x44, 0x33, 0x04])], "track.mp3", { type: "audio/mpeg" });
+  const cloud = createCloudflareContentAdapter({
+    staticContent: weddingContent,
+    fetchImpl: async (path, options = {}) => {
+      calls.push([path, options]);
+      return Response.json({
+        audio: { src: "/api/media/invitation/123e4567-e89b-12d3-a456-426614174000/background-music/track.mp3", mimeType: "audio/mpeg", sizeBytes: file.size },
+        usage: { usedBytes: file.size },
+      }, { status: 201 });
+    },
+  });
+  const uploaded = await cloud.uploadAudio({ file });
+  assert.equal(uploaded.audio.mimeType, "audio/mpeg");
+  assert.equal(calls[0][0], "/api/admin/media/audio");
+  assert.equal(calls[0][1].body instanceof FormData, true);
+  assert.equal(calls[0][1].headers, undefined);
+
+  const storage = memoryStorage();
+  const blobs = new Map();
+  const audioStore = {
+    async put(id, blob) { blobs.set(id, blob); },
+    async get(id) { return blobs.get(id) ?? null; },
+  };
+  const local = createLocalReviewContentAdapter({ staticContent: weddingContent, storage, eventTarget: new EventTarget(), audioStore });
+  const localUpload = await local.uploadAudio({ file });
+  assert.match(localUpload.audio.src, /^blob:/);
+  const localDraft = createContentDocument(weddingContent);
+  localDraft.content.music.src = localUpload.audio.src;
+  localDraft.content.music.title = "로컬 검토 음악";
+  const localSaved = await local.saveDraft(localDraft);
+  const persisted = storage.values.get(LOCAL_REVIEW_STORAGE_KEY);
+  assert.match(persisted, /local-review-audio:[a-f0-9-]{36}/i);
+  assert.doesNotMatch(persisted, /data:audio/);
+  assert.equal((await local.getPublicContent()).content.music.title, weddingContent.music.title);
+  await local.publish(localSaved.draftRevisionId);
+  assert.equal((await local.getPublicContent()).content.music.title, "로컬 검토 음악");
+
+  const reloaded = createLocalReviewContentAdapter({ staticContent: weddingContent, storage, eventTarget: new EventTarget(), audioStore });
+  const reloadedState = await reloaded.getAdminState();
+  assert.match(reloadedState.published.content.music.src, /^blob:/);
+  assert.equal((await reloaded.getPublicContent()).content.music.title, "로컬 검토 음악");
+  await assert.rejects(local.uploadAudio({ file: new File(["not audio"], "track.txt", { type: "text/plain" }) }), /MP3/);
+});
+
 test("production admin requests preserve Access authentication failures for re-login UX", async () => {
   const adapter = createCloudflareContentAdapter({
     staticContent: weddingContent,
@@ -268,13 +352,30 @@ test("the admin UI labels local review and keeps publish behind an explicit save
   assert.match(source, /새 사진 대체 텍스트/);
   assert.match(source, /replacementAlt\.trim\(\)/);
   assert.doesNotMatch(source, /alt:\s*current\.alt/);
-  assert.match(source, /사진 저장 공간/);
-  assert.match(source, /2GB에 도달하면 추가 업로드가 자동으로 차단/);
+  assert.match(source, /배경 음악/);
+  assert.match(source, /uploadAudio/);
+  assert.match(source, /accept="audio\/mpeg,\.mp3"/);
+  assert.match(source, /controls preload="metadata"/);
+  assert.doesNotMatch(source, /autoPlay/);
+  assert.match(source, /미디어 저장 공간\(사진·음악\)/);
+  assert.match(source, /사진과 음악 합계가 2GB에 도달하면 추가 업로드가 자동으로 차단/);
   assert.match(source, /관리자 인증이 필요합니다/);
   assert.match(source, /Google 계정으로 다시 로그인/);
   assert.match(source, /authRequired \? <AdminReauthentication \/>/);
   assert.match(source, /ACCESS_LOGOUT_PATH/);
   assert.match(styles, /@media \(max-width: 1120px\)\s*\{[\s\S]*?\.content-admin-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});
+
+test("public music controls and credits resolve from runtime content and reset on track replacement", async () => {
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(source, /const music = content\.music/);
+  assert.match(source, /src=\{music\.src\}/);
+  assert.match(source, /\[music\.src\]/);
+  assert.match(source, /audio\?\.pause\(\)[\s\S]*audio\.currentTime = 0[\s\S]*audio\?\.load\(\)/);
+  assert.match(source, /href=\{music\.sourceUrl\}/);
+  assert.match(source, /href=\{music\.licenseUrl\}/);
+  assert.match(source, /preload="none"[\s\S]*loop/);
+  assert.doesNotMatch(source, /src="\/assets\/audio\/touching-moments-one-pulse\.mp3"/);
 });
 
 test("both administrator screens expose logout and block stale sessions behind re-authentication", async () => {
