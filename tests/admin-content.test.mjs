@@ -325,9 +325,11 @@ test("production admin requests preserve Access authentication failures for re-l
   assert.equal(ACCESS_LOGOUT_PATH, "/cdn-cgi/access/logout");
 });
 
-test("the app exposes the content admin route and runtime content provider", async () => {
+test("the app exposes the canonical content admin route and runtime content provider", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
-  assert.match(source, /pathname === "\/admin\/content"/);
+  assert.match(source, /\["\/admin", "\/admin\/content"\]\.includes\(window\.location\.pathname\)/);
+  assert.match(source, /pathname === "\/admin\/guestbook"/);
+  assert.match(source, /href="\/admin">콘텐츠 관리<\/a>/);
   assert.match(source, /WeddingRuntimeContext\.Provider/);
   assert.match(source, /usePublicInvitationContent\(weddingContent\)/);
 });

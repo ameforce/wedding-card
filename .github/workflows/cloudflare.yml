@@ -112,6 +112,12 @@ jobs:
       - name: Verify deployment inputs after install and checks
         run: sha256sum --strict --check dist/cloudflare-artifact.sha256
 
+      - name: Verify exact-root Cloudflare Access protection
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run verify:cloudflare-access
+
       - name: Install Chromium for the rendered production canary
         run: npx playwright install --with-deps chromium
 

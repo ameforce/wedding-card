@@ -792,7 +792,7 @@ function GuestbookAdmin() {
     <main className="guestbook-admin-shell">
       <section className="guestbook-admin" aria-labelledby="admin-title">
         <nav className="guestbook-admin-nav" aria-label="관리 메뉴">
-          <a href="/admin/content">콘텐츠 관리</a>
+          <a href="/admin">콘텐츠 관리</a>
           <a className="admin-logout-link" href={ACCESS_LOGOUT_PATH}>로그아웃</a>
         </nav>
         <MusicNote aria-hidden="true" weight="light" />
@@ -1002,6 +1002,6 @@ function WeddingApp() {
 
 export function App() {
   if (window.location.pathname === "/admin/guestbook") return <GuestbookAdmin />;
-  if (window.location.pathname === "/admin/content") return <ContentAdmin />;
+  if (["/admin", "/admin/content"].includes(window.location.pathname)) return <ContentAdmin />;
   return <WeddingApp />;
 }

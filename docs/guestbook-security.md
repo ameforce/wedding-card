@@ -17,7 +17,7 @@ Guestbook messages have a permanent-retention policy. The Worker has no deletion
 Production requires all of the following before guestbook use:
 
 1. Provision D1 and bind it as `GUESTBOOK_DB`; apply all ordered files in `migrations/`.
-2. Protect `/admin/*` and `/api/admin/*` with Cloudflare Access, and protect `/api/guestbook/admin/*` with the same application policy.
+2. Protect exact `/admin`, `/admin/*`, `/api/admin/*`, and `/api/guestbook/admin/*` with the same Cloudflare Access application policy. The wildcard `/admin/*` does not cover the exact root path.
 3. Configure `ADMIN_AUTH_MODE=cloudflare-access-jwt`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, and `WEDDING_ADMIN_EMAILS` only in the deployment environment. The Worker fetches the team's Access JWKS and validates `Cf-Access-Jwt-Assertion`; it fails closed unless the allowlist contains exactly two distinct groom/bride emails. Never commit, bundle, source-map, or render those addresses.
 4. Keep the direct Worker preview hostname disabled or protected so it cannot bypass the Custom Domain Access policy.
 

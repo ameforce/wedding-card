@@ -52,6 +52,7 @@
   ],
   "vars": {
     "ADMIN_AUTH_MODE": "cloudflare-access-jwt",
+    "ADMIN_CONTENT_REDIRECT_ENABLED": "false",
     "REQUIRE_GUESTBOOK_RATE_LIMIT": "1"
   }
 }

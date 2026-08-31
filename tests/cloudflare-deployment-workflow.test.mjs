@@ -31,12 +31,18 @@ test("production CI deploys a Worker version without mutating Custom Domain rout
   assert.doesNotMatch(deployJob, /Install locked dependencies[\s\S]{0,300}CLOUDFLARE_API_TOKEN/);
   assert.match(workflow, /cloudflare-deployment-state\.mjs restore-if-changed/);
   assert.match(deployJob, /npx playwright install --with-deps chromium/);
+  assert.match(deployJob, /Verify exact-root Cloudflare Access protection[\s\S]*npm run verify:cloudflare-access/);
+  assert.ok(
+    deployJob.indexOf("npm run verify:cloudflare-access") < deployJob.indexOf("npm run upload:cloudflare:version"),
+    "Access 보호 확인이 Worker 업로드보다 먼저 실행되어야 합니다.",
+  );
   assert.match(deployJob, /npm run canary:production/);
   assert.match(deployJob, /WEDDING_CANARY_EXPECTED_WORKER_TAG: \$\{\{ github\.sha \}\}/);
   assert.match(deployJob, /WEDDING_CANARY_EXPECTED_WORKER_VERSION: \$\{\{ steps\.active-version\.outputs\.active_worker_version \}\}/);
 
   const artifactSource = await readFile(resolve(root, "scripts/cloudflare-artifact.mjs"), "utf8");
   assert.match(artifactSource, /scripts\/post-deploy-render-canary\.mjs/);
+  assert.match(artifactSource, /scripts\/verify-cloudflare-access\.mjs/);
   assert.equal(packageJson.scripts["deploy:cloudflare:verified"], undefined);
 });
 
