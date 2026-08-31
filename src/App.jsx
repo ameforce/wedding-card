@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -768,11 +768,16 @@ function GuestbookSection({ notify }) {
 }
 
 function GuestbookAdmin() {
-  const [state, setState] = useState({ status: "idle", entries: [], message: "" });
-  const loadEntries = async () => {
-    setState({ status: "loading", entries: [], message: "" });
+  const [state, setState] = useState({ status: "loading", entries: [], message: "" });
+  const hasLoadedRef = useRef(false);
+  const fetchEntries = useCallback(async () => {
     try {
       const result = await getAdminGuestbookEntries();
+      if (!Array.isArray(result.entries)) {
+        const invalidResponse = new Error("관리자 방명록 응답 형식이 올바르지 않습니다.");
+        invalidResponse.status = 503;
+        throw invalidResponse;
+      }
       setState({ status: "ready", entries: result.entries, message: "" });
     } catch (error) {
       const authRequired = isAdminAuthRequiredError(error);
@@ -786,7 +791,17 @@ function GuestbookAdmin() {
           : "방명록 메시지를 불러오지 못했습니다.",
       });
     }
+  }, []);
+  const reloadEntries = () => {
+    setState({ status: "loading", entries: [], message: "" });
+    void fetchEntries();
   };
+
+  useEffect(() => {
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+    queueMicrotask(() => { void fetchEntries(); });
+  }, [fetchEntries]);
 
   return (
     <main className="guestbook-admin-shell">
@@ -807,8 +822,8 @@ function GuestbookAdmin() {
           </div>
         ) : (
           <>
-            <button type="button" onClick={loadEntries} disabled={state.status === "loading"}>
-              {state.status === "loading" ? "불러오는 중…" : state.status === "ready" ? "새로고침" : "인증 확인 후 불러오기"}
+            <button type="button" onClick={reloadEntries} disabled={state.status === "loading"}>
+              {state.status === "loading" ? "불러오는 중…" : state.status === "ready" ? "새로고침" : "다시 시도"}
             </button>
             {state.message && <p className="admin-message" role="status">{state.message}</p>}
           </>
