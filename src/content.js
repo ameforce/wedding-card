@@ -68,6 +68,14 @@ export const weddingContent = {
       type: "image/jpeg",
     },
   },
+  music: {
+    src: "/assets/audio/touching-moments-one-pulse.mp3",
+    title: "Touching Moments One - Pulse",
+    artist: "Kevin MacLeod",
+    sourceUrl: "https://incompetech.com/music/royalty-free/index.html?Search=Search&isrc=USUAN1100039",
+    licenseLabel: "CC BY 4.0",
+    licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+  },
   couple: {
     groom: "김종인",
     bride: "유지혜",

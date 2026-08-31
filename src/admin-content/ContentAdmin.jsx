@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { weddingContent } from "../content.js";
-import { cloneContentDocument, createContentDocument, normalizeContentDocument } from "./content-document.js";
+import {
+  cloneContentDocument,
+  createContentDocument,
+  normalizeContentDocument,
+  validateMusicContent,
+} from "./content-document.js";
 import {
   ACCESS_LOGOUT_PATH,
   createContentAdapter,
@@ -20,12 +25,12 @@ function setAtPath(document, path, value) {
   return next;
 }
 
-function Field({ label, value, onChange, type = "text", hint, required = true }) {
+function Field({ label, value, onChange, type = "text", hint, error, required = true }) {
   return (
     <label className="content-admin-field">
       <span>{label}</span>
-      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} />
-      {hint && <small>{hint}</small>}
+      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} aria-invalid={error ? "true" : undefined} />
+      {error ? <small className="is-error" role="alert">{error}</small> : hint && <small>{hint}</small>}
     </label>
   );
 }
@@ -165,6 +170,11 @@ export function ContentAdmin() {
   };
 
   const saveDraft = async () => {
+    const musicErrors = validateMusicContent(editingDocument.content.music, { allowLocalPreview: localReview });
+    if (Object.keys(musicErrors).length > 0) {
+      setStatus({ tone: "error", message: Object.values(musicErrors)[0] });
+      return null;
+    }
     setBusy(true);
     try {
       const state = await adapter.saveDraft(editingDocument);
@@ -226,10 +236,34 @@ export function ContentAdmin() {
     }
   };
 
+  const uploadAudio = async (file) => {
+    const musicErrors = validateMusicContent(editingDocument.content.music, { allowLocalPreview: localReview });
+    if (Object.keys(musicErrors).length > 0) {
+      setStatus({ tone: "error", message: "곡 정보와 HTTPS 출처·라이선스 주소를 먼저 확인해 주세요." });
+      return false;
+    }
+    setUploadingSlot("background-music");
+    try {
+      const result = await adapter.uploadAudio({ file });
+      update(["content", "music", "src"], result.audio.src);
+      setMediaUsage(result.usage || await adapter.getMediaUsage());
+      setStatus({ tone: "success", message: "새 MP3와 곡 정보를 초안에 넣었습니다. 미리듣기 후 임시 저장해 주세요." });
+      return true;
+    } catch (error) {
+      showAdminError(error, "배경 음악을 처리하지 못했습니다.");
+      return false;
+    } finally {
+      setUploadingSlot("");
+    }
+  };
+
   const event = editingDocument.content.event;
   const venue = editingDocument.content.venue;
   const transit = editingDocument.content.transit;
+  const music = editingDocument.content.music;
   const photos = editingDocument.photos.pastel;
+  const musicErrors = validateMusicContent(music, { allowLocalPreview: localReview });
+  const musicReady = Object.keys(musicErrors).length === 0;
   const previewStateLabel = dirty ? "미저장 변경" : draftRevisionId ? "저장된 초안" : publishedRevisionId ? "공개본" : "저장 전";
 
   return (
@@ -238,7 +272,7 @@ export function ContentAdmin() {
         <div>
           <p className="eyebrow">WEDDING CONTENT STUDIO</p>
           <h1>청첩장 콘텐츠 관리</h1>
-          <p>문구와 사진을 초안으로 저장하고, 오른쪽 실제 화면을 확인한 뒤 공개합니다.</p>
+          <p>문구와 사진·음악을 초안으로 저장하고, 오른쪽 실제 화면을 확인한 뒤 공개합니다.</p>
         </div>
         <nav aria-label="관리 메뉴">
           <a href="/admin/guestbook">비공개 방명록</a>
@@ -294,15 +328,44 @@ export function ContentAdmin() {
           </fieldset>
 
           <fieldset disabled={busy}>
-            <legend>사진</legend>
+            <legend>배경 음악</legend>
             <div className="content-admin-storage" aria-live="polite">
               <div>
-                <strong>사진 저장 공간</strong>
+                <strong>미디어 저장 공간(사진·음악)</strong>
                 <span>{mediaUsage?.localReview ? "로컬 검토에서는 Cloudflare 공간을 사용하지 않습니다." : `${formatStorage(mediaUsage?.usedBytes || 0)} / ${formatStorage(mediaUsage?.limitBytes || 0)}`}</span>
               </div>
-              <progress max="100" value={mediaUsage?.percent || 0} aria-label="사진 저장 공간 사용률" />
-              <small>{mediaUsage?.localReview ? "production에서는 2GB에 도달하면 추가 업로드가 자동으로 차단됩니다." : `사용률 ${mediaUsage?.percent || 0}% · 남은 공간 ${formatStorage(mediaUsage?.remainingBytes || 0)}`}</small>
+              <progress max="100" value={mediaUsage?.percent || 0} aria-label="미디어 저장 공간 사용률" />
+              <small>{mediaUsage?.localReview ? "production에서는 사진과 음악 합계가 2GB에 도달하면 추가 업로드가 자동으로 차단됩니다." : `사용률 ${mediaUsage?.percent || 0}% · 남은 공간 ${formatStorage(mediaUsage?.remainingBytes || 0)}`}</small>
             </div>
+            <div className="content-admin-music-card">
+              <div className="content-admin-grid">
+                <Field label="곡명" value={music.title} error={musicErrors.title} onChange={(value) => update(["content", "music", "title"], value)} />
+                <Field label="아티스트" value={music.artist} error={musicErrors.artist} onChange={(value) => update(["content", "music", "artist"], value)} />
+                <Field label="출처 URL" type="url" value={music.sourceUrl} error={musicErrors.sourceUrl} onChange={(value) => update(["content", "music", "sourceUrl"], value)} hint="HTTPS 주소만 사용할 수 있습니다." />
+                <Field label="라이선스명" value={music.licenseLabel} error={musicErrors.licenseLabel} onChange={(value) => update(["content", "music", "licenseLabel"], value)} />
+                <Field label="라이선스 URL" type="url" value={music.licenseUrl} error={musicErrors.licenseUrl} onChange={(value) => update(["content", "music", "licenseUrl"], value)} hint="HTTPS 주소만 사용할 수 있습니다." />
+              </div>
+              <div className="content-admin-music-upload">
+                <div>
+                  <strong>현재 곡 미리듣기</strong>
+                  <span>{music.title} · {music.artist}</span>
+                </div>
+                <audio key={music.src} className="content-admin-music-preview" controls preload="metadata" src={music.src} aria-label={`${music.title} 미리듣기`} />
+                <label className={`content-admin-file ${musicReady ? "" : "is-disabled"}`}>
+                  <span>{uploadingSlot === "background-music" ? "MP3 업로드 중…" : "MP3 교체"}</span>
+                  <input type="file" accept="audio/mpeg,.mp3" disabled={Boolean(uploadingSlot) || !musicReady} onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (file) await uploadAudio(file);
+                    event.target.value = "";
+                  }} />
+                </label>
+                <small>MP3(audio/mpeg), 최대 25MB · 업로드만으로는 공개되지 않습니다.</small>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset disabled={busy}>
+            <legend>사진</legend>
             <div className="content-admin-photo-list">
               <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={uploadingSlot === "pastel-hero"} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
               {photos.gallery.map((photo, index) => (
@@ -312,7 +375,7 @@ export function ContentAdmin() {
           </fieldset>
 
           <div className="content-admin-actions">
-            <button type="button" className="is-secondary" onClick={saveDraft} disabled={busy || Boolean(uploadingSlot)}>임시 저장</button>
+            <button type="button" className="is-secondary" onClick={saveDraft} disabled={busy || Boolean(uploadingSlot) || !musicReady}>임시 저장</button>
             <button type="button" onClick={publish} disabled={busy || dirty || !draftRevisionId || Boolean(uploadingSlot)}>이 초안을 공개</button>
           </div>
         </section>

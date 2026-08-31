@@ -307,9 +307,12 @@ test("Pastel uses one continuous watercolor surface and an opt-in licensed audio
   assert.match(css, /\.pastel-invitation > \*\s*\{[^}]*z-index:\s*1/);
   assert.match(app, /<audio[\s\S]*preload="none"[\s\S]*loop/);
   assert.doesNotMatch(app, /autoPlay|autoplay/);
-  assert.match(app, /Touching Moments One · Pulse/);
-  assert.match(app, /Kevin MacLeod/);
-  assert.match(app, /creativecommons\.org\/licenses\/by\/4\.0/);
+  assert.equal(weddingContent.music.title, "Touching Moments One - Pulse");
+  assert.equal(weddingContent.music.artist, "Kevin MacLeod");
+  assert.equal(weddingContent.music.licenseUrl, "https://creativecommons.org/licenses/by/4.0/");
+  assert.match(app, /src=\{music\.src\}/);
+  assert.match(app, /href=\{music\.sourceUrl\}/);
+  assert.match(app, /href=\{music\.licenseUrl\}/);
 });
 
 test("private guestbook recovery uses only name and password without exposing a receipt", () => {

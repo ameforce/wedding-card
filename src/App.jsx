@@ -621,8 +621,23 @@ function BottomActions({ notify, pastel = false }) {
 }
 
 function MusicControl({ notify }) {
+  const { content } = useWeddingRuntime();
+  const music = content.music;
+  return <MusicTrackControl key={music.src} music={music} notify={notify} />;
+}
+
+function MusicTrackControl({ music, notify }) {
   const audioRef = useRef(null);
   const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    return () => {
+      audio?.pause();
+      if (audio) audio.currentTime = 0;
+      audio?.load();
+    };
+  }, [music.src]);
 
   const togglePlayback = async () => {
     const audio = audioRef.current;
@@ -648,7 +663,7 @@ function MusicControl({ notify }) {
       </button>
       <audio
         ref={audioRef}
-        src="/assets/audio/touching-moments-one-pulse.mp3"
+        src={music.src}
         preload="none"
         loop
         onPause={() => setPlaying(false)}
@@ -659,9 +674,11 @@ function MusicControl({ notify }) {
 }
 
 function MusicCredit() {
+  const { content } = useWeddingRuntime();
+  const music = content.music;
   return (
     <p className="music-credit">
-      BGM: Touching Moments One · Pulse — Kevin MacLeod · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>
+      BGM: <a href={music.sourceUrl} target="_blank" rel="noreferrer">{music.title}</a> — {music.artist} · <a href={music.licenseUrl} target="_blank" rel="noreferrer">{music.licenseLabel}</a>
     </p>
   );
 }
