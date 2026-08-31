@@ -14,6 +14,7 @@ const DEPLOYMENT_SOURCE_TARGETS = [
   "scripts/cloudflare-deployment-state.mjs",
   "scripts/post-deploy-render-canary.mjs",
   "scripts/post-deploy-canary.mjs",
+  "scripts/verify-cloudflare-access.mjs",
   "worker/index.js",
   "wrangler.jsonc",
 ];

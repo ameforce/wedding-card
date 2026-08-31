@@ -42,6 +42,7 @@ test("production CI deploys a Worker version without mutating Custom Domain rout
 
   const artifactSource = await readFile(resolve(root, "scripts/cloudflare-artifact.mjs"), "utf8");
   assert.match(artifactSource, /scripts\/post-deploy-render-canary\.mjs/);
+  assert.match(artifactSource, /scripts\/verify-cloudflare-access\.mjs/);
   assert.equal(packageJson.scripts["deploy:cloudflare:verified"], undefined);
 });
 

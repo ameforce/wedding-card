@@ -71,6 +71,10 @@ export async function verifyCloudflareAccess({
     policiesPayload.result.some((policy) => policy?.decision === "allow"),
     "관리자 Access 애플리케이션에 허용 정책이 없습니다.",
   );
+  invariant(
+    !policiesPayload.result.some((policy) => policy?.decision === "bypass"),
+    "관리자 Access 애플리케이션에 인증을 우회하는 정책이 있습니다.",
+  );
 
   return {
     applicationId: application.id,

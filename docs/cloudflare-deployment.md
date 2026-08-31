@@ -18,7 +18,7 @@ GitHub Actions is the sole production deployment controller. ENM Jenkins and Clo
 The GitHub `production` Environment must be restricted to `main` and contain only these secrets:
 
 - `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`: a dedicated, expiring token scoped to this account with Workers Scripts Write, D1 Write, Workers R2 Storage Write, and Account Settings Read. It intentionally has no Zone permission because CI must not mutate the Custom Domain route. Do not reuse a human global API key.
+- `CLOUDFLARE_API_TOKEN`: a dedicated, expiring token scoped to this account with Workers Scripts Write, D1 Write, Workers R2 Storage Write, Account Settings Read, and Access: Apps and Policies Read. It intentionally has no Zone permission because CI must not mutate the Custom Domain route. Do not reuse a human global API key.
 
 Protect `main` so changes arrive through a pull request and require the `Verify` check. Keep force pushes and branch deletion disabled. Repository Actions policy should allow GitHub-owned actions only and require actions to be pinned to a full commit SHA.
 
@@ -58,7 +58,7 @@ This project intentionally accepts Cloudflare as its only production data plane 
 - Do not add `Disallow: /` for the public HTML: search crawlers must be able to read the `noindex` directive. This is indexing control, not access control; anyone with the URL can still open the invitation.
 - Add an account-level USD 1 budget alert as a secondary notification. It is not a hard stop; the 2GiB application quota is the cost-control boundary.
 - Keep Access protection on exact `/admin`, `/admin/*`, `/api/admin/*`, and `/api/guestbook/admin/*`. The exact `/admin` application entry must be read back before deployment; `/admin/*` alone is insufficient proof for the root path. `ADMIN_AUTH_MODE=cloudflare-access-jwt`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, and the exact two-address `WEDDING_ADMIN_EMAILS` allowlist must remain deployment-only; never put those values in client code.
-- Production CI runs `npm run verify:cloudflare-access` before uploading a Worker version. The check fails closed unless one self-hosted Access application contains all four administrator destinations and has an allow policy.
+- Production CI runs `npm run verify:cloudflare-access` before uploading a Worker version. The check fails closed unless one self-hosted Access application contains all four administrator destinations, has an allow policy, and has no bypass policy. Its token therefore requires `Access: Apps and Policies Read`.
 - Roll out the URL migration in two protected `main` deployments: first keep `ADMIN_CONTENT_REDIRECT_ENABLED=false` so both `/admin` and `/admin/content` serve the editor, then set it to `true` only after the first version and Access boundary pass production canaries. This makes the first version a safe rollback target for cached `308` responses.
 - `wrangler.jsonc` records the provisioned D1 identifier and R2 bucket name. Treat unexpected changes to either binding as a deployment review event.
 - Keep `workers.dev` and preview URLs disabled so the Custom Domain cannot be bypassed through another public route.

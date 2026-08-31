@@ -58,6 +58,17 @@ test("fails closed when the shared administrator application has no allow policy
   );
 });
 
+test("fails closed when the shared administrator application has a bypass policy", async () => {
+  await assert.rejects(
+    verifyCloudflareAccess({
+      accountId: "account",
+      apiToken: "token",
+      fetchImpl: accessFetch({ policies: [{ decision: "allow" }, { decision: "bypass" }] }),
+    }),
+    /인증을 우회하는 정책/,
+  );
+});
+
 test("fails closed on an Access API error", async () => {
   await assert.rejects(
     verifyCloudflareAccess({
