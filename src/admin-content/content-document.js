@@ -1,12 +1,14 @@
 import { WEDDING_PHOTOS } from "../content.js";
 
-export const CONTENT_SCHEMA_VERSION = 1;
+export const CONTENT_SCHEMA_VERSION = 2;
+const SUPPORTED_CONTENT_SCHEMA_VERSIONS = new Set([1, CONTENT_SCHEMA_VERSION]);
 
 const MAX_LENGTH = {
   short: 80,
   copy: 240,
   photoAlt: 180,
   photoUrl: 2048,
+  url: 2048,
 };
 
 function clone(value) {
@@ -57,6 +59,48 @@ function photoSrcSet(value) {
   return /^(?!.*(?:javascript:|data:|<))/i.test(value) ? value : null;
 }
 
+function httpsUrl(value) {
+  if (typeof value !== "string" || value.length < 1 || value.length > MAX_LENGTH.url) return null;
+  try {
+    return new URL(value).protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function musicSrc(value, allowLocalPreview) {
+  if (typeof value !== "string" || value.length < 1) return null;
+  if (allowLocalPreview && value.length <= 36_000_000 && /^data:audio\/mpeg;base64,/i.test(value)) return value;
+  if (allowLocalPreview && /^blob:/i.test(value)) return value;
+  if (allowLocalPreview && /^local-review-audio:[a-f0-9-]{36}$/i.test(value)) return value;
+  if (value.length > MAX_LENGTH.url) return null;
+  return /^(?:\/assets\/audio\/[a-z0-9._-]+\.mp3|\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3)$/i.test(value)
+    ? value
+    : null;
+}
+
+export function validateMusicContent(music, { allowLocalPreview = false } = {}) {
+  const errors = {};
+  if (!musicSrc(music?.src, allowLocalPreview)) errors.src = "업로드한 MP3 파일을 선택해 주세요.";
+  if (typeof music?.title !== "string" || !music.title.trim() || music.title.length > MAX_LENGTH.short) errors.title = "곡명을 80자 이내로 입력해 주세요.";
+  if (typeof music?.artist !== "string" || !music.artist.trim() || music.artist.length > MAX_LENGTH.short) errors.artist = "아티스트를 80자 이내로 입력해 주세요.";
+  if (!httpsUrl(music?.sourceUrl)) errors.sourceUrl = "출처 URL은 HTTPS 주소여야 합니다.";
+  if (typeof music?.licenseLabel !== "string" || !music.licenseLabel.trim() || music.licenseLabel.length > MAX_LENGTH.short) errors.licenseLabel = "라이선스명을 80자 이내로 입력해 주세요.";
+  if (!httpsUrl(music?.licenseUrl)) errors.licenseUrl = "라이선스 URL은 HTTPS 주소여야 합니다.";
+  return errors;
+}
+
+function normalizeMusic(value, fallback, { allowLocalPreview = false } = {}) {
+  return {
+    src: musicSrc(value?.src, allowLocalPreview) ?? fallback.src,
+    title: text(value?.title, fallback.title, MAX_LENGTH.short),
+    artist: text(value?.artist, fallback.artist, MAX_LENGTH.short),
+    sourceUrl: httpsUrl(value?.sourceUrl) ?? fallback.sourceUrl,
+    licenseLabel: text(value?.licenseLabel, fallback.licenseLabel, MAX_LENGTH.short),
+    licenseUrl: httpsUrl(value?.licenseUrl) ?? fallback.licenseUrl,
+  };
+}
+
 function normalizePhoto(value, fallback, { allowLocalPreview = false } = {}) {
   const normalized = {
     ...fallback,
@@ -95,7 +139,7 @@ export function createContentDocument(content) {
 
 export function normalizeContentDocument(document, fallbackContent, options = {}) {
   const fallback = createContentDocument(fallbackContent);
-  const source = document?.schemaVersion === CONTENT_SCHEMA_VERSION ? document : {};
+  const source = SUPPORTED_CONTENT_SCHEMA_VERSIONS.has(document?.schemaVersion) ? document : {};
   const sourceContent = source.content ?? {};
   const event = sourceContent.event ?? {};
   const venue = sourceContent.venue ?? {};
@@ -142,6 +186,7 @@ export function normalizeContentDocument(document, fallbackContent, options = {}
     parkingRegistrationLocation: text(transit.parkingRegistrationLocation, content.transit.parkingRegistrationLocation),
     parkingRegistration: text(transit.parkingRegistration, content.transit.parkingRegistration),
   };
+  content.music = normalizeMusic(source.schemaVersion === CONTENT_SCHEMA_VERSION ? sourceContent.music : undefined, content.music, options);
   photos.pastel = {
     ...photos.pastel,
     hero: normalizePhoto(sourcePhotos.pastel?.hero, photos.pastel.hero, options),

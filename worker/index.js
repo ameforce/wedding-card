@@ -2,6 +2,8 @@ const API_PREFIX = "/api/guestbook";
 const CONTENT_API_PREFIX = "/api/content";
 const ADMIN_API_PREFIX = "/api/admin";
 const MEDIA_API_PREFIX = "/api/media";
+const ADMIN_CONTENT_PAGE = "/admin";
+const LEGACY_ADMIN_CONTENT_PAGE = "/admin/content";
 // workerd rejects PBKDF2 requests above 100,000 iterations. Keep the value in
 // the encoded verifier and reject unsupported verifier metadata before asking
 // Web Crypto to derive any bits.
@@ -14,6 +16,7 @@ const AUTH_LOCK_MS = 15 * 60 * 1000;
 const MAX_BODY_BYTES = 8_192;
 const MAX_CONTENT_BODY_BYTES = 131_072;
 const MAX_MEDIA_BODY_BYTES = 30 * 1024 * 1024;
+const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
 const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 const GUESTBOOK_RETENTION = "permanent";
 const PUBLIC_BOOTSTRAP_SCHEMA_VERSION = 1;
@@ -513,9 +516,25 @@ function requireText(value, path, maxLength = 500) {
   }
 }
 
-function validateInvitationDocument(document, { publish = false } = {}) {
+function requireHttpsUrl(value, path) {
+  requireText(value, path, 2048);
+  try {
+    if (new URL(value).protocol !== "https:") throw new Error("not https");
+  } catch {
+    throw { status: 400, code: "INVALID_CONTENT", message: `${path} 값은 HTTPS 주소여야 합니다.` };
+  }
+}
+
+function requireMusicSource(value) {
+  requireText(value, "content.music.src", 2048);
+  if (!/^(?:\/assets\/audio\/[a-z0-9._-]+\.mp3|\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3)$/i.test(value)) {
+    throw { status: 400, code: "INVALID_CONTENT", message: "content.music.src 값은 업로드된 MP3 경로여야 합니다." };
+  }
+}
+
+function validateInvitationDocument(document, { publish = false, write = false } = {}) {
   requirePlainObject(document, "document");
-  if (document.schemaVersion !== 1) {
+  if (![1, 2].includes(document.schemaVersion)) {
     throw { status: 400, code: "UNSUPPORTED_CONTENT_SCHEMA", message: "지원하지 않는 초대장 콘텐츠 버전입니다." };
   }
   const content = requirePlainObject(document.content, "content");
@@ -533,6 +552,18 @@ function validateInvitationDocument(document, { publish = false } = {}) {
     [content.venue?.address, "content.venue.address", 300],
   ];
   for (const [value, path, maxLength] of requiredTextPaths) requireText(value, path, maxLength);
+  if (document.schemaVersion === 2) {
+    const music = requirePlainObject(content.music, "content.music");
+    requireMusicSource(music.src);
+    requireText(music.title, "content.music.title", 80);
+    requireText(music.artist, "content.music.artist", 80);
+    requireHttpsUrl(music.sourceUrl, "content.music.sourceUrl");
+    requireText(music.licenseLabel, "content.music.licenseLabel", 80);
+    requireHttpsUrl(music.licenseUrl, "content.music.licenseUrl");
+  }
+  if (write && document.schemaVersion !== 2) {
+    throw { status: 400, code: "UNSUPPORTED_CONTENT_SCHEMA", message: "새 초대장 콘텐츠는 schema v2로 저장해야 합니다." };
+  }
   for (const [value, path] of [[content.message, "content.message"], [content.story, "content.story"]]) {
     if (!Array.isArray(value) || value.length < 1 || value.length > 20) {
       throw { status: 400, code: "INVALID_CONTENT", message: `${path} 값을 확인해 주세요.` };
@@ -739,7 +770,7 @@ async function saveInvitationDraft(request, env) {
   const db = requireContentDatabase(env);
   const adminEmail = await requireAdminEmail(request, env);
   const payload = await readJson(request, MAX_CONTENT_BODY_BYTES);
-  const contentJson = validateInvitationDocument(payload.document);
+  const contentJson = validateInvitationDocument(payload.document, { write: true });
   const state = await getInvitationState(db);
   const revisionId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
@@ -821,7 +852,7 @@ async function rollbackInvitation(request, env) {
 
 function requireMediaBucket(env) {
   if (!env.WEDDING_MEDIA || typeof env.WEDDING_MEDIA.put !== "function" || typeof env.WEDDING_MEDIA.get !== "function") {
-    throw { status: 503, code: "MEDIA_UNAVAILABLE", message: "이미지 저장소가 아직 연결되지 않았습니다." };
+    throw { status: 503, code: "MEDIA_UNAVAILABLE", message: "미디어 저장소가 아직 연결되지 않았습니다." };
   }
   return env.WEDDING_MEDIA;
 }
@@ -863,7 +894,7 @@ async function reserveMediaStorage(db, { mediaId, slot, totalBytes }) {
      WHERE (SELECT COALESCE(SUM(total_bytes), 0) FROM invitation_media_sets WHERE status IN ('reserved', 'stored')) + ? <= ?`,
   ).bind(mediaId, slot, totalBytes, createdAt, totalBytes, MEDIA_STORAGE_LIMIT_BYTES).run();
   if (!result?.meta?.changes) {
-    throw { status: 507, code: "MEDIA_STORAGE_LIMIT", message: "사진 저장 공간 2GB 한도에 도달했습니다. 기존 사진 정리 후 다시 시도해 주세요." };
+    throw { status: 507, code: "MEDIA_STORAGE_LIMIT", message: "미디어 저장 공간 2GB 한도에 도달했습니다. 기존 미디어 정리 후 다시 시도해 주세요." };
   }
 }
 
@@ -938,21 +969,145 @@ async function uploadInvitationMedia(request, env) {
   }, 201);
 }
 
-async function getInvitationMedia(env, url) {
+function hasMpegFrameHeader(bytes) {
+  if (bytes.length < 4 || bytes[0] !== 0xff || (bytes[1] & 0xe0) !== 0xe0) return false;
+  const version = bytes[1] & 0x18;
+  const layer = bytes[1] & 0x06;
+  const bitrate = bytes[2] & 0xf0;
+  const sampleRate = bytes[2] & 0x0c;
+  return version !== 0x08 && layer !== 0 && bitrate !== 0 && bitrate !== 0xf0 && sampleRate !== 0x0c;
+}
+
+async function hasMp3Signature(file) {
+  const header = new Uint8Array(await file.slice(0, 10).arrayBuffer());
+  let frameOffset = 0;
+  if (header.length >= 10 && header[0] === 0x49 && header[1] === 0x44 && header[2] === 0x33) {
+    const validId3 = header[3] >= 2
+      && header[3] <= 4
+      && header[4] !== 0xff
+      && header.slice(6, 10).every((value) => value < 0x80);
+    if (!validId3) return false;
+    const tagSize = (header[6] << 21) | (header[7] << 14) | (header[8] << 7) | header[9];
+    const footerSize = header[3] === 4 && (header[5] & 0x10) !== 0 ? 10 : 0;
+    frameOffset = 10 + tagSize + footerSize;
+  }
+  if (frameOffset + 4 > file.size) return false;
+  const frame = new Uint8Array(await file.slice(frameOffset, frameOffset + 4).arrayBuffer());
+  return hasMpegFrameHeader(frame);
+}
+
+async function uploadInvitationAudio(request, env) {
+  requireSameOrigin(request);
+  await requireAdminEmail(request, env);
+  const db = requireContentDatabase(env);
+  const length = Number(request.headers.get("content-length") || 0);
+  if (length > MAX_MEDIA_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "MP3 파일은 25MB 이하만 업로드할 수 있습니다.");
+  const bucket = requireMediaBucket(env);
+  const form = await request.formData();
+  const file = form.get("file");
+  if (!validUpload(file, ["audio/mpeg"], MAX_AUDIO_FILE_BYTES)) {
+    return apiError(400, "INVALID_AUDIO", "MP3(audio/mpeg) 파일만 25MB 이하로 업로드할 수 있습니다.");
+  }
+  if (!await hasMp3Signature(file)) {
+    return apiError(400, "INVALID_AUDIO_SIGNATURE", "파일 내용이 올바른 MP3 형식이 아닙니다.");
+  }
+  const mediaId = crypto.randomUUID();
+  const key = `invitation/${mediaId}/background-music/track.mp3`;
+  await reserveMediaStorage(db, { mediaId, slot: "background-music", totalBytes: file.size });
+  try {
+    await bucket.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: "audio/mpeg" } });
+    await commitMediaStorage(db, mediaId);
+  } catch (error) {
+    await Promise.allSettled([
+      typeof bucket.delete === "function" ? bucket.delete(key) : Promise.resolve(),
+      releaseMediaStorage(db, mediaId),
+    ]);
+    throw error;
+  }
+  return json({
+    mediaId,
+    usage: await getMediaUsageFromDatabase(db),
+    audio: {
+      src: `${MEDIA_API_PREFIX}/${key}`,
+      mimeType: "audio/mpeg",
+      sizeBytes: file.size,
+    },
+  }, 201);
+}
+
+function parseByteRange(value, size) {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2]) || size < 1) return false;
+  let start;
+  let end;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength < 1) return false;
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) return false;
+    end = Math.min(end, size - 1);
+  }
+  return { start, end, length: end - start + 1 };
+}
+
+function immutableMediaHeaders(object, contentType) {
+  const headers = new Headers({
+    "content-type": contentType,
+    "cache-control": "public, max-age=31536000, immutable",
+    "x-content-type-options": "nosniff",
+  });
+  const etag = object?.httpEtag || object?.etag;
+  if (etag) headers.set("etag", etag);
+  return headers;
+}
+
+async function getInvitationMedia(request, env, url) {
   const bucket = requireMediaBucket(env);
   const key = decodeURIComponent(url.pathname.slice(`${MEDIA_API_PREFIX}/`.length));
-  if (!/^invitation\/[a-f0-9-]{36}\/[a-z0-9-]{1,40}\/(?:480|960)\.webp$/.test(key)) {
-    return apiError(404, "MEDIA_NOT_FOUND", "이미지를 찾을 수 없습니다.");
+  const isImage = /^invitation\/[a-f0-9-]{36}\/[a-z0-9-]{1,40}\/(?:480|960)\.webp$/.test(key);
+  const isAudio = /^invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3$/.test(key);
+  if (!isImage && !isAudio) {
+    return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
+  }
+  if (isAudio) {
+    if (typeof bucket.head !== "function") {
+      throw { status: 503, code: "MEDIA_UNAVAILABLE", message: "미디어 스트리밍 저장소가 아직 연결되지 않았습니다." };
+    }
+    const metadata = await bucket.head(key);
+    if (!metadata) return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
+    const headers = immutableMediaHeaders(metadata, "audio/mpeg");
+    headers.set("accept-ranges", "bytes");
+    const size = Number(metadata.size) || 0;
+    const range = parseByteRange(request.headers.get("range"), size);
+    if (range === false) {
+      headers.set("content-range", `bytes */${size}`);
+      return new Response(null, { status: 416, headers });
+    }
+    if (request.method === "HEAD") {
+      headers.set("content-length", String(size));
+      return new Response(null, { headers });
+    }
+    if (range) {
+      const object = await bucket.get(key, { range: { offset: range.start, length: range.length } });
+      if (!object) return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
+      headers.set("content-length", String(range.length));
+      headers.set("content-range", `bytes ${range.start}-${range.end}/${size}`);
+      return new Response(object.body, { status: 206, headers });
+    }
+    const object = await bucket.get(key);
+    if (!object) return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
+    headers.set("content-length", String(size));
+    return new Response(object.body, { headers });
   }
   const object = await bucket.get(key);
-  if (!object) return apiError(404, "MEDIA_NOT_FOUND", "이미지를 찾을 수 없습니다.");
-  return new Response(object.body, {
-    headers: {
-      "content-type": object.httpMetadata?.contentType || "image/webp",
-      "cache-control": "public, max-age=31536000, immutable",
-      "x-content-type-options": "nosniff",
-      etag: object.httpEtag || object.etag,
-    },
+  if (!object) return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
+  return new Response(request.method === "HEAD" ? null : object.body, {
+    headers: immutableMediaHeaders(object, object.httpMetadata?.contentType || "image/webp"),
   });
 }
 
@@ -972,11 +1127,14 @@ async function handleContent(request, env, url) {
     if (url.pathname === `${ADMIN_API_PREFIX}/media` && request.method === "POST") {
       return await uploadInvitationMedia(request, env);
     }
+    if (url.pathname === `${ADMIN_API_PREFIX}/media/audio` && request.method === "POST") {
+      return await uploadInvitationAudio(request, env);
+    }
     if (url.pathname === `${ADMIN_API_PREFIX}/media/usage` && request.method === "GET") {
       return await getAdminMediaUsage(request, env);
     }
-    if (url.pathname.startsWith(`${MEDIA_API_PREFIX}/`) && request.method === "GET") {
-      return await getInvitationMedia(env, url);
+    if (url.pathname.startsWith(`${MEDIA_API_PREFIX}/`) && ["GET", "HEAD"].includes(request.method)) {
+      return await getInvitationMedia(request, env, url);
     }
     return apiError(404, "NOT_FOUND", "요청한 초대장 콘텐츠 경로가 없습니다.");
   } catch (error) {
@@ -1018,8 +1176,17 @@ export default {
       return withSearchPrivacy(await handleContent(request, env, url), env);
     }
 
+    const redirectsLegacyAdmin = env.ADMIN_CONTENT_REDIRECT_ENABLED === "true"
+      && url.pathname === LEGACY_ADMIN_CONTENT_PAGE
+      && ["GET", "HEAD"].includes(request.method);
+    if (redirectsLegacyAdmin) {
+      const canonicalUrl = new URL(request.url);
+      canonicalUrl.pathname = ADMIN_CONTENT_PAGE;
+      return withSearchPrivacy(Response.redirect(canonicalUrl.toString(), 308), env);
+    }
+
     const acceptsHtml = request.headers.get("accept")?.includes("text/html");
-    const servesAdminShell = ["/admin/content", "/admin/guestbook"].includes(url.pathname)
+    const servesAdminShell = [ADMIN_CONTENT_PAGE, LEGACY_ADMIN_CONTENT_PAGE, "/admin/guestbook"].includes(url.pathname)
       && acceptsHtml
       && ["GET", "HEAD"].includes(request.method);
 

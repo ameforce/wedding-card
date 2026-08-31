@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import worker from "../worker/index.js";
+import worker, { __test } from "../worker/index.js";
 import { WEDDING_PHOTOS, weddingContent } from "../src/content.js";
 
 function request(path, init = {}) {
@@ -151,10 +151,39 @@ function invitationDatabase() {
 }
 
 function confirmedDocument() {
-  const document = structuredClone({ schemaVersion: 1, content: weddingContent, photos: WEDDING_PHOTOS });
+  const document = structuredClone({ schemaVersion: 2, content: weddingContent, photos: WEDDING_PHOTOS });
   document.content.isDesignPlaceholder = false;
   document.content.unconfirmedContent = [];
   return document;
+}
+
+function memoryMediaBucket() {
+  const objects = new Map();
+  return {
+    objects,
+    async put(key, value, options) {
+      objects.set(key, { value: new Uint8Array(value), httpMetadata: options.httpMetadata, etag: `etag-${objects.size}` });
+    },
+    async head(key) {
+      const object = objects.get(key);
+      return object ? { size: object.value.byteLength, httpMetadata: object.httpMetadata, etag: object.etag } : null;
+    },
+    async get(key, options = {}) {
+      const object = objects.get(key);
+      if (!object) return null;
+      const offset = options.range?.offset ?? 0;
+      const length = options.range?.length ?? object.value.byteLength;
+      return {
+        body: object.value.slice(offset, offset + length),
+        size: object.value.byteLength,
+        httpMetadata: object.httpMetadata,
+        etag: object.etag,
+      };
+    },
+    async delete(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+    },
+  };
 }
 
 test("public content fails closed until an invitation revision is published", async () => {
@@ -330,6 +359,24 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
   }
 });
 
+test("content validation dual-reads schema v1, requires v2 writes, and validates music credits", () => {
+  const legacy = confirmedDocument();
+  legacy.schemaVersion = 1;
+  assert.doesNotThrow(() => __test.validateInvitationDocument(legacy));
+  assert.throws(() => __test.validateInvitationDocument(legacy, { write: true }), (error) => {
+    assert.equal(error.code, "UNSUPPORTED_CONTENT_SCHEMA");
+    return true;
+  });
+
+  const current = confirmedDocument();
+  current.content.music.sourceUrl = "http://music.example.test/track";
+  assert.throws(() => __test.validateInvitationDocument(current), (error) => {
+    assert.equal(error.code, "INVALID_CONTENT");
+    assert.match(error.message, /HTTPS/);
+    return true;
+  });
+});
+
 test("content publishing rejects unconfirmed or search-indexable documents", async () => {
   const db = invitationDatabase();
   const fixture = await accessFixture();
@@ -432,6 +479,153 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(usageResponse.status, 200);
     assert.equal((await usageResponse.json()).mediaSets, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Access-authenticated MP3 uploads use immutable private keys and stream GET, HEAD, and byte ranges", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const bucket = memoryMediaBucket();
+  const bytes = new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfb, 0x90, 0x64]);
+  const form = new FormData();
+  form.set("file", new File([bytes], "track.mp3", { type: "audio/mpeg" }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: form,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 201);
+    const payload = await response.json();
+    assert.match(payload.audio.src, /^\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3$/);
+    assert.equal(payload.audio.mimeType, "audio/mpeg");
+    assert.equal(payload.audio.sizeBytes, bytes.byteLength);
+    assert.equal(payload.usage.usedBytes, bytes.byteLength);
+    assert.equal(bucket.objects.size, 1);
+
+    const head = await worker.fetch(request(payload.audio.src, { method: "HEAD" }), { WEDDING_MEDIA: bucket });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get("content-type"), "audio/mpeg");
+    assert.equal(head.headers.get("content-length"), String(bytes.byteLength));
+    assert.equal(head.headers.get("accept-ranges"), "bytes");
+    assert.equal(head.headers.get("cache-control"), "public, max-age=31536000, immutable");
+    assert.equal((await head.arrayBuffer()).byteLength, 0);
+
+    const ranged = await worker.fetch(request(payload.audio.src, { method: "GET", headers: { range: "bytes=3-5" } }), { WEDDING_MEDIA: bucket });
+    assert.equal(ranged.status, 206);
+    assert.equal(ranged.headers.get("content-range"), `bytes 3-5/${bytes.byteLength}`);
+    assert.deepEqual(new Uint8Array(await ranged.arrayBuffer()), bytes.slice(3, 6));
+
+    const invalidRange = await worker.fetch(request(payload.audio.src, { method: "GET", headers: { range: "bytes=99-100" } }), { WEDDING_MEDIA: bucket });
+    assert.equal(invalidRange.status, 416);
+    assert.equal(invalidRange.headers.get("content-range"), `bytes */${bytes.byteLength}`);
+
+    const full = await worker.fetch(request(payload.audio.src, { method: "GET" }), { WEDDING_MEDIA: bucket });
+    assert.equal(full.status, 200);
+    assert.deepEqual(new Uint8Array(await full.arrayBuffer()), bytes);
+
+    const missing = await worker.fetch(request("/api/media/invitation/123e4567-e89b-12d3-a456-426614174000/background-music/track.mp3", { method: "GET" }), { WEDDING_MEDIA: bucket });
+    assert.equal(missing.status, 404);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("MP3 administration fails closed on origin, Access, D1, and R2 boundaries", async () => {
+  const fixture = await accessFixture();
+  const form = () => {
+    const value = new FormData();
+    value.set("file", new File([new Uint8Array([0x49, 0x44, 0x33, 1])], "track.mp3", { type: "audio/mpeg" }));
+    return value;
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const noAccess = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+      method: "POST",
+      headers: { origin: "https://example.test" },
+      body: form(),
+    }), { GUESTBOOK_DB: invitationDatabase(), WEDDING_MEDIA: memoryMediaBucket() });
+    assert.equal(noAccess.status, 503);
+    assert.equal((await noAccess.json()).code, "ADMIN_AUTH_UNAVAILABLE");
+
+    const wrongOrigin = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+      method: "POST",
+      headers: { origin: "https://attacker.example", "cf-access-jwt-assertion": fixture.assertion },
+      body: form(),
+    }), { ...fixture.env, GUESTBOOK_DB: invitationDatabase(), WEDDING_MEDIA: memoryMediaBucket() });
+    assert.equal(wrongOrigin.status, 403);
+
+    const noDatabase = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: form(),
+    }), { ...fixture.env, WEDDING_MEDIA: memoryMediaBucket() });
+    assert.equal(noDatabase.status, 503);
+    assert.equal((await noDatabase.json()).code, "CONTENT_UNAVAILABLE");
+
+    const noBucket = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: form(),
+    }), { ...fixture.env, GUESTBOOK_DB: invitationDatabase() });
+    assert.equal(noBucket.status, 503);
+    assert.equal((await noBucket.json()).code, "MEDIA_UNAVAILABLE");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("MP3 upload rejects spoofed files and shared-quota overflow before R2 writes", async () => {
+  const fixture = await accessFixture();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const spoofDb = invitationDatabase();
+    const spoofBucket = memoryMediaBucket();
+    const spoofForm = new FormData();
+    spoofForm.set("file", new File([new Uint8Array([1, 2, 3, 4])], "spoof.mp3", { type: "audio/mpeg" }));
+    const spoofResponse = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: spoofForm,
+    }), { ...fixture.env, GUESTBOOK_DB: spoofDb, WEDDING_MEDIA: spoofBucket });
+    assert.equal(spoofResponse.status, 400);
+    assert.equal((await spoofResponse.json()).code, "INVALID_AUDIO_SIGNATURE");
+    assert.equal(spoofBucket.objects.size, 0);
+
+    const id3OnlyForm = new FormData();
+    id3OnlyForm.set("file", new File([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])], "id3-only.mp3", { type: "audio/mpeg" }));
+    const id3OnlyResponse = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: id3OnlyForm,
+    }), { ...fixture.env, GUESTBOOK_DB: invitationDatabase(), WEDDING_MEDIA: memoryMediaBucket() });
+    assert.equal(id3OnlyResponse.status, 400);
+    assert.equal((await id3OnlyResponse.json()).code, "INVALID_AUDIO_SIGNATURE");
+
+    const quotaDb = invitationDatabase();
+    quotaDb.mediaSets.set("existing-media", {
+      id: "existing-media",
+      slot: "pastel-hero",
+      total_bytes: 2 * 1024 * 1024 * 1024 - 4,
+      status: "stored",
+    });
+    const quotaBucket = memoryMediaBucket();
+    const quotaForm = new FormData();
+    quotaForm.set("file", new File([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfb, 0x90, 0x64])], "track.mp3", { type: "audio/mpeg" }));
+    const quotaResponse = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: quotaForm,
+    }), { ...fixture.env, GUESTBOOK_DB: quotaDb, WEDDING_MEDIA: quotaBucket });
+    assert.equal(quotaResponse.status, 507);
+    assert.equal((await quotaResponse.json()).code, "MEDIA_STORAGE_LIMIT");
+    assert.equal(quotaBucket.objects.size, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

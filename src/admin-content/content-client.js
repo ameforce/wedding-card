@@ -3,12 +3,17 @@ import {
   cloneContentDocument,
   createContentDocument,
   normalizeContentDocument,
+  validateMusicContent,
 } from "./content-document.js";
 
 export const LOCAL_REVIEW_STORAGE_KEY = "wedding-card.content-review.v1";
 export const LOCAL_REVIEW_EVENT = "wedding-card:content-review-updated";
 export const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+export const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
 export const ACCESS_LOGOUT_PATH = "/cdn-cgi/access/logout";
+const LOCAL_AUDIO_REFERENCE_PREFIX = "local-review-audio:";
+const LOCAL_AUDIO_DATABASE_NAME = "wedding-card.content-review-media.v1";
+const LOCAL_AUDIO_STORE_NAME = "audio";
 
 export function isAdminAuthRequiredError(error) {
   return error?.code === "ADMIN_AUTH_REQUIRED" || error?.status === 401;
@@ -138,12 +143,73 @@ async function resizeWebp(file, maxWidth) {
 }
 
 function blobAsDataUrl(blob) {
+  if (typeof FileReader === "undefined") {
+    return blob.arrayBuffer().then((buffer) => {
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+      return `data:${blob.type};base64,${btoa(binary)}`;
+    });
+  }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("로컬 미리보기 이미지를 읽지 못했습니다."));
+    reader.onerror = () => reject(new Error("로컬 미리보기 파일을 읽지 못했습니다."));
     reader.readAsDataURL(blob);
   });
+}
+
+function createMemoryAudioStore() {
+  const values = new Map();
+  return {
+    async put(id, blob) { values.set(id, blob); },
+    async get(id) { return values.get(id) ?? null; },
+  };
+}
+
+function createLocalAudioStore(indexedDb = globalThis.indexedDB) {
+  if (!indexedDb?.open) return createMemoryAudioStore();
+  let databasePromise;
+  const database = () => {
+    if (databasePromise) return databasePromise;
+    databasePromise = new Promise((resolve, reject) => {
+      const request = indexedDb.open(LOCAL_AUDIO_DATABASE_NAME, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(LOCAL_AUDIO_STORE_NAME)) {
+          request.result.createObjectStore(LOCAL_AUDIO_STORE_NAME);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("로컬 MP3 저장소를 열지 못했습니다."));
+    });
+    return databasePromise;
+  };
+  const request = async (mode, operation) => {
+    const db = await database();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(LOCAL_AUDIO_STORE_NAME, mode);
+      const result = operation(transaction.objectStore(LOCAL_AUDIO_STORE_NAME));
+      result.onsuccess = () => resolve(result.result ?? null);
+      result.onerror = () => reject(result.error || new Error("로컬 MP3 저장소 요청이 실패했습니다."));
+      transaction.onabort = () => reject(transaction.error || new Error("로컬 MP3 저장을 완료하지 못했습니다."));
+    });
+  };
+  return {
+    async put(id, blob) { await request("readwrite", (store) => store.put(blob, id)); },
+    async get(id) { return request("readonly", (store) => store.get(id)); },
+  };
+}
+
+function assertValidMusic(document, options) {
+  const errors = validateMusicContent(document?.content?.music, options);
+  const firstError = Object.values(errors)[0];
+  if (firstError) throw new Error(firstError);
+}
+
+function validAudioFile(file) {
+  if (!file || file.type !== "audio/mpeg") throw new Error("MP3(audio/mpeg) 파일만 업로드할 수 있습니다.");
+  if (file.size < 1 || file.size > MAX_AUDIO_FILE_BYTES) throw new Error("MP3 파일은 25MB 이하만 업로드할 수 있습니다.");
+  return file;
 }
 
 async function optimizedFiles(file) {
@@ -164,9 +230,42 @@ export function createLocalReviewContentAdapter({
   storage = defaultStorage(),
   eventTarget = defaultEventTarget(),
   now = () => new Date().toISOString(),
+  audioStore = createLocalAudioStore(),
 } = {}) {
   let state;
   const listeners = new Set();
+  const sourceReferences = new Map();
+  const referenceSources = new Map();
+
+  const hydrateDocument = async (document) => {
+    const reference = document?.content?.music?.src;
+    if (!reference?.startsWith(LOCAL_AUDIO_REFERENCE_PREFIX)) return cloneContentDocument(document);
+    let source = referenceSources.get(reference);
+    if (!source) {
+      const blob = await audioStore.get(reference.slice(LOCAL_AUDIO_REFERENCE_PREFIX.length));
+      if (!blob) throw new Error("저장된 로컬 MP3 파일을 찾을 수 없습니다. 파일을 다시 선택해 주세요.");
+      source = URL.createObjectURL(blob);
+      referenceSources.set(reference, source);
+      sourceReferences.set(source, reference);
+    }
+    const hydrated = cloneContentDocument(document);
+    hydrated.content.music.src = source;
+    return hydrated;
+  };
+
+  const presentState = async (current) => {
+    const copy = copyState(current);
+    copy.draft = await hydrateDocument(copy.draft);
+    copy.published = await hydrateDocument(copy.published);
+    return copy;
+  };
+
+  const serializeDocument = (document) => {
+    const serialized = cloneContentDocument(document);
+    const reference = sourceReferences.get(serialized.content.music.src);
+    if (reference) serialized.content.music.src = reference;
+    return serialized;
+  };
 
   const load = () => {
     if (state) return state;
@@ -202,15 +301,16 @@ export function createLocalReviewContentAdapter({
   return {
     mode: "local-review",
     async getAdminState() {
-      return copyState(load());
+      return presentState(load());
     },
     async getPublicContent() {
       const current = load();
+      const published = await hydrateDocument(current.published);
       return {
         source: "local-review-published",
         revisionId: current.publishedRevisionId,
         publishedAt: null,
-        content: applyContentDocument(current.published, staticContent, { allowLocalPreview: true }),
+        content: applyContentDocument(published, staticContent, { allowLocalPreview: true }),
       };
     },
     async getMediaUsage() {
@@ -218,13 +318,15 @@ export function createLocalReviewContentAdapter({
     },
     async saveDraft(document) {
       const current = load();
+      const serialized = serializeDocument(document);
+      assertValidMusic(serialized, { allowLocalPreview: true });
       state = {
         ...current,
         draftRevisionId: localRevision("local-draft", now),
-        draft: normalizeContentDocument(document, staticContent, { allowLocalPreview: true }),
+        draft: normalizeContentDocument(serialized, staticContent, { allowLocalPreview: true }),
       };
       persist();
-      return copyState(state);
+      return presentState(state);
     },
     async publish(revisionId) {
       const current = load();
@@ -237,7 +339,7 @@ export function createLocalReviewContentAdapter({
         published: cloneContentDocument(current.draft),
       };
       persist();
-      return copyState(state);
+      return presentState(state);
     },
     async uploadPhoto({ file, alt, position }) {
       const { large } = await optimizedFiles(file);
@@ -247,6 +349,23 @@ export function createLocalReviewContentAdapter({
           alt,
           position,
           sizes: "(min-width: 768px) 430px, 100vw",
+        },
+        usage: emptyMediaUsage(true),
+      };
+    },
+    async uploadAudio({ file }) {
+      validAudioFile(file);
+      const id = crypto.randomUUID();
+      const reference = `${LOCAL_AUDIO_REFERENCE_PREFIX}${id}`;
+      await audioStore.put(id, file);
+      const source = URL.createObjectURL(file);
+      sourceReferences.set(source, reference);
+      referenceSources.set(reference, source);
+      return {
+        audio: {
+          src: source,
+          mimeType: "audio/mpeg",
+          sizeBytes: file.size,
         },
         usage: emptyMediaUsage(true),
       };
@@ -296,6 +415,7 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
       return requestJson(fetchImpl, "/api/admin/media/usage");
     },
     async saveDraft(document) {
+      assertValidMusic(document, { allowLocalPreview: false });
       const normalized = normalizeContentDocument(document, staticContent);
       const payload = await requestJson(fetchImpl, "/api/admin/content", {
         method: "PUT",
@@ -331,6 +451,19 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw createRequestError(response, payload);
       return { photo: payload.photo, usage: payload.usage };
+    },
+    async uploadAudio({ file }) {
+      validAudioFile(file);
+      const form = new FormData();
+      form.set("file", file);
+      const response = await fetchImpl("/api/admin/media/audio", {
+        method: "POST",
+        credentials: "same-origin",
+        body: form,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw createRequestError(response, payload);
+      return { audio: payload.audio, usage: payload.usage };
     },
     subscribe() {
       return () => {};
