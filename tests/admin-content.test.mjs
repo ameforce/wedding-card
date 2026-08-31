@@ -4,11 +4,17 @@ import test from "node:test";
 import { weddingContent } from "../src/content.js";
 import {
   applyContentDocument,
+  buildPublishDiff,
+  cloneContentDocument,
   CONTENT_SCHEMA_VERSION,
   createContentDocument,
+  deriveEventDisplay,
   normalizeContentDocument,
+  serializeContentDocument,
+  validateEditableContentDocument,
   validateMusicContent,
 } from "../src/admin-content/content-document.js";
+
 import {
   ACCESS_LOGOUT_PATH,
   createContentAdapter,
@@ -23,6 +29,17 @@ import {
   PUBLIC_CONTENT_TIMEOUT_MS,
   readPublicBootstrap,
 } from "../src/admin-content/public-bootstrap.js";
+
+test("strict serialization preserves invalid values and reports field paths", () => {
+  const invalid = createContentDocument(weddingContent);
+  invalid.content.couple.groom = "";
+  assert.throws(() => serializeContentDocument(invalid), (error) => {
+    assert.equal(error.code, "INVALID_CONTENT");
+    assert.equal(typeof error.fieldErrors["신랑 이름"], "string");
+    assert.equal(invalid.content.couple.groom, "");
+    return true;
+  });
+});
 
 function bootstrapRoot(payload, schemaVersion = "1") {
   const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
@@ -327,24 +344,36 @@ test("production admin requests preserve Access authentication failures for re-l
 
 test("the app exposes the canonical content admin route and runtime content provider", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const shellSource = await readFile(new URL("../src/admin-content/AdminShell.jsx", import.meta.url), "utf8");
   assert.match(source, /\["\/admin", "\/admin\/content"\]\.includes\(window\.location\.pathname\)/);
   assert.match(source, /pathname === "\/admin\/guestbook"/);
-  assert.match(source, /href="\/admin">콘텐츠 관리<\/a>/);
+  assert.match(source, /import \{ GuestbookAdmin \}/);
+  assert.match(shellSource, /href: "\/admin", label: "콘텐츠"/);
   assert.match(source, /WeddingRuntimeContext\.Provider/);
   assert.match(source, /usePublicInvitationContent\(weddingContent\)/);
 });
 
-test("the admin UI labels local review and keeps publish behind an explicit saved draft", async () => {
+test("the admin UI uses apply, automatic publish review, dirty guard, fixed preview, and responsive shared shell", async () => {
   const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  const shellSource = await readFile(new URL("../src/admin-content/AdminShell.jsx", import.meta.url), "utf8");
   const previewSource = await readFile(new URL("../src/admin-content/public-content.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(source, /로컬 검토 모드/);
-  assert.match(source, /임시 저장/);
-  assert.match(source, /이 초안을 공개/);
-  assert.match(source, /dirty \|\| !draftRevisionId/);
+  assert.match(source, /임시 적용/);
+  assert.match(source, /previewSelectorForPath/);
+  assert.match(source, /전체 미리보기 열기/);
+  assert.match(source, /PublishReviewDialog/);
+  assert.match(source, /미적용 변경사항은 자동으로 임시 적용한 뒤 게시/);
+  assert.match(source, /beforeunload/);
   assert.match(source, /setDraftRevisionId\(state\.draftRevisionId \|\| null\)/);
-  assert.match(source, /setPublishedRevisionId\(published\.revisionId \|\| draftRevisionId\)/);
-  assert.match(source, /미저장 변경.*저장된 초안.*공개본/s);
+  assert.match(source, /await adapter\.publish\(revisionId\)/);
+  assert.match(source, /await load\(\)/);
+  assert.match(source, /미적용 변경.*초안.*공개본/s);
+  assert.match(source, /width="390"/);
+  assert.match(source, /validateEditableContentDocument/);
+  assert.match(source, /buildPublishDiff/);
+  assert.match(source, /adapter\.republish/);
+  assert.match(shellSource, /function AdminShell/);
   assert.match(source, /CONTENT_PREVIEW_READY_MESSAGE_TYPE/);
   assert.match(previewSource, /event\.source !== window\.parent/);
   assert.match(previewSource, /source:\s*"admin-live-preview"/);
@@ -365,7 +394,8 @@ test("the admin UI labels local review and keeps publish behind an explicit save
   assert.match(source, /Google 계정으로 다시 로그인/);
   assert.match(source, /authRequired \? <AdminReauthentication \/>/);
   assert.match(source, /ACCESS_LOGOUT_PATH/);
-  assert.match(styles, /@media \(max-width: 1120px\)\s*\{[\s\S]*?\.content-admin-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  assert.match(styles, /@media \(max-width: 1024px\)\s*\{[\s\S]*?\.content-admin-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)/);
+  assert.match(styles, /\.content-admin-preview iframe\s*\{[^}]*width:\s*390px !important/);
 });
 
 test("public music controls and credits resolve from runtime content and reset on track replacement", async () => {
@@ -381,11 +411,53 @@ test("public music controls and credits resolve from runtime content and reset o
 });
 
 test("both administrator screens expose logout and block stale sessions behind re-authentication", async () => {
-  const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
-  assert.match(appSource, /guestbook-admin-nav/);
-  assert.match(appSource, /status: authRequired \? "auth-required"/);
-  assert.match(appSource, /Google 계정으로 다시 로그인/);
-  assert.match(appSource, /href=\{ACCESS_LOGOUT_PATH\}>로그아웃/);
+  const shellSource = await readFile(new URL("../src/admin-content/AdminShell.jsx", import.meta.url), "utf8");
+  const guestbookSource = await readFile(new URL("../src/admin-content/GuestbookAdmin.jsx", import.meta.url), "utf8");
+  const contentSource = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  assert.match(shellSource, /href=\{ACCESS_LOGOUT_PATH\}>로그아웃/);
+  assert.match(guestbookSource, /"auth-required"/);
+  assert.match(guestbookSource, /Google 계정으로 다시 로그인/);
+  assert.match(contentSource, /관리자 인증이 필요합니다/);
+});
+
+test("event labels are strictly derived and publish review reports changed sections", () => {
+  assert.deepEqual(deriveEventDisplay("2026-12-27", "15:00"), {
+    dateLabel: "2026년 12월 27일",
+    day: "일요일",
+    time: "오후 3시",
+  });
+  assert.equal(deriveEventDisplay("2026-02-31", "15:00"), null);
+  const published = createContentDocument(weddingContent);
+  const editing = createContentDocument(weddingContent);
+  editing.content.hero.introLines[1] = "두 사람의 새로운 시작입니다";
+  editing.content.event.isoDate = "2026-12-28";
+  Object.assign(editing.content.event, deriveEventDisplay(editing.content.event.isoDate, editing.content.event.startTime24h));
+  const diff = buildPublishDiff(editing, published);
+  assert.deepEqual(diff.sections, ["상단 인사", "예식 정보"]);
+  assert.equal(diff.changes.some((change) => change.label === "예식 날짜"), true);
+  assert.deepEqual(validateEditableContentDocument(editing), {});
+  editing.content.event.day = "일요일";
+  assert.match(validateEditableContentDocument(editing)["예식 일시"], /파생/);
+});
+
+test("publish review includes every editable parking field and material media details", () => {
+  const published = createContentDocument(weddingContent);
+  const current = cloneContentDocument(published);
+  current.content.transit.parkingRegistrationLocation = "변경된 등록 위치";
+  current.content.transit.parkingRegistration = "변경된 등록 안내";
+  current.content.music.licenseLabel = "변경된 라이선스";
+  current.photos.pastel.gallery[0].position = "40% 60%";
+
+  const diff = buildPublishDiff(current, published);
+  assert.deepEqual(
+    diff.changes.filter((change) => change.section === "교통과 주차").map((change) => change.label),
+    ["주차 등록 위치", "주차 등록 안내"],
+  );
+  const music = diff.changes.find((change) => change.label === "배경 음악");
+  assert.match(music.current, /변경된 라이선스/);
+  const gallery = diff.changes.find((change) => change.label === "갤러리");
+  assert.match(gallery.current, /40% 60%/);
+  assert.doesNotMatch(gallery.current, /\[object Object\]/);
 });
 
 test("applied admin content keeps full runtime photo objects", () => {

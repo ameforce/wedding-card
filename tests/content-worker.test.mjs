@@ -395,6 +395,18 @@ test("content publishing rejects unconfirmed or search-indexable documents", asy
     assert.equal(unsafeResponse.status, 400);
     assert.equal((await unsafeResponse.json()).code, "SEARCH_PRIVACY_REQUIRED");
 
+    const invalid = confirmedDocument();
+    invalid.content.couple.groom = "";
+    const invalidResponse = await worker.fetch(request("/api/admin/content", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ document: invalid }),
+    }), env);
+    assert.equal(invalidResponse.status, 400);
+    const invalidPayload = await invalidResponse.json();
+    assert.equal(invalidPayload.code, "INVALID_CONTENT");
+    assert.equal(typeof invalidPayload.fieldErrors["content.couple.groom"], "string");
+
     const unconfirmed = confirmedDocument();
     unconfirmed.content.unconfirmedContent = [{ key: "publishing.og", label: "OG" }];
     unconfirmed.content.isDesignPlaceholder = true;

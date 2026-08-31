@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,9 +13,14 @@ import {
 test("all checked-in D1 migrations are additive", async () => {
   const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
   assert.deepEqual(await checkMigrationDirectory(resolve(root, "migrations")), {
-    fileCount: 5,
-    statementCount: 13,
+    fileCount: 6,
+    statementCount: 14,
   });
+});
+
+test("the admin guestbook keyset order has a matching composite D1 index", async () => {
+  const migration = await readFile(new URL("../migrations/0006_guestbook_admin_keyset.sql", import.meta.url), "utf8");
+  assert.match(migration, /ON guestbook_entries \(created_at DESC, id DESC\)/);
 });
 
 test("the guard accepts the narrow additive migration forms", () => {

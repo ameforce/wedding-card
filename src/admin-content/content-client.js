@@ -3,6 +3,7 @@ import {
   cloneContentDocument,
   createContentDocument,
   normalizeContentDocument,
+  serializeContentDocument,
   validateMusicContent,
 } from "./content-document.js";
 
@@ -53,24 +54,44 @@ function fallbackPublicContent(staticContent) {
 
 function initialLocalState(staticContent) {
   const document = createContentDocument(staticContent);
+  const createdAt = new Date().toISOString();
   return {
     schemaVersion: 1,
     draftRevisionId: "local-draft-initial",
     publishedRevisionId: "local-published-initial",
     draft: document,
     published: document,
+    revisions: [
+      { id: "local-draft-initial", status: "draft", createdAt, publishedAt: null, document },
+      { id: "local-published-initial", status: "published", createdAt, publishedAt: createdAt, document },
+    ],
   };
 }
 
 function normalizeLocalState(value, staticContent) {
   if (!value || value.schemaVersion !== 1) return initialLocalState(staticContent);
   const fallback = initialLocalState(staticContent);
+  const draftRevisionId = typeof value.draftRevisionId === "string" ? value.draftRevisionId : fallback.draftRevisionId;
+  const publishedRevisionId = typeof value.publishedRevisionId === "string" ? value.publishedRevisionId : fallback.publishedRevisionId;
+  const draft = normalizeContentDocument(value.draft, staticContent, { allowLocalPreview: true });
+  const published = normalizeContentDocument(value.published, staticContent, { allowLocalPreview: true });
+  const createdAt = new Date().toISOString();
   return {
     schemaVersion: 1,
-    draftRevisionId: typeof value.draftRevisionId === "string" ? value.draftRevisionId : fallback.draftRevisionId,
-    publishedRevisionId: typeof value.publishedRevisionId === "string" ? value.publishedRevisionId : fallback.publishedRevisionId,
-    draft: normalizeContentDocument(value.draft, staticContent, { allowLocalPreview: true }),
-    published: normalizeContentDocument(value.published, staticContent, { allowLocalPreview: true }),
+    draftRevisionId,
+    publishedRevisionId,
+    draft,
+    published,
+    revisions: Array.isArray(value.revisions) ? value.revisions.slice(0, 20).map((revision) => ({
+      id: typeof revision.id === "string" ? revision.id : crypto.randomUUID(),
+      status: ["draft", "published", "archived"].includes(revision.status) ? revision.status : "archived",
+      createdAt: typeof revision.createdAt === "string" ? revision.createdAt : null,
+      publishedAt: typeof revision.publishedAt === "string" ? revision.publishedAt : null,
+      document: normalizeContentDocument(revision.document, staticContent, { allowLocalPreview: true }),
+    })) : [
+      { id: draftRevisionId, status: "draft", createdAt, publishedAt: null, document: draft },
+      { id: publishedRevisionId, status: "published", createdAt, publishedAt: createdAt, document: published },
+    ],
   };
 }
 
@@ -80,6 +101,7 @@ function copyState(state) {
     publishedRevisionId: state.publishedRevisionId,
     draft: cloneContentDocument(state.draft),
     published: cloneContentDocument(state.published),
+    history: (state.revisions || []).map(({ id, status, createdAt, publishedAt }) => ({ id, status, createdAt, publishedAt })),
   };
 }
 
@@ -100,6 +122,7 @@ function createRequestError(response, payload) {
   const error = new Error(payload?.message || "콘텐츠 요청을 처리하지 못했습니다.");
   error.status = response.status;
   error.code = typeof payload?.code === "string" ? payload.code : null;
+  error.fieldErrors = payload?.fieldErrors && typeof payload.fieldErrors === "object" ? payload.fieldErrors : null;
   return error;
 }
 
@@ -318,13 +341,23 @@ export function createLocalReviewContentAdapter({
     },
     async saveDraft(document) {
       const current = load();
-      const serialized = serializeDocument(document);
+      const serialized = serializeContentDocument(serializeDocument(document), { allowLocalPreview: true });
       assertValidMusic(serialized, { allowLocalPreview: true });
       state = {
         ...current,
         draftRevisionId: localRevision("local-draft", now),
         draft: normalizeContentDocument(serialized, staticContent, { allowLocalPreview: true }),
       };
+      state.revisions = [
+        {
+          id: state.draftRevisionId,
+          status: "draft",
+          createdAt: now(),
+          publishedAt: null,
+          document: cloneContentDocument(state.draft),
+        },
+        ...(current.revisions || []).map((revision) => revision.status === "draft" ? { ...revision, status: "archived" } : revision),
+      ].slice(0, 20);
       persist();
       return presentState(state);
     },
@@ -335,11 +368,32 @@ export function createLocalReviewContentAdapter({
       }
       state = {
         ...current,
-        publishedRevisionId: localRevision("local-published", now),
+        draftRevisionId: null,
+        publishedRevisionId: revisionId,
         published: cloneContentDocument(current.draft),
       };
+      const publishedAt = now();
+      state.revisions = (current.revisions || []).map((revision) => revision.id === revisionId
+        ? { ...revision, status: "published", publishedAt }
+        : revision.status === "published" ? { ...revision, status: "archived" } : revision);
       persist();
       return presentState(state);
+    },
+    async republish(revisionId) {
+      const current = load();
+      const target = (current.revisions || []).find((revision) => revision.id === revisionId);
+      if (!target || !["archived", "published"].includes(target.status)) throw new Error("다시 공개할 버전을 찾을 수 없습니다.");
+      const publishedAt = now();
+      state = {
+        ...current,
+        publishedRevisionId: revisionId,
+        published: cloneContentDocument(target.document),
+        revisions: current.revisions.map((revision) => revision.id === revisionId
+          ? { ...revision, status: "published", publishedAt }
+          : revision.status === "published" ? { ...revision, status: "archived" } : revision),
+      };
+      persist();
+      return { revisionId, publishedAt };
     },
     async uploadPhoto({ file, alt, position }) {
       const { large } = await optimizedFiles(file);
@@ -416,20 +470,26 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
     },
     async saveDraft(document) {
       assertValidMusic(document, { allowLocalPreview: false });
-      const normalized = normalizeContentDocument(document, staticContent);
+      const serialized = serializeContentDocument(document, { allowLocalPreview: false });
       const payload = await requestJson(fetchImpl, "/api/admin/content", {
         method: "PUT",
-        body: JSON.stringify({ document: normalized }),
+        body: JSON.stringify({ document: serialized }),
       });
       return {
         draftRevisionId: payload.draftRevisionId ?? payload.revisionId ?? null,
         publishedRevisionId: payload.publishedRevisionId ?? null,
-        draft: normalizeContentDocument(payload.draft ?? normalized, staticContent),
+        draft: normalizeContentDocument(payload.draft ?? serialized, staticContent),
         published: normalizeContentDocument(payload.published, staticContent),
       };
     },
     async publish(revisionId) {
       return requestJson(fetchImpl, "/api/admin/content/publish", {
+        method: "POST",
+        body: JSON.stringify({ revisionId }),
+      });
+    },
+    async republish(revisionId) {
+      return requestJson(fetchImpl, "/api/admin/content/rollback", {
         method: "POST",
         body: JSON.stringify({ revisionId }),
       });

@@ -336,3 +336,39 @@ final result: passed
 - `/admin` now exposes a restrained storage meter directly above the photo editors, showing used/limit/remaining capacity without exposing Cloudflare internals to ordinary visitors.
 - The production API reserves every immutable original/480/960 image set in D1 before writing to private R2 and rejects the request at the 2GiB project boundary.
 - The local review adapter clearly states that it does not consume Cloudflare storage; production retains the same photo editor layout and mobile input sizing.
+
+## Current admin workspace pass — 2026-08-31
+
+### Visual source and comparison
+
+- Corrected source of truth: `C:\Users\enmso\.codex\generated_images\01a05718-585c-7993-aafa-d168f76af6c1\exec-d98d927e-fc4c-4250-8a64-8d061ef72f70.png`.
+- Side-by-side comparison input: `tests/admin-ui-qa/revised-source-vs-implementation.png`.
+- Rendered evidence: `tests/admin-ui-qa/content-360.png`, `content-390.png`, `content-430.png`, `content-768.png`, `content-1440.png`, and `guestbook-1440-fail-closed.png`.
+- The implementation preserves the corrected navy-on-paper hierarchy, shared left navigation, compact editor density, version rail, automatic publish-review dialog, and desktop guestbook author/message/time anatomy.
+
+### Responsive and accessibility evidence
+
+- IAB checks passed at 360, 390, 430, 768, and 1440px: document width exactly matched viewport width with no horizontal overflow.
+- The public invitation iframe kept an exact computed and layout width of 390px at every breakpoint; only its visual scale changes inside the clipped preview surface.
+- Mobile renders the editor first and keeps a compact sticky focused preview; every visible navigation/action target measured at least 44px and all form controls computed at 16px. Desktop retains the three-column editor/preview/history composition.
+- Editing the venue field moved the iframe focus marker to the matching `.location-section`; the compact preview expanded into a fixed full-screen review surface and returned without covering or mutating form content.
+- Collapsible secondary sections reduce mobile traversal while keeping native keyboard-operable `details` controls. The visible form had no `aria-invalid` controls in the validated initial state.
+- The final IAB console contained no error or warning. Local Vite intentionally rendered the explicit fail-closed guestbook-unavailable state because no authenticated D1 administrator boundary was attached.
+
+### Workflow and data evidence
+
+- Browser interaction proved `미적용 변경 → 게시 → 게시 확인 → 자동 임시 적용 → 공개본`, including a one-section field diff and restoration of the temporary QA edit.
+- Date display strings are derived from ISO date and 24-hour time, and strict document validation rejects invalid or incomplete publishable contracts.
+- Guestbook administration supports NFKC-normalized 50-character search, all/7-day/30-day ranges, `totalCount`, `refreshedAt`, bounded limits, refresh, validated opaque composite keyset cursors, and load-more without overlapping rows.
+- Migration `0006_guestbook_admin_keyset.sql` adds the matching `(created_at DESC, id DESC)` D1 index. Administrator identity and D1 remain fail-closed.
+
+### Verification
+
+- `npm run lint`: passed.
+- Targeted admin/content/guestbook tests: 50/50 passed.
+- `npm run test:ui`: 69/69 passed.
+- `npm run test:sites`: 77/77 passed, including the 6-file/14-statement additive migration contract.
+- `npm run build`: passed and produced the Sites worker, hosting config, and bundled D1 migrations.
+- `npm run cloudflare:dry-run`: passed with D1, R2, both rate limiters, Static Assets, and Worker version metadata bound; no production deployment occurred.
+
+final result: passed

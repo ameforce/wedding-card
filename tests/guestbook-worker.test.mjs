@@ -93,6 +93,14 @@ function database() {
           return { success: true };
         },
         async first() {
+          if (sql.startsWith("SELECT COUNT(*) AS total")) {
+            let entries = [...rows.values()];
+            if (sql.includes("name LIKE")) {
+              const needle = String(values[0]).replaceAll("%", "").replaceAll("\\", "").toLowerCase();
+              entries = entries.filter((entry) => `${entry.name} ${entry.message}`.toLowerCase().includes(needle));
+            }
+            return { total: entries.length };
+          }
           if (sql.startsWith("UPDATE guestbook_entries SET auth_failure_count = CASE")) {
             const [expiredBefore, maximumFailures, , now, , , lockedUntil, id] = values;
             const entry = rows.get(id);
@@ -120,6 +128,25 @@ function database() {
         async all() {
           if (sql.includes("WHERE name = ?")) {
             return { results: [...rows.values()].filter((entry) => entry.name === values[0]).slice(0, 2) };
+          }
+          if (sql.includes("ORDER BY created_at DESC, id DESC")) {
+            let entries = [...rows.values()].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
+            let valueIndex = 0;
+            if (sql.includes("name LIKE")) {
+              const needle = String(values[valueIndex]).replaceAll("%", "").replaceAll("\\", "").toLowerCase();
+              valueIndex += 2;
+              entries = entries.filter((entry) => `${entry.name} ${entry.message}`.toLowerCase().includes(needle));
+            }
+            if (sql.includes("created_at >= ?")) {
+              const cutoff = values[valueIndex];
+              valueIndex += 1;
+              entries = entries.filter((entry) => entry.created_at >= cutoff);
+            }
+            if (sql.includes("(created_at < ? OR (created_at = ? AND id < ?))")) {
+              const [createdAt, , id] = values.slice(valueIndex, valueIndex + 3);
+              entries = entries.filter((entry) => entry.created_at < createdAt || (entry.created_at === createdAt && entry.id < id));
+            }
+            return { results: entries.slice(0, Number(values.at(-1))) };
           }
           return { results: [...rows.values()] };
         },
@@ -542,6 +569,56 @@ test("administrator list requires an asserted allowlisted identity", async () =>
       updatedAt: "2026-08-17T00:00:00.000Z",
     }]);
     assert.equal(JSON.stringify(payload).includes("password_hash"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("administrator list supports search, bounded limits, counts, and opaque keyset cursors", async () => {
+  const db = database();
+  for (let index = 0; index < 55; index += 1) {
+    const suffix = String(index).padStart(2, "0");
+    db.rows.set(`entry-${suffix}`, {
+      id: `entry-${suffix}`,
+      name: index === 23 ? "특별 하객" : `하객 ${suffix}`,
+      message: index === 23 ? "특별한 축하 메시지" : `축하 메시지 ${suffix}`,
+      password_hash: "not returned",
+      created_at: `2026-08-${String(31 - Math.floor(index / 2)).padStart(2, "0")}T${String(23 - (index % 2)).padStart(2, "0")}:00:00.000Z`,
+      updated_at: `2026-08-31T00:00:00.000Z`,
+    });
+  }
+  const fixture = await accessFixture();
+  const env = { GUESTBOOK_DB: db, ...fixture.env };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  const headers = { "cf-access-jwt-assertion": fixture.assertion };
+  try {
+    const first = await worker.fetch(request("/api/guestbook/admin/entries?limit=20", { method: "GET", headers }), env);
+    const firstPayload = await first.json();
+    assert.equal(firstPayload.count, 55);
+    assert.equal(firstPayload.totalCount, 55);
+    assert.equal(typeof firstPayload.refreshedAt, "string");
+    assert.equal(firstPayload.entries.length, 20);
+    assert.equal(firstPayload.hasMore, true);
+    assert.equal(typeof firstPayload.nextCursor, "string");
+
+    const second = await worker.fetch(request(`/api/guestbook/admin/entries?limit=20&cursor=${encodeURIComponent(firstPayload.nextCursor)}`, { method: "GET", headers }), env);
+    const secondPayload = await second.json();
+    assert.equal(secondPayload.entries.length, 20);
+    assert.equal(secondPayload.entries.some((entry) => firstPayload.entries.some((firstEntry) => firstEntry.id === entry.id)), false);
+
+    const searched = await worker.fetch(request("/api/guestbook/admin/entries?q=%ED%8A%B9%EB%B3%84&limit=10", { method: "GET", headers }), env);
+    const searchedPayload = await searched.json();
+    assert.equal(searchedPayload.count, 1);
+    assert.equal(searchedPayload.entries[0].name, "특별 하객");
+
+    const invalidCursor = await worker.fetch(request("/api/guestbook/admin/entries?cursor=broken&limit=20", { method: "GET", headers }), env);
+    assert.equal(invalidCursor.status, 400);
+    assert.equal((await invalidCursor.json()).code, "INVALID_CURSOR");
+
+    const overlongQuery = await worker.fetch(request(`/api/guestbook/admin/entries?q=${"a".repeat(51)}`, { method: "GET", headers }), env);
+    assert.equal(overlongQuery.status, 400);
+    assert.equal((await overlongQuery.json()).code, "INVALID_QUERY");
   } finally {
     globalThis.fetch = originalFetch;
   }
