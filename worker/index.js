@@ -2,6 +2,8 @@ const API_PREFIX = "/api/guestbook";
 const CONTENT_API_PREFIX = "/api/content";
 const ADMIN_API_PREFIX = "/api/admin";
 const MEDIA_API_PREFIX = "/api/media";
+const ADMIN_CONTENT_PAGE = "/admin";
+const LEGACY_ADMIN_CONTENT_PAGE = "/admin/content";
 // workerd rejects PBKDF2 requests above 100,000 iterations. Keep the value in
 // the encoded verifier and reject unsupported verifier metadata before asking
 // Web Crypto to derive any bits.
@@ -1174,8 +1176,17 @@ export default {
       return withSearchPrivacy(await handleContent(request, env, url), env);
     }
 
+    const redirectsLegacyAdmin = env.ADMIN_CONTENT_REDIRECT_ENABLED === "true"
+      && url.pathname === LEGACY_ADMIN_CONTENT_PAGE
+      && ["GET", "HEAD"].includes(request.method);
+    if (redirectsLegacyAdmin) {
+      const canonicalUrl = new URL(request.url);
+      canonicalUrl.pathname = ADMIN_CONTENT_PAGE;
+      return withSearchPrivacy(Response.redirect(canonicalUrl.toString(), 308), env);
+    }
+
     const acceptsHtml = request.headers.get("accept")?.includes("text/html");
-    const servesAdminShell = ["/admin/content", "/admin/guestbook"].includes(url.pathname)
+    const servesAdminShell = [ADMIN_CONTENT_PAGE, LEGACY_ADMIN_CONTENT_PAGE, "/admin/guestbook"].includes(url.pathname)
       && acceptsHtml
       && ["GET", "HEAD"].includes(request.method);
 

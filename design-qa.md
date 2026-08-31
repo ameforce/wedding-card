@@ -2,7 +2,7 @@
 
 ## Current accepted pass — Cloudflare content admin review
 
-- `/admin/content` renders a two-pane editor and an isolated 390px Pastel preview. At a 1440px browser viewport, the document reports `scrollWidth === clientWidth === 1440` and the preview iframe resolves to exactly 390px. At 390px, the admin document reports zero horizontal overflow, a 338px preview, and a minimum button height of 48px.
+- `/admin` renders a two-pane editor and an isolated 390px Pastel preview. At a 1440px browser viewport, the document reports `scrollWidth === clientWidth === 1440` and the preview iframe resolves to exactly 390px. At 390px, the admin document reports zero horizontal overflow, a 338px preview, and a minimum button height of 48px. Exact `GET` and `HEAD /admin/content` remain a rollback-safe compatibility shell until the staged permanent redirect is activated.
 - The editor exposes only the reviewed mutable subset: couple names, hero intro, event and venue display fields, invitation/story copy, transit/parking copy, and Pastel hero/gallery photos with alt text and focal position. Contacts, accounts, map links, search privacy, the confirmed-disabled RSVP setting, and publication policy stay outside this UI and remain guarded by the bundled content contract.
 - A live browser canary changed the hero intro, observed the new text in the iframe, saved a draft, explicitly published the local review revision, observed it on the ordinary Pastel page, and then restored and republished the original text. No test marker remains in the saved local state.
 - A browser file-chooser canary selected an existing project WebP for the hero. The admin produced a local WebP data URL and updated the iframe without saving; a reload discarded that uncommitted photo and restored the approved `/assets/photos/` source.
@@ -333,6 +333,6 @@ This section records the prior `45b1ebacc0f3893d4cc88bfd7ae18dc3caa2b384` state.
 final result: passed
 # Current admin storage-safety pass — 2026-08-17
 
-- `/admin/content` now exposes a restrained storage meter directly above the photo editors, showing used/limit/remaining capacity without exposing Cloudflare internals to ordinary visitors.
+- `/admin` now exposes a restrained storage meter directly above the photo editors, showing used/limit/remaining capacity without exposing Cloudflare internals to ordinary visitors.
 - The production API reserves every immutable original/480/960 image set in D1 before writing to private R2 and rejects the request at the 2GiB project boundary.
 - The local review adapter clearly states that it does not consume Cloudflare storage; production retains the same photo editor layout and mobile input sizing.
