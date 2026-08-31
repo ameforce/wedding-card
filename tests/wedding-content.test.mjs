@@ -332,10 +332,24 @@ test("guestbook labels, privacy break, and password guidance stay private withou
   assert.doesNotMatch(app, /단방향 해시|해시로만 보관/);
 });
 
-test("couple-only guestbook admin reports a successful empty state", () => {
+test("couple-only guestbook admin loads once on mount and reports a successful empty state", () => {
+  assert.match(app, /useState\(\{ status: "loading", entries: \[\], message: "" \}\)/);
+  assert.match(app, /const hasLoadedRef = useRef\(false\)/);
+  assert.match(app, /if \(hasLoadedRef\.current\) return;\s*hasLoadedRef\.current = true;\s*queueMicrotask\(\(\) => \{ void fetchEntries\(\); \}\)/);
+  assert.match(app, /useEffect\(\(\) => \{[\s\S]*?\}, \[fetchEntries\]\)/);
+  assert.match(app, /const reloadEntries = \(\) => \{\s*setState\(\{ status: "loading", entries: \[\], message: "" \}\);\s*void fetchEntries\(\)/);
+  assert.doesNotMatch(app, /인증 확인 후 불러오기/);
   assert.match(app, /state\.status === "ready" && state\.entries\.length === 0/);
   assert.match(app, /아직 도착한 방명록 메시지가 없습니다/);
   assert.match(app, /state\.status === "ready" \? "새로고침"/);
+});
+
+test("couple-only guestbook admin preserves auth-required and unavailable transitions", () => {
+  assert.match(app, /if \(!Array\.isArray\(result\.entries\)\)[\s\S]*?invalidResponse\.status = 503/);
+  assert.match(app, /status: authRequired \? "auth-required" : error\.status === 503 \? "unavailable" : "error"/);
+  assert.match(app, /state\.status === "auth-required" \? \(/);
+  assert.match(app, /Google 계정으로 다시 로그인/);
+  assert.match(app, /state\.status === "ready" && state\.entries\.length > 0/);
 });
 
 test("public section motion stays active in Chrome while capture mode remains static", () => {
