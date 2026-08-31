@@ -31,9 +31,9 @@ function setAtPath(document, path, value) {
   return next;
 }
 
-function Field({ label, value, onChange, type = "text", hint, error, required = true }) {
+function Field({ label, value, onChange, type = "text", hint, error, required = true, wide = false }) {
   return (
-    <label className="content-admin-field">
+    <label className={`content-admin-field ${wide ? "is-wide" : ""}`}>
       <span>{label}</span>
       <input type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} aria-invalid={error ? "true" : undefined} />
       {error ? <small className="is-error" role="alert">{error}</small> : hint && <small>{hint}</small>}
@@ -541,9 +541,11 @@ export function ContentAdmin() {
               <Field label="예식 날짜" type="date" value={event.isoDate} onChange={(value) => update(["content", "event", "isoDate"], value)} />
               <Field label="시작 시각" type="time" value={event.startTime24h} onChange={(value) => update(["content", "event", "startTime24h"], value)} />
               <p className="content-admin-derived is-wide"><CheckCircle aria-hidden="true" />공개 표기: {event.dateLabel} {event.day} · {event.time}</p>
-              <Field label="예식장" value={venue.name} onChange={(value) => update(["content", "venue", "name"], value)} />
-              <Field label="층" value={venue.floor} onChange={(value) => update(["content", "venue", "floor"], value)} />
-              <Field label="주소" value={venue.address} onChange={(value) => update(["content", "venue", "address"], value)} />
+              <div className="content-admin-venue-fields">
+                <Field label="예식장" value={venue.name} onChange={(value) => update(["content", "venue", "name"], value)} />
+                <Field label="층" value={venue.floor} onChange={(value) => update(["content", "venue", "floor"], value)} />
+                <Field label="주소" wide value={venue.address} onChange={(value) => update(["content", "venue", "address"], value)} />
+              </div>
             </div>
           </fieldset>
 
@@ -577,9 +579,9 @@ export function ContentAdmin() {
               <div className="content-admin-grid">
                 <Field label="곡명" value={music.title} error={musicErrors.title} onChange={(value) => update(["content", "music", "title"], value)} />
                 <Field label="아티스트" value={music.artist} error={musicErrors.artist} onChange={(value) => update(["content", "music", "artist"], value)} />
-                <Field label="출처 URL" type="url" value={music.sourceUrl} error={musicErrors.sourceUrl} onChange={(value) => update(["content", "music", "sourceUrl"], value)} hint="HTTPS 주소만 사용할 수 있습니다." />
+                <Field label="출처 URL" wide type="url" value={music.sourceUrl} error={musicErrors.sourceUrl} onChange={(value) => update(["content", "music", "sourceUrl"], value)} hint="HTTPS 주소만 사용할 수 있습니다." />
                 <Field label="라이선스명" value={music.licenseLabel} error={musicErrors.licenseLabel} onChange={(value) => update(["content", "music", "licenseLabel"], value)} />
-                <Field label="라이선스 URL" type="url" value={music.licenseUrl} error={musicErrors.licenseUrl} onChange={(value) => update(["content", "music", "licenseUrl"], value)} hint="HTTPS 주소만 사용할 수 있습니다." />
+                <Field label="라이선스 URL" wide type="url" value={music.licenseUrl} error={musicErrors.licenseUrl} onChange={(value) => update(["content", "music", "licenseUrl"], value)} hint="HTTPS 주소만 사용할 수 있습니다." />
               </div>
               <div className="content-admin-music-upload">
                 <div>

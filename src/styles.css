@@ -420,6 +420,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-editor fieldset:first-of-type { border-top: 0; }
 .content-admin-editor legend { margin-bottom: 18px; padding: 0; font-family: "Noto Serif KR Variable", serif; font-size: 21px; font-weight: 620; }
 .content-admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.content-admin-venue-fields { display: grid; min-width: 0; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .content-admin-field { display: grid; align-content: start; gap: 7px; min-width: 0; color: #334b62; font-size: 14px; }
 .content-admin-field.is-wide { grid-column: 1 / -1; }
 .content-admin-field > span { font-weight: 650; }
@@ -464,6 +465,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   .content-admin-shell { padding: 18px 12px 32px; }
   .content-admin-editor { padding: 20px 15px; border-radius: 18px; }
   .content-admin-grid { grid-template-columns: minmax(0, 1fr); }
+  .content-admin-venue-fields { grid-template-columns: minmax(0, 1fr); }
   .content-admin-field.is-wide { grid-column: auto; }
   .content-admin-photo-card { grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding: 12px; }
   .content-admin-photo-card > img { width: 92px; }
@@ -646,6 +648,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   .admin-page-heading { align-items: flex-start; }
   .content-admin-editor { padding-inline: 12px; }
   .content-admin-grid { grid-template-columns: minmax(0,1fr); }
+  .content-admin-venue-fields { grid-template-columns: minmax(0,1fr); }
   .content-admin-derived.is-wide, .content-admin-field.is-wide { grid-column: auto; }
   .content-admin-photo-card { grid-template-columns: 78px minmax(0,1fr); }
   .content-admin-photo-card > img { width: 78px; }

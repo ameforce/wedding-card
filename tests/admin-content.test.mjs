@@ -353,6 +353,19 @@ test("the app exposes the canonical content admin route and runtime content prov
   assert.match(source, /usePublicInvitationContent\(weddingContent\)/);
 });
 
+test("long administrator fields use the full edit row without collapsing short-field hierarchy", async () => {
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /function Field\(\{[^}]*wide = false[^}]*\}\)/);
+  assert.match(source, /className=\{`content-admin-field \$\{wide \? "is-wide" : ""\}`\}/);
+  assert.match(source, /className="content-admin-venue-fields"[\s\S]*?<Field label="예식장"[\s\S]*?<Field label="층"[\s\S]*?<Field label="주소"[^>]*\bwide\b/);
+  assert.match(source, /<Field label="곡명"[\s\S]*?<Field label="아티스트"[\s\S]*?<Field label="출처 URL"[^>]*\bwide\b[\s\S]*?<Field label="라이선스명"[\s\S]*?<Field label="라이선스 URL"[^>]*\bwide\b/);
+  assert.match(styles, /\.content-admin-venue-fields\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(styles, /\.content-admin-venue-fields\s*\{[^}]*min-width:\s*0;/);
+  assert.match(styles, /@media \(max-width: 760px\)\s*\{[\s\S]*?\.content-admin-venue-fields\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+});
+
 test("the admin UI uses apply, automatic publish review, dirty guard, fixed preview, and responsive shared shell", async () => {
   const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
   const shellSource = await readFile(new URL("../src/admin-content/AdminShell.jsx", import.meta.url), "utf8");
