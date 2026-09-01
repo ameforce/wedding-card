@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import worker, { __test } from "../worker/index.js";
 import { WEDDING_PHOTOS, weddingContent } from "../src/content.js";
+
+const workerSource = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
 
 function request(path, init = {}) {
   return new Request(`https://example.test${path}`, {
@@ -66,6 +69,11 @@ function invitationDatabase() {
     revisions,
     mediaSets,
     queries,
+    async batch(statements) {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    },
     prepare(sql) {
       queries.push(sql);
       let values = [];
@@ -90,7 +98,14 @@ function invitationDatabase() {
           return null;
         },
         async all() {
-          if (sql.includes("FROM invitation_revisions")) return { results: [...revisions.values()] };
+          if (sql.includes("FROM invitation_revisions")) {
+            const results = [...revisions.values()];
+            if (sql.includes("ORDER BY created_at DESC LIMIT 20")) {
+              results.sort((left, right) => right.created_at.localeCompare(left.created_at));
+              return { results: results.slice(0, 20) };
+            }
+            return { results };
+          }
           return { results: [] };
         },
         async run() {
@@ -133,15 +148,26 @@ function invitationDatabase() {
             [state.published_revision_id, state.updated_at] = values;
             state.draft_revision_id = null;
           } else if (sql.includes("SET published_revision_id = ?, updated_at = ?")) {
-            [state.published_revision_id, state.updated_at] = values;
+            const [nextRevisionId, updatedAt, expectedRevisionId] = values;
+            if (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId) {
+              [state.published_revision_id, state.updated_at] = [nextRevisionId, updatedAt];
+            } else {
+              changes = 0;
+            }
           } else if (sql.includes("SET status = 'archived'")) {
-            const row = revisions.get(values[0]);
-            if (row) row.status = "archived";
-          } else if (sql.includes("SET status = 'published'")) {
-            const [publishedAt, id] = values;
+            const [id, expectedRevisionId] = values;
             const row = revisions.get(id);
-            row.status = "published";
-            row.published_at = publishedAt;
+            if (row && (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)) row.status = "archived";
+            else changes = 0;
+          } else if (sql.includes("SET status = 'published'")) {
+            const [publishedAt, id, expectedRevisionId] = values;
+            const row = revisions.get(id);
+            if (row && (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)) {
+              row.status = "published";
+              row.published_at = publishedAt;
+            } else {
+              changes = 0;
+            }
           }
           return { success: true, meta: { changes } };
         },
@@ -349,11 +375,94 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
     const rollbackResponse = await worker.fetch(request("/api/admin/content/rollback", {
       method: "POST",
       headers,
-      body: JSON.stringify({ revisionId }),
+      body: JSON.stringify({ revisionId, expectedPublishedRevisionId: secondRevisionId }),
     }), env);
     assert.equal(rollbackResponse.status, 200);
     assert.equal(db.state.published_revision_id, revisionId);
     assert.equal(db.revisions.get(revisionId).status, "published");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rollback rejects archived drafts that were never public", async () => {
+  assert.match(workerSource, /!target\.publishedAt/);
+  assert.match(workerSource, /const rollbackResults = await db\.batch\(statements\)/);
+  assert.match(workerSource, /published_revision_id = \?\)"/);
+  assert.match(workerSource, /rollbackResults\.at\(-1\)\?\.meta\?\.changes/);
+});
+
+test("rollback rejects a stale public pointer before replacing another administrator's publication", async () => {
+  const db = invitationDatabase();
+  const fixture = await accessFixture();
+  const env = { GUESTBOOK_DB: db, ...fixture.env };
+  const document = JSON.stringify(confirmedDocument());
+  for (const [id, status] of [["current-public", "published"], ["older-public", "archived"]]) {
+    db.revisions.set(id, {
+      id,
+      content_json: document,
+      status,
+      created_at: `2026-08-${id === "current-public" ? "20" : "10"}T00:00:00.000Z`,
+      created_by: "groom@example.test",
+      published_at: `2026-08-${id === "current-public" ? "20" : "10"}T00:00:00.000Z`,
+    });
+  }
+  db.state.published_revision_id = "current-public";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(request("/api/admin/content/rollback", {
+      method: "POST",
+      headers: { "cf-access-jwt-assertion": fixture.assertion },
+      body: JSON.stringify({ revisionId: "older-public", expectedPublishedRevisionId: "stale-public" }),
+    }), env);
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "STALE_PUBLISHED_REVISION");
+    assert.equal(db.state.published_revision_id, "current-public");
+    assert.equal(db.revisions.get("current-public").status, "published");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("admin history always includes active pointers beyond the recent revision limit", async () => {
+  const db = invitationDatabase();
+  const fixture = await accessFixture();
+  const document = JSON.stringify(confirmedDocument());
+  const publishedId = "published-outside-limit";
+  db.revisions.set(publishedId, {
+    id: publishedId,
+    content_json: document,
+    status: "published",
+    created_at: "2026-01-01T00:00:00.000Z",
+    created_by: "groom@example.test",
+    published_at: "2026-01-01T00:00:00.000Z",
+  });
+  db.state.published_revision_id = publishedId;
+  for (let index = 1; index <= 21; index += 1) {
+    const id = `newer-draft-${String(index).padStart(2, "0")}`;
+    db.revisions.set(id, {
+      id,
+      content_json: document,
+      status: index === 21 ? "draft" : "archived",
+      created_at: `2026-02-${String(index).padStart(2, "0")}T00:00:00.000Z`,
+      created_by: "groom@example.test",
+      published_at: null,
+    });
+    if (index === 21) db.state.draft_revision_id = id;
+  }
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(request("/api/admin/content", {
+      method: "GET",
+      headers: { "cf-access-jwt-assertion": fixture.assertion },
+    }), { GUESTBOOK_DB: db, ...fixture.env });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.history.length, 21);
+    assert.equal(payload.history.some((revision) => revision.id === publishedId), true);
+    assert.equal(payload.history.some((revision) => revision.id === db.state.draft_revision_id), true);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -394,6 +503,18 @@ test("content publishing rejects unconfirmed or search-indexable documents", asy
     }), env);
     assert.equal(unsafeResponse.status, 400);
     assert.equal((await unsafeResponse.json()).code, "SEARCH_PRIVACY_REQUIRED");
+
+    const invalid = confirmedDocument();
+    invalid.content.couple.groom = "";
+    const invalidResponse = await worker.fetch(request("/api/admin/content", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ document: invalid }),
+    }), env);
+    assert.equal(invalidResponse.status, 400);
+    const invalidPayload = await invalidResponse.json();
+    assert.equal(invalidPayload.code, "INVALID_CONTENT");
+    assert.equal(typeof invalidPayload.fieldErrors["content.couple.groom"], "string");
 
     const unconfirmed = confirmedDocument();
     unconfirmed.content.unconfirmedContent = [{ key: "publishing.og", label: "OG" }];

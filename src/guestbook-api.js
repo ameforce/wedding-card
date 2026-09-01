@@ -43,6 +43,12 @@ export function updateGuestbookEntry(entry) {
   });
 }
 
-export function getAdminGuestbookEntries() {
-  return requestJson("/api/guestbook/admin/entries", { method: "GET" });
+export function getAdminGuestbookEntries({ query = "", range = "all", cursor = "", limit = 50 } = {}) {
+  const search = new URLSearchParams();
+  const trimmedQuery = query.trim();
+  if (trimmedQuery) search.set("q", trimmedQuery);
+  if (["7d", "30d"].includes(range)) search.set("range", range);
+  if (cursor) search.set("cursor", cursor);
+  search.set("limit", String(limit));
+  return requestJson(`/api/guestbook/admin/entries?${search}`, { method: "GET" });
 }

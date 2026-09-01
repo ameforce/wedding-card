@@ -75,8 +75,8 @@ function json(body, status = 200, extraHeaders = {}) {
   });
 }
 
-function apiError(status, code, message) {
-  return json({ code, message }, status);
+function apiError(status, code, message, details = {}) {
+  return json({ code, message, ...details }, status);
 }
 
 function bytesToBase64(bytes) {
@@ -349,8 +349,8 @@ async function createEntry(request, env) {
   const passwordHash = await hashPassword(password);
   try {
     await db.prepare(
-      "INSERT INTO guestbook_entries (id, name, message, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-    ).bind(id, name, message, passwordHash, timestamp, timestamp).run();
+      "INSERT INTO guestbook_entries (id, name, message, message_search, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).bind(id, name, message, message.normalize("NFKC"), passwordHash, timestamp, timestamp).run();
   } catch (error) {
     const racedEntry = await findEntriesByName(db, name);
     if (racedEntry.length > 0) {
@@ -379,7 +379,8 @@ async function updateEntry(request, env) {
   await enforceGuestbookCredentialRateLimit(env, name);
   const entry = await requireUniqueCredentialMatch(db, name, password);
   const updatedAt = new Date().toISOString();
-  await db.prepare("UPDATE guestbook_entries SET message = ?, updated_at = ? WHERE id = ?").bind(message, updatedAt, entry.id).run();
+  await db.prepare("UPDATE guestbook_entries SET message = ?, message_search = ?, updated_at = ? WHERE id = ?")
+    .bind(message, message.normalize("NFKC"), updatedAt, entry.id).run();
   return json({ updatedAt });
 }
 
@@ -479,20 +480,96 @@ async function requireAdminEmail(request, env) {
   return email;
 }
 
+async function backfillGuestbookMessageSearch(db) {
+  for (;;) {
+    const result = await db.prepare(
+      "SELECT id, message FROM guestbook_entries WHERE message_search IS NULL LIMIT 100",
+    ).all();
+    const rows = result.results || [];
+    if (rows.length === 0) return;
+    await runDatabaseBatch(db, rows.map((entry) => db.prepare(
+      "UPDATE guestbook_entries SET message_search = ? WHERE id = ? AND message = ? AND message_search IS NULL",
+    ).bind(entry.message.normalize("NFKC"), entry.id, entry.message)));
+    if (rows.length < 100) return;
+  }
+}
+
 async function listAdminEntries(request, env) {
   const db = requireDatabase(env);
   await requireAdminEmail(request, env);
+  const url = new URL(request.url);
+  const rawQuery = (url.searchParams.get("q") || "").trim();
+  const normalizedQuery = rawQuery.normalize("NFKC");
+  if (normalizedQuery.length > 50) throw { status: 400, code: "INVALID_QUERY", message: "검색어는 50자 이내로 입력해 주세요." };
+  const range = url.searchParams.get("range") || "all";
+  if (!["all", "7d", "30d"].includes(range)) {
+    throw { status: 400, code: "INVALID_RANGE", message: "조회 기간을 확인해 주세요." };
+  }
+  const limitValue = Number(url.searchParams.get("limit") || 50);
+  if (!Number.isInteger(limitValue) || limitValue < 1 || limitValue > 100) {
+    throw { status: 400, code: "INVALID_LIMIT", message: "한 번에 1~100개의 메시지를 조회할 수 있습니다." };
+  }
+  let cursor = null;
+  const cursorValue = url.searchParams.get("cursor");
+  if (cursorValue) {
+    if (cursorValue.length > 512) throw { status: 400, code: "INVALID_CURSOR", message: "목록 위치가 만료되었습니다. 새로고침해 주세요." };
+    try {
+      cursor = JSON.parse(new TextDecoder().decode(decodeBase64Url(cursorValue)));
+      if (!cursor || typeof cursor.createdAt !== "string" || typeof cursor.id !== "string"
+        || Number.isNaN(Date.parse(cursor.createdAt)) || !cursor.id || cursor.id.length > 128) throw new Error("invalid cursor");
+    } catch {
+      throw { status: 400, code: "INVALID_CURSOR", message: "목록 위치가 만료되었습니다. 새로고침해 주세요." };
+    }
+  }
+
+  const where = [];
+  const values = [];
+  if (rawQuery) {
+    await backfillGuestbookMessageSearch(db);
+    const escapeLike = (value) => value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+    const rawPattern = `%${escapeLike(rawQuery)}%`;
+    const normalizedPattern = `%${escapeLike(normalizedQuery)}%`;
+    where.push("(name LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\' OR message_search LIKE ? ESCAPE '\\')");
+    values.push(normalizedPattern, rawPattern, normalizedPattern);
+  }
+  if (range !== "all") {
+    const days = range === "7d" ? 7 : 30;
+    where.push("created_at >= ?");
+    values.push(new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString());
+  }
+  const filterSql = where.length ? ` WHERE ${where.join(" AND ")}` : "";
+  const countRow = await db.prepare(`SELECT COUNT(*) AS total FROM guestbook_entries${filterSql}`).bind(...values).first();
+  const pageWhere = [...where];
+  const pageValues = [...values];
+  if (cursor) {
+    pageWhere.push("(created_at < ? OR (created_at = ? AND id < ?))");
+    pageValues.push(cursor.createdAt, cursor.createdAt, cursor.id);
+  }
+  const pageFilterSql = pageWhere.length ? ` WHERE ${pageWhere.join(" AND ")}` : "";
+  pageValues.push(limitValue + 1);
   const result = await db.prepare(
-    "SELECT id, name, message, created_at, updated_at FROM guestbook_entries ORDER BY created_at DESC LIMIT 500",
-  ).all();
+    `SELECT id, name, message, created_at, updated_at FROM guestbook_entries${pageFilterSql} ORDER BY created_at DESC, id DESC LIMIT ?`,
+  ).bind(...pageValues).all();
+  const rows = result.results || [];
+  const hasMore = rows.length > limitValue;
+  const visibleRows = rows.slice(0, limitValue);
+  const last = visibleRows.at(-1);
+  const totalCount = Number(countRow?.total) || 0;
   return json({
-    entries: (result.results || []).map((entry) => ({
+    entries: visibleRows.map((entry) => ({
       id: entry.id,
       name: entry.name,
       message: entry.message,
       createdAt: entry.created_at,
       updatedAt: entry.updated_at,
     })),
+    totalCount,
+    refreshedAt: new Date().toISOString(),
+    count: totalCount,
+    hasMore,
+    nextCursor: hasMore && last
+      ? bytesToBase64Url(new TextEncoder().encode(JSON.stringify({ createdAt: last.created_at, id: last.id })))
+      : null,
   });
 }
 
@@ -532,6 +609,21 @@ function requireMusicSource(value) {
   }
 }
 
+function derivedEventLabels(isoDate, startTime24h) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate || "") || !/^\d{2}:\d{2}$/.test(startTime24h || "")) return null;
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const [hour, minute] = startTime24h.split(":").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day
+    || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  const weekdays = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
+  return {
+    dateLabel: `${year}년 ${month}월 ${day}일`,
+    day: weekdays[date.getUTCDay()],
+    time: `${hour < 12 ? "오전" : "오후"} ${hour % 12 || 12}시${minute ? ` ${minute}분` : ""}`,
+  };
+}
+
 function validateInvitationDocument(document, { publish = false, write = false } = {}) {
   requirePlainObject(document, "document");
   if (![1, 2].includes(document.schemaVersion)) {
@@ -543,15 +635,45 @@ function validateInvitationDocument(document, { publish = false, write = false }
   requirePlainObject(photos.pastel.hero, "photos.pastel.hero");
   requireText(photos.pastel.hero.src, "photos.pastel.hero.src", 500);
   requireText(photos.pastel.hero.alt, "photos.pastel.hero.alt", 300);
+  if (!/^\d{1,3}%\s+\d{1,3}%$/.test(photos.pastel.hero.position || "")) {
+    throw { status: 400, code: "INVALID_CONTENT", message: "photos.pastel.hero.position 값을 확인해 주세요." };
+  }
+  if (!Array.isArray(photos.pastel.gallery) || photos.pastel.gallery.length !== 4) {
+    throw { status: 400, code: "INVALID_CONTENT", message: "photos.pastel.gallery에는 사진 4개가 필요합니다." };
+  }
+  for (const [index, photo] of photos.pastel.gallery.entries()) {
+    requirePlainObject(photo, `photos.pastel.gallery[${index}]`);
+    requireText(photo.src, `photos.pastel.gallery[${index}].src`, 500);
+    requireText(photo.alt, `photos.pastel.gallery[${index}].alt`, 300);
+    if (!/^\d{1,3}%\s+\d{1,3}%$/.test(photo.position || "")) {
+      throw { status: 400, code: "INVALID_CONTENT", message: `photos.pastel.gallery[${index}].position 값을 확인해 주세요.` };
+    }
+  }
   const requiredTextPaths = [
     [content.couple?.groom, "content.couple.groom", 50],
     [content.couple?.bride, "content.couple.bride", 50],
     [content.event?.isoDate, "content.event.isoDate", 20],
+    [content.event?.startTime24h, "content.event.startTime24h", 10],
+    [content.event?.dateLabel, "content.event.dateLabel", 30],
+    [content.event?.day, "content.event.day", 10],
     [content.event?.time, "content.event.time", 30],
     [content.venue?.name, "content.venue.name", 100],
+    [content.venue?.floor, "content.venue.floor", 30],
     [content.venue?.address, "content.venue.address", 300],
   ];
   for (const [value, path, maxLength] of requiredTextPaths) requireText(value, path, maxLength);
+  const eventLabels = derivedEventLabels(content.event.isoDate, content.event.startTime24h);
+  if (!eventLabels || content.event.dateLabel !== eventLabels.dateLabel || content.event.day !== eventLabels.day || content.event.time !== eventLabels.time
+    || content.event.timezone?.iana !== "Asia/Seoul" || content.event.timezone?.utcOffset !== "+09:00") {
+    throw { status: 400, code: "INVALID_EVENT", message: "예식 일시의 파생 표기와 Asia/Seoul 시간대를 확인해 주세요." };
+  }
+  if (!Array.isArray(content.hero?.introLines) || content.hero.introLines.length !== 2) {
+    throw { status: 400, code: "INVALID_CONTENT", message: "content.hero.introLines에는 두 줄이 필요합니다." };
+  }
+  for (const line of content.hero.introLines) requireText(line, "content.hero.introLines[]", 80);
+  if (content.rsvp?.enabled !== false || !Array.isArray(content.unconfirmedContent)) {
+    throw { status: 400, code: "INVALID_CONTENT", message: "RSVP 비활성화 및 콘텐츠 확인 상태 계약을 변경할 수 없습니다." };
+  }
   if (document.schemaVersion === 2) {
     const music = requirePlainObject(content.music, "content.music");
     requireMusicSource(music.src);
@@ -751,17 +873,30 @@ async function getAdminInvitation(request, env) {
   const historyResult = await db.prepare(
     "SELECT id, status, created_at, published_at FROM invitation_revisions ORDER BY created_at DESC LIMIT 20",
   ).all();
+  const history = (historyResult.results || []).map((revision) => ({
+    id: revision.id,
+    status: revision.status,
+    createdAt: revision.created_at,
+    publishedAt: revision.published_at,
+  }));
+  const historyIds = new Set(history.map((revision) => revision.id));
+  for (const current of [draft, published]) {
+    if (!current || historyIds.has(current.id)) continue;
+    history.push({
+      id: current.id,
+      status: current.status,
+      createdAt: current.createdAt,
+      publishedAt: current.publishedAt,
+    });
+    historyIds.add(current.id);
+  }
+  history.sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""));
   return json({
     draftRevisionId: draft?.id || null,
     publishedRevisionId: published?.id || null,
     draft,
     published,
-    history: (historyResult.results || []).map((revision) => ({
-      id: revision.id,
-      status: revision.status,
-      createdAt: revision.created_at,
-      publishedAt: revision.published_at,
-    })),
+    history,
   });
 }
 
@@ -799,10 +934,10 @@ async function publishInvitationDraft(request, env) {
   const revisionId = typeof payload.revisionId === "string" ? payload.revisionId : "";
   const state = await getInvitationState(db);
   if (!revisionId || revisionId !== state?.draft_revision_id) {
-    return apiError(409, "STALE_DRAFT", "현재 임시 저장본을 다시 불러온 뒤 공개해 주세요.");
+    return apiError(409, "STALE_DRAFT", "현재 임시 적용본을 다시 불러온 뒤 공개해 주세요.");
   }
   const draft = await getInvitationRevision(db, revisionId);
-  if (!draft || draft.status !== "draft") return apiError(409, "STALE_DRAFT", "공개할 임시 저장본이 없습니다.");
+  if (!draft || draft.status !== "draft") return apiError(409, "STALE_DRAFT", "공개할 임시 적용본이 없습니다.");
   validateInvitationDocument(draft.document, { publish: true });
   const publishedAt = new Date().toISOString();
   const statements = [];
@@ -827,26 +962,34 @@ async function rollbackInvitation(request, env) {
   await requireAdminEmail(request, env);
   const payload = await readJson(request);
   const revisionId = typeof payload.revisionId === "string" ? payload.revisionId : "";
+  const expectedPublishedRevisionId = typeof payload.expectedPublishedRevisionId === "string" ? payload.expectedPublishedRevisionId : "";
   const target = await getInvitationRevision(db, revisionId);
-  if (!target || !["archived", "published"].includes(target.status)) {
+  if (!target || !["archived", "published"].includes(target.status) || !target.publishedAt) {
     return apiError(404, "REVISION_NOT_FOUND", "되돌릴 콘텐츠 버전을 찾을 수 없습니다.");
   }
   validateInvitationDocument(target.document, { publish: true });
-  const state = await getInvitationState(db);
+  if (!expectedPublishedRevisionId || typeof db.batch !== "function") {
+    return apiError(409, "STALE_PUBLISHED_REVISION", "공개본이 변경되었습니다. 최신 상태를 다시 확인해 주세요.");
+  }
   const publishedAt = new Date().toISOString();
   const statements = [];
-  if (state?.published_revision_id && state.published_revision_id !== revisionId) {
-    statements.push(db.prepare("UPDATE invitation_revisions SET status = 'archived' WHERE id = ? AND status = 'published'")
-      .bind(state.published_revision_id));
+  if (expectedPublishedRevisionId !== revisionId) {
+    statements.push(db.prepare(
+      "UPDATE invitation_revisions SET status = 'archived' WHERE id = ? AND status = 'published' AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND published_revision_id = ?)",
+    ).bind(expectedPublishedRevisionId, expectedPublishedRevisionId));
   }
   statements.push(
-    db.prepare("UPDATE invitation_revisions SET status = 'published', published_at = ? WHERE id = ?")
-      .bind(publishedAt, revisionId),
     db.prepare(
-      "UPDATE invitation_state SET published_revision_id = ?, updated_at = ? WHERE singleton_id = 1",
-    ).bind(revisionId, publishedAt),
+      "UPDATE invitation_revisions SET status = 'published', published_at = ? WHERE id = ? AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND published_revision_id = ?)",
+    ).bind(publishedAt, revisionId, expectedPublishedRevisionId),
+    db.prepare(
+      "UPDATE invitation_state SET published_revision_id = ?, updated_at = ? WHERE singleton_id = 1 AND published_revision_id = ?",
+    ).bind(revisionId, publishedAt, expectedPublishedRevisionId),
   );
-  await runDatabaseBatch(db, statements);
+  const rollbackResults = await db.batch(statements);
+  if (Number(rollbackResults.at(-1)?.meta?.changes) !== 1) {
+    return apiError(409, "STALE_PUBLISHED_REVISION", "공개본이 변경되었습니다. 최신 상태를 다시 확인해 주세요.");
+  }
   return json({ revisionId, publishedAt });
 }
 
@@ -1138,7 +1281,12 @@ async function handleContent(request, env, url) {
     }
     return apiError(404, "NOT_FOUND", "요청한 초대장 콘텐츠 경로가 없습니다.");
   } catch (error) {
-    if (error && Number.isInteger(error.status)) return apiError(error.status, error.code, error.message);
+    if (error && Number.isInteger(error.status)) {
+      const fieldErrors = error.code === "INVALID_CONTENT"
+        ? error.fieldErrors || { [String(error.message || "content").split(" ")[0]]: error.message }
+        : undefined;
+      return apiError(error.status, error.code, error.message, fieldErrors ? { fieldErrors } : {});
+    }
     return apiError(500, "INTERNAL_ERROR", "초대장 콘텐츠 요청을 처리하지 못했습니다.");
   }
 }
