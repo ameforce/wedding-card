@@ -41,17 +41,17 @@ function Field({ label, value, onChange, type = "text", hint, error, required = 
   );
 }
 
-function CopyField({ label, lines, onChange, hint }) {
+function CopyField({ label, lines, onChange, hint, error }) {
   return (
     <label className="content-admin-field is-wide">
       <span>{label}</span>
-      <textarea rows={Math.max(3, lines.length)} value={lines.join("\n")} onChange={(event) => onChange(event.target.value.split("\n"))} />
-      {hint && <small>{hint}</small>}
+      <textarea rows={Math.max(3, lines.length)} value={lines.join("\n")} onChange={(event) => onChange(event.target.value.split("\n"))} aria-invalid={error ? "true" : undefined} />
+      {error ? <small className="is-error" role="alert">{error}</small> : hint && <small>{hint}</small>}
     </label>
   );
 }
 
-function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy }) {
+function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, error }) {
   const [replacementAlt, setReplacementAlt] = useState("");
   const replacementReady = replacementAlt.trim().length > 0;
   return (
@@ -74,7 +74,7 @@ function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy }) {
             event.target.value = "";
           }} />
         </label>
-        <Field label="초점 위치" value={photo.position} onChange={(value) => onMetaChange("position", value)} hint="예: 50% 58%" />
+        <Field label="초점 위치" value={photo.position} onChange={(value) => onMetaChange("position", value)} error={error} hint="예: 50% 58%" />
       </div>
     </article>
   );
@@ -113,8 +113,12 @@ function previewSelectorForPath(path) {
 }
 
 function CollapsibleSection({ title, busy, children, attention = false }) {
+  const detailsRef = useRef(null);
+  useEffect(() => {
+    if (attention && detailsRef.current) detailsRef.current.open = true;
+  }, [attention]);
   return (
-    <details className="content-admin-section">
+    <details ref={detailsRef} className="content-admin-section">
       <summary>{title}{attention && <span aria-label="확인이 필요한 항목" />}</summary>
       <fieldset disabled={busy}>{children}</fieldset>
     </details>
@@ -433,12 +437,18 @@ export function ContentAdmin() {
     if (!republishTarget) return;
     setBusy(true);
     try {
-      const result = await adapter.republish(republishTarget.id);
+      const result = await adapter.republish(republishTarget.id, publishedRevisionId);
       setRepublishTarget(null);
       setPublishedRevisionId(result.revisionId || republishTarget.id);
       await load({ preserveEditingDocument: dirty });
       setStatus({ tone: "success", message: `${republishTarget.label}을 다시 공개했습니다.` });
     } catch (error) {
+      if (error?.code === "STALE_PUBLISHED_REVISION") {
+        setRepublishTarget(null);
+        await load({ preserveEditingDocument: dirty });
+        setStatus({ tone: "error", message: "다른 관리자가 공개본을 변경해 최신 상태를 불러왔습니다. 다시 선택해 주세요." });
+        return;
+      }
       showAdminError(error, "선택한 버전을 다시 공개하지 못했습니다.");
     } finally {
       setBusy(false);
@@ -526,34 +536,40 @@ export function ContentAdmin() {
       {authRequired ? <AdminReauthentication /> : <div className="content-admin-layout">
         <section className="content-admin-editor" aria-label="초대장 콘텐츠 편집">
           <p className={`content-admin-status is-${status.tone}`} role="status">{status.message}</p>
+          {workflow.errorCount > 0 && (
+            <section className="content-admin-validation-summary" role="alert" aria-label="입력 오류 요약">
+              <strong>입력 오류 {workflow.errorCount}개를 확인해 주세요.</strong>
+              <ul>{Object.entries(validationErrors).map(([field, message]) => <li key={field}><b>{field}</b><span>{message}</span></li>)}</ul>
+            </section>
+          )}
 
           <fieldset disabled={busy}>
             <legend>기본 정보</legend>
             <div className="content-admin-grid">
-              <Field label="신랑 이름" value={editingDocument.content.couple.groom} maxLength={50} onChange={(value) => update(["content", "couple", "groom"], value)} />
-              <Field label="신부 이름" value={editingDocument.content.couple.bride} maxLength={50} onChange={(value) => update(["content", "couple", "bride"], value)} />
-              <CopyField label="상단 인사" lines={editingDocument.content.hero.introLines} onChange={(value) => update(["content", "hero", "introLines"], value)} hint="줄바꿈 그대로 표시됩니다." />
+              <Field label="신랑 이름" value={editingDocument.content.couple.groom} maxLength={50} error={validationErrors["신랑 이름"]} onChange={(value) => update(["content", "couple", "groom"], value)} />
+              <Field label="신부 이름" value={editingDocument.content.couple.bride} maxLength={50} error={validationErrors["신부 이름"]} onChange={(value) => update(["content", "couple", "bride"], value)} />
+              <CopyField label="상단 인사" lines={editingDocument.content.hero.introLines} error={validationErrors["상단 인사"]} onChange={(value) => update(["content", "hero", "introLines"], value)} hint="줄바꿈 그대로 표시됩니다." />
             </div>
           </fieldset>
 
           <fieldset disabled={busy}>
             <legend>예식 정보</legend>
             <div className="content-admin-grid">
-              <Field label="예식 날짜" type="date" value={event.isoDate} onChange={(value) => update(["content", "event", "isoDate"], value)} />
-              <Field label="시작 시각" type="time" value={event.startTime24h} onChange={(value) => update(["content", "event", "startTime24h"], value)} />
+              <Field label="예식 날짜" type="date" value={event.isoDate} error={validationErrors["예식 일시"]} onChange={(value) => update(["content", "event", "isoDate"], value)} />
+              <Field label="시작 시각" type="time" value={event.startTime24h} error={validationErrors["예식 일시"]} onChange={(value) => update(["content", "event", "startTime24h"], value)} />
               <p className="content-admin-derived is-wide"><CheckCircle aria-hidden="true" />공개 표기: {event.dateLabel} {event.day} · {event.time}</p>
               <div className="content-admin-venue-fields">
-                <Field label="예식장" value={venue.name} onChange={(value) => update(["content", "venue", "name"], value)} />
-                <Field label="층" value={venue.floor} onChange={(value) => update(["content", "venue", "floor"], value)} />
-                <Field label="주소" wide value={venue.address} onChange={(value) => update(["content", "venue", "address"], value)} />
+                <Field label="예식장" value={venue.name} error={validationErrors["예식장"]} onChange={(value) => update(["content", "venue", "name"], value)} />
+                <Field label="층" value={venue.floor} error={validationErrors["층"]} onChange={(value) => update(["content", "venue", "floor"], value)} />
+                <Field label="주소" wide value={venue.address} error={validationErrors["주소"]} onChange={(value) => update(["content", "venue", "address"], value)} />
               </div>
             </div>
           </fieldset>
 
-          <CollapsibleSection title="초대 문구" busy={busy}>
+          <CollapsibleSection title="초대 문구" busy={busy} attention={Boolean(validationErrors["인사말"] || validationErrors["우리의 이야기"])}>
             <div className="content-admin-grid">
-              <CopyField label="인사말" lines={editingDocument.content.message} onChange={(value) => update(["content", "message"], value)} />
-              <CopyField label="우리의 이야기" lines={editingDocument.content.story} onChange={(value) => update(["content", "story"], value)} />
+              <CopyField label="인사말" lines={editingDocument.content.message} error={validationErrors["인사말"]} onChange={(value) => update(["content", "message"], value)} />
+              <CopyField label="우리의 이야기" lines={editingDocument.content.story} error={validationErrors["우리의 이야기"]} onChange={(value) => update(["content", "story"], value)} />
             </div>
           </CollapsibleSection>
 
@@ -603,11 +619,11 @@ export function ContentAdmin() {
             </div>
           </CollapsibleSection>
 
-          <CollapsibleSection title="사진" busy={busy} attention={Boolean(uploadingSlot)}>
+          <CollapsibleSection title="사진" busy={busy} attention={Boolean(uploadingSlot || validationErrors["사진"])}>
             <div className="content-admin-photo-list">
-              <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={uploadingSlot === "pastel-hero"} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
+              <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={uploadingSlot === "pastel-hero"} error={validationErrors["상단 대표 사진 초점 위치"] || validationErrors["상단 대표 사진 대체 텍스트"] || validationErrors["상단 대표 사진 파일"]} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
               {photos.gallery.map((photo, index) => (
-                <PhotoEditor key={`gallery-${index}`} title={`갤러리 ${index + 1}`} slot={`pastel-gallery-${index}`} photo={photo} busy={uploadingSlot === `pastel-gallery-${index}`} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "gallery", index, key], value)} />
+                <PhotoEditor key={`gallery-${index}`} title={`갤러리 ${index + 1}`} slot={`pastel-gallery-${index}`} photo={photo} busy={uploadingSlot === `pastel-gallery-${index}`} error={validationErrors[`갤러리 ${index + 1} 초점 위치`] || validationErrors[`갤러리 ${index + 1} 대체 텍스트`] || validationErrors[`갤러리 ${index + 1} 파일`]} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "gallery", index, key], value)} />
               ))}
             </div>
           </CollapsibleSection>
@@ -635,8 +651,8 @@ export function ContentAdmin() {
         <aside className="content-admin-history" aria-label="콘텐츠 버전 기록">
           <h2>버전 기록</h2>
           <ol>
-            {versionHistory.map((revision, index) => {
-              const label = `v${versionHistory.length - index}`;
+            {versionHistory.map((revision) => {
+              const label = `리비전 ${revision.id.slice(0, 8)}`;
               const active = revision.id === draftRevisionId || revision.id === publishedRevisionId;
               const statusLabel = revision.status === "published" ? "공개 중"
                 : revision.publishedAt ? "이전 공개"

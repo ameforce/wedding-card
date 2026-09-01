@@ -406,8 +406,11 @@ export function createLocalReviewContentAdapter({
       persist();
       return presentState(state);
     },
-    async republish(revisionId) {
+    async republish(revisionId, expectedPublishedRevisionId) {
       const current = load();
+      if (current.publishedRevisionId !== expectedPublishedRevisionId) {
+        throw Object.assign(new Error("공개본이 변경되었습니다. 최신 상태를 다시 확인해 주세요."), { code: "STALE_PUBLISHED_REVISION" });
+      }
       const target = (current.revisions || []).find((revision) => revision.id === revisionId);
       if (!target || !["archived", "published"].includes(target.status) || !target.publishedAt) throw new Error("이전에 공개된 버전만 다시 공개할 수 있습니다.");
       const publishedAt = now();
@@ -516,10 +519,10 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
         body: JSON.stringify({ revisionId }),
       });
     },
-    async republish(revisionId) {
+    async republish(revisionId, expectedPublishedRevisionId) {
       return requestJson(fetchImpl, "/api/admin/content/rollback", {
         method: "POST",
-        body: JSON.stringify({ revisionId }),
+        body: JSON.stringify({ revisionId, expectedPublishedRevisionId }),
       });
     },
     async uploadPhoto({ slot, file, alt, position }) {

@@ -359,7 +359,7 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
     const rollbackResponse = await worker.fetch(request("/api/admin/content/rollback", {
       method: "POST",
       headers,
-      body: JSON.stringify({ revisionId }),
+      body: JSON.stringify({ revisionId, expectedPublishedRevisionId: secondRevisionId }),
     }), env);
     assert.equal(rollbackResponse.status, 200);
     assert.equal(db.state.published_revision_id, revisionId);
@@ -371,6 +371,39 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
 
 test("rollback rejects archived drafts that were never public", async () => {
   assert.match(workerSource, /!target\.publishedAt/);
+});
+
+test("rollback rejects a stale public pointer before replacing another administrator's publication", async () => {
+  const db = invitationDatabase();
+  const fixture = await accessFixture();
+  const env = { GUESTBOOK_DB: db, ...fixture.env };
+  const document = JSON.stringify(confirmedDocument());
+  for (const [id, status] of [["current-public", "published"], ["older-public", "archived"]]) {
+    db.revisions.set(id, {
+      id,
+      content_json: document,
+      status,
+      created_at: `2026-08-${id === "current-public" ? "20" : "10"}T00:00:00.000Z`,
+      created_by: "groom@example.test",
+      published_at: `2026-08-${id === "current-public" ? "20" : "10"}T00:00:00.000Z`,
+    });
+  }
+  db.state.published_revision_id = "current-public";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(request("/api/admin/content/rollback", {
+      method: "POST",
+      headers: { "cf-access-jwt-assertion": fixture.assertion },
+      body: JSON.stringify({ revisionId: "older-public", expectedPublishedRevisionId: "stale-public" }),
+    }), env);
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "STALE_PUBLISHED_REVISION");
+    assert.equal(db.state.published_revision_id, "current-public");
+    assert.equal(db.revisions.get("current-public").status, "published");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("admin history always includes active pointers beyond the recent revision limit", async () => {

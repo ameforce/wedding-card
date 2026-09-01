@@ -66,18 +66,26 @@ export function GuestbookAdmin() {
     } catch (error) {
       if (requestSequence.current !== sequence) return;
       const status = statusFromError(error);
-      setState({
-        status,
-        entries: [],
-        count: 0,
-        nextCursor: null,
-        hasMore: false,
-        message: status === "auth-required"
-          ? "인증 방식이 변경되었거나 로그인 세션이 만료되었습니다."
-          : status === "unavailable"
-            ? "관리자 인증 공급자와 저장소가 연결되지 않아 메시지를 조회할 수 없습니다."
-            : "방명록 메시지를 불러오지 못했습니다.",
-      });
+      if (append && status === "error") {
+        setState((current) => ({
+          ...current,
+          status: "append-error",
+          message: "추가 메시지를 불러오지 못했습니다. 현재 목록은 그대로 유지됩니다.",
+        }));
+      } else {
+        setState({
+          status,
+          entries: [],
+          count: 0,
+          nextCursor: null,
+          hasMore: false,
+          message: status === "auth-required"
+            ? "인증 방식이 변경되었거나 로그인 세션이 만료되었습니다."
+            : status === "unavailable"
+              ? "관리자 인증 공급자와 저장소가 연결되지 않아 메시지를 조회할 수 없습니다."
+              : "방명록 메시지를 불러오지 못했습니다.",
+        });
+      }
     }
   }, [appliedQuery, range]);
 
@@ -85,7 +93,7 @@ export function GuestbookAdmin() {
 
   const search = (event) => {
     event.preventDefault();
-    setAppliedQuery(query.normalize("NFKC").trim());
+    setAppliedQuery(query.trim());
   };
 
   return (
@@ -131,7 +139,13 @@ export function GuestbookAdmin() {
             {state.status === "ready" && state.entries.length === 0 && (
               <div className="admin-state-panel" role="status">{appliedQuery ? "검색 조건에 맞는 메시지가 없습니다." : "아직 도착한 방명록 메시지가 없습니다."}</div>
             )}
-            {["ready", "loading-more"].includes(state.status) && state.entries.length > 0 && (
+            {state.status === "append-error" && state.entries.length > 0 && (
+              <section className="admin-state-panel is-error" role="alert">
+                <p>{state.message}</p>
+                <button type="button" onClick={() => void load({ append: true, cursor: state.nextCursor || "" })}>추가 불러오기 다시 시도</button>
+              </section>
+            )}
+            {["ready", "loading-more", "append-error"].includes(state.status) && state.entries.length > 0 && (
               <>
                 <div className="guestbook-admin-table" role="table" aria-label="비공개 방명록 메시지">
                   <div className="guestbook-admin-row is-header" role="row">

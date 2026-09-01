@@ -483,8 +483,9 @@ async function listAdminEntries(request, env) {
   const db = requireDatabase(env);
   await requireAdminEmail(request, env);
   const url = new URL(request.url);
-  const query = (url.searchParams.get("q") || "").normalize("NFKC").trim();
-  if (query.length > 50) throw { status: 400, code: "INVALID_QUERY", message: "검색어는 50자 이내로 입력해 주세요." };
+  const rawQuery = (url.searchParams.get("q") || "").trim();
+  const normalizedQuery = rawQuery.normalize("NFKC");
+  if (rawQuery.length > 50 || normalizedQuery.length > 50) throw { status: 400, code: "INVALID_QUERY", message: "검색어는 50자 이내로 입력해 주세요." };
   const range = url.searchParams.get("range") || "all";
   if (!["all", "7d", "30d"].includes(range)) {
     throw { status: 400, code: "INVALID_RANGE", message: "조회 기간을 확인해 주세요." };
@@ -508,10 +509,12 @@ async function listAdminEntries(request, env) {
 
   const where = [];
   const values = [];
-  if (query) {
-    const escaped = query.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
-    where.push("(name LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\')");
-    values.push(`%${escaped}%`, `%${escaped}%`);
+  if (rawQuery) {
+    const escapeLike = (value) => value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+    const rawPattern = `%${escapeLike(rawQuery)}%`;
+    const normalizedPattern = `%${escapeLike(normalizedQuery)}%`;
+    where.push("(name LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\')");
+    values.push(normalizedPattern, rawPattern, normalizedPattern);
   }
   if (range !== "all") {
     const days = range === "7d" ? 7 : 30;
@@ -943,12 +946,16 @@ async function rollbackInvitation(request, env) {
   await requireAdminEmail(request, env);
   const payload = await readJson(request);
   const revisionId = typeof payload.revisionId === "string" ? payload.revisionId : "";
+  const expectedPublishedRevisionId = typeof payload.expectedPublishedRevisionId === "string" ? payload.expectedPublishedRevisionId : "";
   const target = await getInvitationRevision(db, revisionId);
   if (!target || !["archived", "published"].includes(target.status) || !target.publishedAt) {
     return apiError(404, "REVISION_NOT_FOUND", "되돌릴 콘텐츠 버전을 찾을 수 없습니다.");
   }
   validateInvitationDocument(target.document, { publish: true });
   const state = await getInvitationState(db);
+  if (!expectedPublishedRevisionId || state?.published_revision_id !== expectedPublishedRevisionId) {
+    return apiError(409, "STALE_PUBLISHED_REVISION", "공개본이 변경되었습니다. 최신 상태를 다시 확인해 주세요.");
+  }
   const publishedAt = new Date().toISOString();
   const statements = [];
   if (state?.published_revision_id && state.published_revision_id !== revisionId) {

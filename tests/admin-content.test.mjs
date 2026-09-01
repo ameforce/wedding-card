@@ -130,7 +130,7 @@ test("development review keeps draft and published content as separate explicit 
   await adapter.publish(saved.draftRevisionId);
   assert.equal((await adapter.getPublicContent()).content.venue.name, "검토용 예식장");
   assert.equal(storage.values.has(LOCAL_REVIEW_STORAGE_KEY), true);
-  await adapter.republish(initial.publishedRevisionId);
+  await adapter.republish(initial.publishedRevisionId, saved.draftRevisionId);
   const republishedState = await adapter.getAdminState();
   assert.equal(republishedState.draftRevisionId, null);
   assert.equal(republishedState.draft, null);
@@ -579,11 +579,39 @@ test("authentication, refresh, dialog focus, and rollback guards protect privile
   assert.match(source, /opener\?\.focus\(\)/);
   assert.match(source, /revision\.publishedAt && !\[draftRevisionId, publishedRevisionId\]\.includes/);
   assert.match(client, /!target\.publishedAt/);
+  assert.match(source, /adapter\.republish\(republishTarget\.id, publishedRevisionId\)/);
+  assert.match(source, /STALE_PUBLISHED_REVISION/);
+  assert.match(client, /expectedPublishedRevisionId/);
+  assert.doesNotMatch(source, /versionHistory\.length - index/);
+  assert.match(source, /리비전 \$\{revision\.id\.slice\(0, 8\)\}/);
+  assert.match(source, /content-admin-validation-summary/);
   assert.match(shell, /inert=\{sidebarHidden \? true : undefined\}/);
+  assert.match(shell, /event\.key === "Escape"/);
+  assert.match(shell, /event\.key !== "Tab"/);
+  assert.match(shell, /className="admin-main-content" inert=\{compact && menuOpen \? true : undefined\}/);
   assert.match(shell, /closeButtonRef\.current\?\.focus\(\)/);
   assert.match(shell, /restoreMenuFocusRef\.current = true/);
   assert.match(shell, /menuButtonRef\.current\?\.focus\(\)/);
   assert.match(styles, /\.admin-sidebar \{[^}]*visibility: hidden/);
+});
+
+test("guestbook append failures preserve loaded rows and raw compatibility-form searches", async () => {
+  const admin = await readFile(new URL("../src/admin-content/GuestbookAdmin.jsx", import.meta.url), "utf8");
+  const api = await readFile(new URL("../src/guestbook-api.js", import.meta.url), "utf8");
+  assert.match(admin, /append && status === "error"/);
+  assert.match(admin, /status: "append-error"/);
+  assert.match(admin, /현재 목록은 그대로 유지됩니다/);
+  assert.match(admin, /\["ready", "loading-more", "append-error"\]/);
+  assert.match(admin, /setAppliedQuery\(query\.trim\(\)\)/);
+  assert.match(api, /const trimmedQuery = query\.trim\(\)/);
+  assert.doesNotMatch(api, /query\.normalize\("NFKC"\)/);
+});
+
+test("photo validation exposes the exact collapsed field before apply is enabled", () => {
+  const document = createContentDocument(weddingContent);
+  document.photos.pastel.hero.position = "invalid";
+  const errors = validateEditableContentDocument(document);
+  assert.match(errors["상단 대표 사진 초점 위치"], /50% 58%/);
 });
 
 test("applied admin content keeps full runtime photo objects", () => {
