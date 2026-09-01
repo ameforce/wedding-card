@@ -854,17 +854,30 @@ async function getAdminInvitation(request, env) {
   const historyResult = await db.prepare(
     "SELECT id, status, created_at, published_at FROM invitation_revisions ORDER BY created_at DESC LIMIT 20",
   ).all();
+  const history = (historyResult.results || []).map((revision) => ({
+    id: revision.id,
+    status: revision.status,
+    createdAt: revision.created_at,
+    publishedAt: revision.published_at,
+  }));
+  const historyIds = new Set(history.map((revision) => revision.id));
+  for (const current of [draft, published]) {
+    if (!current || historyIds.has(current.id)) continue;
+    history.push({
+      id: current.id,
+      status: current.status,
+      createdAt: current.createdAt,
+      publishedAt: current.publishedAt,
+    });
+    historyIds.add(current.id);
+  }
+  history.sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""));
   return json({
     draftRevisionId: draft?.id || null,
     publishedRevisionId: published?.id || null,
     draft,
     published,
-    history: (historyResult.results || []).map((revision) => ({
-      id: revision.id,
-      status: revision.status,
-      createdAt: revision.created_at,
-      publishedAt: revision.published_at,
-    })),
+    history,
   });
 }
 
