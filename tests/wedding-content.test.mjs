@@ -329,8 +329,10 @@ test("private guestbook recovery uses only name and password without exposing a 
 
 test("guestbook edit exposes a confirmed destructive author action and resets after deletion", () => {
   assert.match(app, /className="guestbook-delete"/);
-  assert.match(app, /삭제 후 복구할 수 없습니다/);
-  assert.match(app, /if \(!window\.confirm/);
+  assert.match(app, /role="dialog" aria-modal="true"/);
+  assert.match(app, /삭제한 글은 복구할 수 없습니다/);
+  assert.match(app, /setDeleteConfirmOpen\(true\)/);
+  assert.doesNotMatch(app, /window\.confirm/);
   assert.match(app, /await deleteGuestbookEntry\(\{ name, password \}\);\s*switchMode\("write"\);/);
   assert.match(app, /방명록을 삭제했습니다/);
 });
