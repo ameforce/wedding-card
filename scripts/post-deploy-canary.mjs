@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { chromium } from "playwright";
 
 const DEFAULT_BASE_URL = "https://wdcard.enmsoftware.com/";
 const DEFAULT_DATABASE = "wedding-card-guestbook-db";
@@ -223,6 +224,56 @@ async function verifyAdminBoundary(fetchImpl, baseUrl, identity, accessToken) {
   return "authenticated-admin";
 }
 
+export async function verifyGuestbookDeleteUi(baseUrl, identity, {
+  chromiumImpl = chromium,
+  expectedWorkerTag = process.env.WEDDING_CANARY_EXPECTED_WORKER_TAG || "",
+  expectedWorkerVersion = process.env.WEDDING_CANARY_EXPECTED_WORKER_VERSION || "",
+} = {}) {
+  const browser = await chromiumImpl.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  let deleteRequests = 0;
+  page.on("request", (request) => {
+    if (request.method() === "DELETE" && new URL(request.url()).pathname === "/api/guestbook/entries") deleteRequests += 1;
+  });
+
+  try {
+    const documentResponse = await page.goto(baseUrl.href, { waitUntil: "networkidle", timeout: HTTP_TIMEOUT_MS });
+    invariant(documentResponse?.status() === 200, `삭제 UI 문서 응답이 HTTP ${documentResponse?.status() ?? "NONE"}입니다.`);
+    invariant(expectedWorkerTag, "삭제 UI 검증에 기대 Worker tag가 없습니다.");
+    invariant(expectedWorkerVersion, "삭제 UI 검증에 기대 Worker version이 없습니다.");
+    invariant(documentResponse.headers()["x-wedding-worker-tag"] === expectedWorkerTag, "삭제 UI 문서의 Worker tag가 배포 SHA와 다릅니다.");
+    invariant(documentResponse.headers()["x-wedding-worker-version"] === expectedWorkerVersion, "삭제 UI 문서의 Worker version이 활성 버전과 다릅니다.");
+    const guestbook = page.locator(".guestbook-section");
+    await guestbook.getByRole("button", { name: "내 글 수정", exact: true }).click();
+    await guestbook.getByLabel("이름", { exact: true }).fill(identity.name);
+    await guestbook.getByLabel(/비밀번호/).fill(identity.password);
+    await guestbook.getByRole("button", { name: "내 글 불러오기", exact: true }).click();
+
+    const deleteButton = guestbook.getByRole("button", { name: "삭제", exact: true });
+    await deleteButton.waitFor({ state: "visible" });
+    await deleteButton.click();
+    const dialog = page.getByRole("dialog", { name: "이 방명록을 삭제할까요?" });
+    await dialog.waitFor({ state: "visible" });
+    invariant(deleteRequests === 0, "삭제 확인 전 DELETE 요청이 발생했습니다.");
+    await dialog.getByRole("button", { name: "취소", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    invariant(deleteRequests === 0, "삭제 취소 후 DELETE 요청이 발생했습니다.");
+
+    await deleteButton.click();
+    const deleteResponse = page.waitForResponse(
+      (response) => response.request().method() === "DELETE" && new URL(response.url()).pathname === "/api/guestbook/entries",
+      { timeout: HTTP_TIMEOUT_MS },
+    );
+    await page.getByRole("button", { name: "삭제하기", exact: true }).click();
+    const response = await deleteResponse;
+    invariant(response.status() === 200, `브라우저 삭제 요청이 HTTP ${response.status()}를 반환했습니다.`);
+    await guestbook.getByRole("button", { name: "비공개로 전하기", exact: true }).waitFor({ state: "visible" });
+    invariant(deleteRequests === 1, `삭제 확인 후 DELETE 요청이 ${deleteRequests}회 발생했습니다.`);
+  } finally {
+    await browser.close();
+  }
+}
+
 export async function runPostDeployCanary({
   allowProductionWrite = process.env.WEDDING_CANARY_ALLOW_PRODUCTION_WRITE === "1",
   allowD1AdminRead = process.env.WEDDING_CANARY_ALLOW_D1_ADMIN_READ === "1",
@@ -233,6 +284,9 @@ export async function runPostDeployCanary({
   idFactory,
   logger = console,
   passwordFactory,
+  expectedWorkerTag = process.env.WEDDING_CANARY_EXPECTED_WORKER_TAG || "",
+  expectedWorkerVersion = process.env.WEDDING_CANARY_EXPECTED_WORKER_VERSION || "",
+  verifyGuestbookDelete = verifyGuestbookDeleteUi,
 } = {}) {
   invariant(allowProductionWrite, "운영 합성 데이터 생성을 승인하려면 WEDDING_CANARY_ALLOW_PRODUCTION_WRITE=1이 필요합니다.");
   invariant(accessToken || allowD1AdminRead, "완전한 관리자 조회에는 WEDDING_CANARY_ACCESS_TOKEN이 필요합니다. D1 대체 검증은 WEDDING_CANARY_ALLOW_D1_ADMIN_READ=1로 명시해야 합니다.");
@@ -273,12 +327,11 @@ export async function runPostDeployCanary({
     logger.info("[canary] D1 저장 결과와 관리자 경계 확인");
     assertOwnedRows(await d1.findByName(identity.name), identity, identity.updatedMessage);
     const adminVerification = await verifyAdminBoundary(fetchImpl, url, identity, accessToken);
-    logger.info("[canary] 작성자 인증 방명록 삭제와 잔여 0 확인");
-    const deleted = await requestGuestbook(fetchImpl, url, "/api/guestbook/entries", "DELETE", {
-      name: identity.name,
-      password: identity.password,
-    }, 200);
-    invariant(deleted.deleted === true, "방명록 삭제 응답이 성공을 확인하지 못했습니다.");
+    logger.info("[canary] 실제 브라우저 삭제 취소·확인과 잔여 0 확인");
+    await verifyGuestbookDelete(url, identity, {
+      expectedWorkerTag,
+      expectedWorkerVersion,
+    });
     invariant((await d1.findByName(identity.name)).length === 0, "작성자 삭제 후 D1 행이 남아 있습니다.");
     result = { adminVerification, publicVerified: true, guestbookLifecycleVerified: true, guestbookDeleteVerified: true };
   } catch (error) {
