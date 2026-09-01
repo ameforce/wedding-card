@@ -596,7 +596,8 @@ test("authentication, refresh, dialog focus, and rollback guards protect privile
   assert.match(source, /load\(\{ preserveEditingDocument: dirty \}\)/);
   assert.match(source, /if \(!preserveEditingDocument\) setEditingDocument\(next\)/);
   assert.match(source, /setAppliedDocument\(next\)/);
-  assert.match(source, /const dirty = !contentDocumentsEqual\(editingDocument, appliedDocument\)/);
+  assert.match(source, /const dirty = useMemo\([\s\S]*?!contentDocumentsEqual\(editingDocument, appliedDocument\)[\s\S]*?\[editingDocument, appliedDocument\]/);
+  assert.equal(source.indexOf("const dirty = useMemo(") < source.indexOf("const refreshAdminState"), true);
   assert.doesNotMatch(source, /setDirty\(/);
   assert.match(source, /item\.status === "draft" \? \{ \.\.\.item, status: "archived" \} : item/);
   assert.match(source, /revision\.status === "archived" \? "이전 초안" : "초안"/);
