@@ -8,6 +8,7 @@ const RENDER_TIMEOUT_MS = 30_000;
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const VERSION_CONVERGENCE_ATTEMPTS = 12;
 const VERSION_CONVERGENCE_INTERVAL_MS = 5_000;
+const SCENARIO_CONVERGENCE_ATTEMPTS = 3;
 const GIT_SHA = /^[a-f0-9]{40}$/u;
 const WORKER_VERSION_ID = /^[a-f0-9-]{36}$/u;
 const BUNDLED_PASTEL_HERO = /^\/assets\/photos\/pastel-hero-(?:480|960)\.webp$/u;
@@ -364,6 +365,49 @@ async function collectScenario({
   }
 }
 
+export async function collectScenarioWithVersionConvergence({
+  scenario,
+  browser,
+  baseUrl,
+  expectedWorkerTag: targetWorkerTag,
+  expectedWorkerVersion: targetWorkerVersion,
+  fetchImpl = globalThis.fetch,
+  logger = console,
+  collectScenarioImpl = collectScenario,
+  waitForWorkerVersionImpl = waitForWorkerVersion,
+  attempts = SCENARIO_CONVERGENCE_ATTEMPTS,
+}) {
+  invariant(Number.isInteger(attempts) && attempts > 0, "렌더 시나리오 수렴 재시도 횟수가 올바르지 않습니다.");
+  const identityFailures = [];
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await collectScenarioImpl({
+        ...scenario,
+        browser,
+        baseUrl,
+        expectedWorkerTag: targetWorkerTag,
+        expectedWorkerVersion: targetWorkerVersion,
+      });
+    } catch (error) {
+      const identityMismatch = /HTML Worker (?:tag|version ID)가/u.test(error.message);
+      if (!identityMismatch) throw error;
+      identityFailures.push({ attempt, error: error.message });
+      if (attempt >= attempts) {
+        throw new Error(`[${scenario.name}] 브라우저 문서가 배포 Worker로 수렴하지 않았습니다. identityFailures=${JSON.stringify(identityFailures)}`, { cause: error });
+      }
+      logger.info(`[production-render-canary] ${scenario.name} 문서가 이전 Worker를 관찰해 재수렴합니다: attempt=${attempt}`);
+      await waitForWorkerVersionImpl({
+        baseUrl,
+        expectedTag: targetWorkerTag,
+        expectedVersion: targetWorkerVersion,
+        fetchImpl,
+        logger,
+      });
+    }
+  }
+  throw new Error(`[${scenario.name}] 렌더 시나리오 수렴 상태가 올바르지 않습니다.`);
+}
+
 export async function runPostDeployRenderCanary({
   baseUrl = process.env.WEDDING_CANARY_BASE_URL || DEFAULT_BASE_URL,
   expectedTag = process.env.WEDDING_CANARY_EXPECTED_WORKER_TAG,
@@ -394,12 +438,14 @@ export async function runPostDeployRenderCanary({
     ];
     const scenarios = [];
     for (const config of scenarioConfigs) {
-      const evidence = await collectScenario({
-        ...config,
+      const evidence = await collectScenarioWithVersionConvergence({
+        scenario: config,
         browser,
         baseUrl: normalizedBaseUrl,
         expectedWorkerTag: targetWorkerTag,
         expectedWorkerVersion: targetWorkerVersion,
+        fetchImpl,
+        logger,
       });
       validateRenderScenario({
         name: config.name,

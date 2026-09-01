@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  collectScenarioWithVersionConvergence,
   formatRenderDiagnostic,
   resolveExpectedWorkerIdentity,
   validateRenderEvidence,
@@ -160,6 +161,43 @@ test("render canary bounds version convergence failure and reports observed vers
     logger: { info() {} },
     now: () => 123,
   }), new RegExp(`수렴하지 않았습니다.*${STALE_VERSION}`));
+});
+
+test("each browser scenario retries only Worker identity drift after bounded re-convergence", async () => {
+  let collections = 0;
+  let convergenceChecks = 0;
+  const result = await collectScenarioWithVersionConvergence({
+    scenario: { name: "cold-400ms", latencyMs: 400 },
+    browser: {},
+    baseUrl: new URL(BASE),
+    expectedWorkerTag: TARGET_SHA,
+    expectedWorkerVersion: TARGET_VERSION,
+    logger: { info() {} },
+    collectScenarioImpl: async () => {
+      collections += 1;
+      if (collections === 1) throw new Error(`[cold-400ms] HTML Worker tag가 배포 SHA와 다릅니다: ${STALE_SHA}; diagnostics={}`);
+      return evidence();
+    },
+    waitForWorkerVersionImpl: async ({ expectedTag, expectedVersion }) => {
+      convergenceChecks += 1;
+      assert.equal(expectedTag, TARGET_SHA);
+      assert.equal(expectedVersion, TARGET_VERSION);
+    },
+  });
+  assert.equal(result.responseHeaders.workerVersion, TARGET_VERSION);
+  assert.equal(collections, 2);
+  assert.equal(convergenceChecks, 1);
+
+  await assert.rejects(collectScenarioWithVersionConvergence({
+    scenario: { name: "warm-cache", warm: true },
+    browser: {},
+    baseUrl: new URL(BASE),
+    expectedWorkerTag: TARGET_SHA,
+    expectedWorkerVersion: TARGET_VERSION,
+    logger: { info() {} },
+    collectScenarioImpl: async () => { throw new Error("hero decode failed"); },
+    waitForWorkerVersionImpl: async () => assert.fail("non-identity failures must not retry"),
+  }), /hero decode failed/);
 });
 
 test("standalone render canary reads the exact active identity when CI inputs are absent", async () => {
