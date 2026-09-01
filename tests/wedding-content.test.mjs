@@ -350,7 +350,7 @@ test("couple-only guestbook admin preserves auth-required and unavailable transi
   assert.match(guestbookAdmin, /state\.status === "auth-required" \? \(/);
   assert.match(guestbookAdmin, /Google 계정으로 다시 로그인/);
   assert.match(guestbookAdmin, /\["error", "unavailable"\]\.includes\(state\.status\)/);
-  assert.match(guestbookAdmin, /\["ready", "loading-more"\]\.includes\(state\.status\) && state\.entries\.length > 0/);
+  assert.match(guestbookAdmin, /\["ready", "loading-more", "append-error"\]\.includes\(state\.status\) && state\.entries\.length > 0/);
 });
 
 test("public section motion stays active in Chrome while capture mode remains static", () => {
