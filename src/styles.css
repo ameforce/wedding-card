@@ -365,10 +365,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .guestbook-actions .guestbook-submit { margin-top: 0; }
 .guestbook-delete { min-width: 78px; padding: 0 16px; color: #9b3d42; background: rgba(255, 255, 255, .54); border: 1px solid rgba(155, 61, 66, .3); }
 .guestbook-submit:disabled, .guestbook-delete:disabled { cursor: wait; opacity: .58; }
+.guestbook-delete-portal { -webkit-user-select: none; user-select: none; }
 .guestbook-delete-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; padding: 24px; place-items: center; background: rgba(42, 40, 38, .34); backdrop-filter: blur(5px); }
 .guestbook-delete-dialog { width: min(100%, 360px); padding: 24px; color: #403b37; background: #fffdf9; border: 1px solid rgba(91, 82, 73, .16); border-radius: 18px; box-shadow: 0 24px 70px rgba(38, 35, 32, .2); text-align: left; }
 .guestbook-delete-dialog h3 { margin: 0 0 8px; font-family: "Noto Serif KR Variable", serif; font-size: 21px; font-weight: 600; }
 .guestbook-delete-dialog p { margin: 0; color: #736b65; font-size: 15px; line-height: 1.65; }
+.guestbook-delete-dialog .guestbook-delete-error { margin-top: 12px; color: #9b3d42; font-weight: 650; }
 .guestbook-delete-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 22px; }
 .guestbook-delete-dialog-actions button { min-height: 48px; color: #5d5650; background: #f4f0eb; border: 1px solid rgba(91, 82, 73, .14); border-radius: 12px; cursor: pointer; font: inherit; font-size: 15px; font-weight: 650; }
 .guestbook-delete-dialog-actions button.is-destructive { color: #fff; background: #9b4d58; border-color: #9b4d58; }

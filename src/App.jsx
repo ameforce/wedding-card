@@ -690,6 +690,7 @@ function GuestbookSection({ notify }) {
   const [unlocked, setUnlocked] = useState(false);
   const [busyAction, setBusyAction] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const deleteTriggerRef = useRef(null);
   const deleteDialogRef = useRef(null);
   const deleteCancelRef = useRef(null);
@@ -697,6 +698,7 @@ function GuestbookSection({ notify }) {
 
   const closeDeleteConfirm = () => {
     if (busy) return;
+    setDeleteError("");
     setDeleteConfirmOpen(false);
     requestAnimationFrame(() => deleteTriggerRef.current?.focus());
   };
@@ -741,6 +743,7 @@ function GuestbookSection({ notify }) {
     setMode(nextMode);
     setPassword("");
     setUnlocked(false);
+    setDeleteError("");
     setDeleteConfirmOpen(false);
     if (nextMode === "write") {
       setName("");
@@ -778,12 +781,14 @@ function GuestbookSection({ notify }) {
   };
 
   const remove = async () => {
+    setDeleteError("");
     setBusyAction("delete");
     try {
       await deleteGuestbookEntry({ name, password });
       switchMode("write");
       notify("방명록을 삭제했습니다.");
     } catch (error) {
+      setDeleteError(error.message);
       notify(error.message, "error");
     } finally {
       setBusyAction(null);
@@ -824,17 +829,19 @@ function GuestbookSection({ notify }) {
             {busyAction === "submit" ? "처리 중…" : mode === "write" ? "비공개로 전하기" : unlocked ? "수정 저장" : "내 글 불러오기"}
           </button>
           {unlocked && (
-            <button ref={deleteTriggerRef} className="guestbook-delete" type="button" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}>
+            <button ref={deleteTriggerRef} className="guestbook-delete" type="button" disabled={busy} onClick={() => { setDeleteError(""); setDeleteConfirmOpen(true); }}>
               {busyAction === "delete" ? "삭제 중…" : "삭제"}
             </button>
           )}
         </div>
       </form>
       {deleteConfirmOpen && createPortal((
+        <div className={`guestbook-delete-portal ${deleteTriggerRef.current?.closest(".pastel-invitation") ? "pastel-invitation" : "quiet-invitation"}`}>
         <div className="guestbook-delete-backdrop">
           <div ref={deleteDialogRef} className="guestbook-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="guestbook-delete-title" aria-describedby="guestbook-delete-description">
             <h3 id="guestbook-delete-title">이 방명록을 삭제할까요?</h3>
             <p id="guestbook-delete-description">삭제한 글은 복구할 수 없습니다.</p>
+            {deleteError && <p className="guestbook-delete-error" role="alert">{deleteError}</p>}
             <div className="guestbook-delete-dialog-actions">
               <button
                 ref={deleteCancelRef}
@@ -849,6 +856,7 @@ function GuestbookSection({ notify }) {
               </button>
             </div>
           </div>
+        </div>
         </div>
       ), document.body)}
     </section>

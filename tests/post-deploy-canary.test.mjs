@@ -118,6 +118,35 @@ test("production canary verifies the authenticated admin list when a short-lived
   assert.equal(getRow(), null);
 });
 
+test("production canary binds the browser delete scenario to the activated Worker identity", async () => {
+  const { d1, fetchImpl } = fixture();
+  let observedIdentity;
+  await runPostDeployCanary({
+    allowProductionWrite: true,
+    allowD1AdminRead: true,
+    d1,
+    expectedWorkerTag: "expected-sha",
+    expectedWorkerVersion: "expected-version",
+    fetchImpl,
+    idFactory: () => "feedface-abcd-ef00",
+    logger: { info() {} },
+    passwordFactory: () => "identity-secret",
+    verifyGuestbookDelete: async (baseUrl, identity, options) => {
+      observedIdentity = options;
+      const response = await fetchImpl(new URL("/api/guestbook/entries", baseUrl), {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: identity.name, password: identity.password }),
+      });
+      assert.equal(response.status, 200);
+    },
+  });
+  assert.deepEqual(observedIdentity, {
+    expectedWorkerTag: "expected-sha",
+    expectedWorkerVersion: "expected-version",
+  });
+});
+
 test("production canary always removes its owned row when an intermediate check fails", async () => {
   const { d1, fetchImpl, getRow, verifyGuestbookDelete } = fixture({ failUpdate: true });
   await assert.rejects(

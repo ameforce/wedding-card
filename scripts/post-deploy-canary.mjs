@@ -224,7 +224,11 @@ async function verifyAdminBoundary(fetchImpl, baseUrl, identity, accessToken) {
   return "authenticated-admin";
 }
 
-export async function verifyGuestbookDeleteUi(baseUrl, identity, { chromiumImpl = chromium } = {}) {
+export async function verifyGuestbookDeleteUi(baseUrl, identity, {
+  chromiumImpl = chromium,
+  expectedWorkerTag = process.env.WEDDING_CANARY_EXPECTED_WORKER_TAG || "",
+  expectedWorkerVersion = process.env.WEDDING_CANARY_EXPECTED_WORKER_VERSION || "",
+} = {}) {
   const browser = await chromiumImpl.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let deleteRequests = 0;
@@ -233,7 +237,12 @@ export async function verifyGuestbookDeleteUi(baseUrl, identity, { chromiumImpl 
   });
 
   try {
-    await page.goto(baseUrl.href, { waitUntil: "networkidle", timeout: HTTP_TIMEOUT_MS });
+    const documentResponse = await page.goto(baseUrl.href, { waitUntil: "networkidle", timeout: HTTP_TIMEOUT_MS });
+    invariant(documentResponse?.status() === 200, `삭제 UI 문서 응답이 HTTP ${documentResponse?.status() ?? "NONE"}입니다.`);
+    invariant(expectedWorkerTag, "삭제 UI 검증에 기대 Worker tag가 없습니다.");
+    invariant(expectedWorkerVersion, "삭제 UI 검증에 기대 Worker version이 없습니다.");
+    invariant(documentResponse.headers()["x-wedding-worker-tag"] === expectedWorkerTag, "삭제 UI 문서의 Worker tag가 배포 SHA와 다릅니다.");
+    invariant(documentResponse.headers()["x-wedding-worker-version"] === expectedWorkerVersion, "삭제 UI 문서의 Worker version이 활성 버전과 다릅니다.");
     const guestbook = page.locator(".guestbook-section");
     await guestbook.getByRole("button", { name: "내 글 수정", exact: true }).click();
     await guestbook.getByLabel("이름", { exact: true }).fill(identity.name);
@@ -275,6 +284,8 @@ export async function runPostDeployCanary({
   idFactory,
   logger = console,
   passwordFactory,
+  expectedWorkerTag = process.env.WEDDING_CANARY_EXPECTED_WORKER_TAG || "",
+  expectedWorkerVersion = process.env.WEDDING_CANARY_EXPECTED_WORKER_VERSION || "",
   verifyGuestbookDelete = verifyGuestbookDeleteUi,
 } = {}) {
   invariant(allowProductionWrite, "운영 합성 데이터 생성을 승인하려면 WEDDING_CANARY_ALLOW_PRODUCTION_WRITE=1이 필요합니다.");
@@ -317,7 +328,10 @@ export async function runPostDeployCanary({
     assertOwnedRows(await d1.findByName(identity.name), identity, identity.updatedMessage);
     const adminVerification = await verifyAdminBoundary(fetchImpl, url, identity, accessToken);
     logger.info("[canary] 실제 브라우저 삭제 취소·확인과 잔여 0 확인");
-    await verifyGuestbookDelete(url, identity);
+    await verifyGuestbookDelete(url, identity, {
+      expectedWorkerTag,
+      expectedWorkerVersion,
+    });
     invariant((await d1.findByName(identity.name)).length === 0, "작성자 삭제 후 D1 행이 남아 있습니다.");
     result = { adminVerification, publicVerified: true, guestbookLifecycleVerified: true, guestbookDeleteVerified: true };
   } catch (error) {

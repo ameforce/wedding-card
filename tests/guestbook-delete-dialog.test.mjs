@@ -6,7 +6,7 @@ import { createServer } from "vite";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 
-test("guestbook deletion requires an in-app confirmation and sends one request only after confirmation", { timeout: 60_000 }, async () => {
+test("guestbook deletion requires an accessible in-app confirmation and keeps failures visible", { timeout: 60_000 }, async () => {
   const server = await createServer({
     root: projectRoot,
     logLevel: "silent",
@@ -18,6 +18,7 @@ test("guestbook deletion requires an in-app confirmation and sends one request o
   assert.equal(typeof address, "object");
   let browser;
   let deleteRequests = 0;
+  let failNextDelete = true;
 
   try {
     browser = await chromium.launch({ headless: true });
@@ -32,6 +33,11 @@ test("guestbook deletion requires an in-app confirmation and sends one request o
     await page.route("**/api/guestbook/entries", async (route) => {
       if (route.request().method() !== "DELETE") return route.continue();
       deleteRequests += 1;
+      if (failNextDelete) {
+        failNextDelete = false;
+        await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ code: "INTERNAL_ERROR" }) });
+        return;
+      }
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: true }) });
     });
 
@@ -46,6 +52,8 @@ test("guestbook deletion requires an in-app confirmation and sends one request o
     const dialog = page.getByRole("dialog", { name: "이 방명록을 삭제할까요?" });
     await dialog.waitFor({ state: "visible" });
     assert.equal(deleteRequests, 0);
+    assert.equal(await page.locator(".guestbook-delete-portal").evaluate((element) => element.classList.contains("pastel-invitation")), true);
+    assert.equal(await page.locator(".guestbook-delete-portal").evaluate((element) => getComputedStyle(element).userSelect), "none");
 
     assert.equal(await page.locator("#root").getAttribute("inert"), "");
     const cancelButton = dialog.getByRole("button", { name: "취소", exact: true });
@@ -70,8 +78,12 @@ test("guestbook deletion requires an in-app confirmation and sends one request o
 
     await deleteButton.click();
     await page.getByRole("button", { name: "삭제하기", exact: true }).click();
-    await page.getByRole("button", { name: "비공개로 전하기", exact: true }).waitFor({ state: "visible" });
+    await dialog.getByRole("alert").waitFor({ state: "visible" });
     assert.equal(deleteRequests, 1);
+    assert.equal(await dialog.isVisible(), true);
+    await page.getByRole("button", { name: "삭제하기", exact: true }).click();
+    await page.getByRole("button", { name: "비공개로 전하기", exact: true }).waitFor({ state: "visible" });
+    assert.equal(deleteRequests, 2);
   } finally {
     await browser?.close();
     await server.close();
