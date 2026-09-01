@@ -689,12 +689,59 @@ function GuestbookSection({ notify }) {
   const [message, setMessage] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [busyAction, setBusyAction] = useState(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const deleteTriggerRef = useRef(null);
+  const deleteDialogRef = useRef(null);
+  const deleteCancelRef = useRef(null);
   const busy = busyAction !== null;
+
+  const closeDeleteConfirm = () => {
+    if (busy) return;
+    setDeleteConfirmOpen(false);
+    requestAnimationFrame(() => deleteTriggerRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!deleteConfirmOpen) return undefined;
+    const appRoot = document.getElementById("root");
+    const wasInert = appRoot?.hasAttribute("inert") ?? false;
+    const previousOverflow = document.body.style.overflow;
+    appRoot?.setAttribute("inert", "");
+    document.body.style.overflow = "hidden";
+    deleteCancelRef.current?.focus();
+    const keepFocusInside = (event) => {
+      if (event.key === "Escape" && !busy) {
+        event.preventDefault();
+        setDeleteConfirmOpen(false);
+        requestAnimationFrame(() => deleteTriggerRef.current?.focus());
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...(deleteDialogRef.current?.querySelectorAll("button:not(:disabled)") ?? [])];
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", keepFocusInside);
+    return () => {
+      window.removeEventListener("keydown", keepFocusInside);
+      if (!wasInert) appRoot?.removeAttribute("inert");
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [busy, deleteConfirmOpen]);
 
   const switchMode = (nextMode) => {
     setMode(nextMode);
     setPassword("");
     setUnlocked(false);
+    setDeleteConfirmOpen(false);
     if (nextMode === "write") {
       setName("");
       setMessage("");
@@ -731,7 +778,6 @@ function GuestbookSection({ notify }) {
   };
 
   const remove = async () => {
-    if (!window.confirm("이 방명록을 삭제할까요? 삭제 후 복구할 수 없습니다.")) return;
     setBusyAction("delete");
     try {
       await deleteGuestbookEntry({ name, password });
@@ -778,12 +824,33 @@ function GuestbookSection({ notify }) {
             {busyAction === "submit" ? "처리 중…" : mode === "write" ? "비공개로 전하기" : unlocked ? "수정 저장" : "내 글 불러오기"}
           </button>
           {unlocked && (
-            <button className="guestbook-delete" type="button" disabled={busy} onClick={remove}>
+            <button ref={deleteTriggerRef} className="guestbook-delete" type="button" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}>
               {busyAction === "delete" ? "삭제 중…" : "삭제"}
             </button>
           )}
         </div>
       </form>
+      {deleteConfirmOpen && createPortal((
+        <div className="guestbook-delete-backdrop">
+          <div ref={deleteDialogRef} className="guestbook-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="guestbook-delete-title" aria-describedby="guestbook-delete-description">
+            <h3 id="guestbook-delete-title">이 방명록을 삭제할까요?</h3>
+            <p id="guestbook-delete-description">삭제한 글은 복구할 수 없습니다.</p>
+            <div className="guestbook-delete-dialog-actions">
+              <button
+                ref={deleteCancelRef}
+                type="button"
+                disabled={busy}
+                onClick={closeDeleteConfirm}
+              >
+                취소
+              </button>
+              <button className="is-destructive" type="button" disabled={busy} onClick={remove}>
+                {busyAction === "delete" ? "삭제 중…" : "삭제하기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
     </section>
   );
 }

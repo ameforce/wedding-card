@@ -365,6 +365,14 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .guestbook-actions .guestbook-submit { margin-top: 0; }
 .guestbook-delete { min-width: 78px; padding: 0 16px; color: #9b3d42; background: rgba(255, 255, 255, .54); border: 1px solid rgba(155, 61, 66, .3); }
 .guestbook-submit:disabled, .guestbook-delete:disabled { cursor: wait; opacity: .58; }
+.guestbook-delete-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; padding: 24px; place-items: center; background: rgba(42, 40, 38, .34); backdrop-filter: blur(5px); }
+.guestbook-delete-dialog { width: min(100%, 360px); padding: 24px; color: #403b37; background: #fffdf9; border: 1px solid rgba(91, 82, 73, .16); border-radius: 18px; box-shadow: 0 24px 70px rgba(38, 35, 32, .2); text-align: left; }
+.guestbook-delete-dialog h3 { margin: 0 0 8px; font-family: "Noto Serif KR Variable", serif; font-size: 21px; font-weight: 600; }
+.guestbook-delete-dialog p { margin: 0; color: #736b65; font-size: 15px; line-height: 1.65; }
+.guestbook-delete-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 22px; }
+.guestbook-delete-dialog-actions button { min-height: 48px; color: #5d5650; background: #f4f0eb; border: 1px solid rgba(91, 82, 73, .14); border-radius: 12px; cursor: pointer; font: inherit; font-size: 15px; font-weight: 650; }
+.guestbook-delete-dialog-actions button.is-destructive { color: #fff; background: #9b4d58; border-color: #9b4d58; }
+.guestbook-delete-dialog-actions button:disabled { cursor: wait; opacity: .58; }
 
 .music-control { position: fixed; z-index: 24; top: calc(96px + env(safe-area-inset-top)); right: max(16px, calc((100vw - 430px) / 2 + 16px)); }
 .music-control button { display: grid; width: 44px; height: 44px; padding: 0; place-items: center; color: #415a79; background: rgba(255, 255, 255, .86); border: 1px solid rgba(71, 98, 127, .16); border-radius: 50%; cursor: pointer; box-shadow: 0 8px 22px rgba(42, 59, 77, .12); backdrop-filter: blur(10px); }
@@ -384,6 +392,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-invitation .guestbook-tabs button.is-active { background: rgba(213, 229, 241, .66); border-color: rgba(96, 127, 158, .3); }
 .pastel-invitation .guestbook-submit { background: #6f8aa6; }
 .pastel-invitation .guestbook-delete { color: #9b4d58; background: rgba(255, 250, 250, .62); border-color: rgba(155, 77, 88, .28); }
+.pastel-invitation .guestbook-delete-dialog { color: #294765; background: #fffdfb; border-color: rgba(71, 98, 127, .14); }
+.pastel-invitation .guestbook-delete-dialog p { color: #6d7d8c; }
+.pastel-invitation .guestbook-delete-dialog-actions button { color: #506a82; background: #eef4f7; border-color: rgba(71, 98, 127, .14); }
+.pastel-invitation .guestbook-delete-dialog-actions button.is-destructive { color: #fff; background: #9b4d58; border-color: #9b4d58; }
 .pastel-invitation .music-credit { color: #74869a; }
 
 .guestbook-admin-shell { min-height: 100vh; padding: 40px 20px; color: #233d60; background: #f8f7f2; }
