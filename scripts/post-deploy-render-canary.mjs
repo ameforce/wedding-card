@@ -13,6 +13,14 @@ const GIT_SHA = /^[a-f0-9]{40}$/u;
 const WORKER_VERSION_ID = /^[a-f0-9-]{36}$/u;
 const BUNDLED_PASTEL_HERO = /^\/assets\/photos\/pastel-hero-(?:480|960)\.webp$/u;
 
+class WorkerIdentityMismatchError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = "WorkerIdentityMismatchError";
+    this.code = "WORKER_IDENTITY_MISMATCH";
+  }
+}
+
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -326,8 +334,12 @@ async function collectScenario({
       workerVersion: headers["x-wedding-worker-version"] || "",
     };
     invariant(responseHeaders.status === 200, `HTML document 응답이 HTTP ${responseHeaders.status}입니다.`);
-    invariant(responseHeaders.workerTag === targetWorkerTag, `HTML Worker tag가 배포 SHA와 다릅니다: ${responseHeaders.workerTag || "missing"}`);
-    invariant(responseHeaders.workerVersion === targetWorkerVersion, `HTML Worker version ID가 활성 버전과 다릅니다: ${responseHeaders.workerVersion || "missing"}`);
+    if (responseHeaders.workerTag !== targetWorkerTag) {
+      throw new WorkerIdentityMismatchError(`HTML Worker tag가 배포 SHA와 다릅니다: ${responseHeaders.workerTag || "missing"}`);
+    }
+    if (responseHeaders.workerVersion !== targetWorkerVersion) {
+      throw new WorkerIdentityMismatchError(`HTML Worker version ID가 활성 버전과 다릅니다: ${responseHeaders.workerVersion || "missing"}`);
+    }
     await page.waitForFunction(() => {
       const root = document.querySelector("main[data-content-source='cloudflare-published']");
       const image = document.querySelector(".pastel-hero-photo.is-image-ready img");
@@ -359,7 +371,8 @@ async function collectScenario({
       consoleErrors,
       pageErrors,
     });
-    throw new Error(`[${name}] ${error.message}; diagnostics=${diagnostic}`, { cause: error });
+    const WrappedError = error?.code === "WORKER_IDENTITY_MISMATCH" ? WorkerIdentityMismatchError : Error;
+    throw new WrappedError(`[${name}] ${error.message}; diagnostics=${diagnostic}`, { cause: error });
   } finally {
     await context.close();
   }
@@ -389,20 +402,24 @@ export async function collectScenarioWithVersionConvergence({
         expectedWorkerVersion: targetWorkerVersion,
       });
     } catch (error) {
-      const identityMismatch = /HTML Worker (?:tag|version ID)가/u.test(error.message);
+      const identityMismatch = error?.code === "WORKER_IDENTITY_MISMATCH";
       if (!identityMismatch) throw error;
       identityFailures.push({ attempt, error: error.message });
       if (attempt >= attempts) {
         throw new Error(`[${scenario.name}] 브라우저 문서가 배포 Worker로 수렴하지 않았습니다. identityFailures=${JSON.stringify(identityFailures)}`, { cause: error });
       }
       logger.info(`[production-render-canary] ${scenario.name} 문서가 이전 Worker를 관찰해 재수렴합니다: attempt=${attempt}`);
-      await waitForWorkerVersionImpl({
-        baseUrl,
-        expectedTag: targetWorkerTag,
-        expectedVersion: targetWorkerVersion,
-        fetchImpl,
-        logger,
-      });
+      try {
+        await waitForWorkerVersionImpl({
+          baseUrl,
+          expectedTag: targetWorkerTag,
+          expectedVersion: targetWorkerVersion,
+          fetchImpl,
+          logger,
+        });
+      } catch (probeError) {
+        throw new Error(`[${scenario.name}] Worker 재수렴 probe가 실패했습니다. identityFailures=${JSON.stringify(identityFailures)}; probeError=${probeError.message}`, { cause: probeError });
+      }
     }
   }
   throw new Error(`[${scenario.name}] 렌더 시나리오 수렴 상태가 올바르지 않습니다.`);
