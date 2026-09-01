@@ -64,11 +64,19 @@ function fixture({ failUpdate = false, failDelete = false, authenticatedAdmin = 
       row = null;
     },
   };
-  return { calls, d1, fetchImpl, getRow: () => row };
+  const verifyGuestbookDelete = async (baseUrl, identity) => {
+    const response = await fetchImpl(new URL("/api/guestbook/entries", baseUrl), {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: identity.name, password: identity.password }),
+    });
+    assert.equal(response.status, 200, `browser delete failed with HTTP ${response.status}`);
+  };
+  return { calls, d1, fetchImpl, getRow: () => row, verifyGuestbookDelete };
 }
 
 test("production canary covers public, guestbook, D1, Access denial, and exact cleanup without logging secrets", async () => {
-  const { calls, d1, fetchImpl, getRow } = fixture();
+  const { calls, d1, fetchImpl, getRow, verifyGuestbookDelete } = fixture();
   const log = [];
   const secret = "not-printed-secret";
   const result = await runPostDeployCanary({
@@ -79,6 +87,7 @@ test("production canary covers public, guestbook, D1, Access denial, and exact c
     idFactory: () => "12345678-abcd-ef00",
     logger: { info: (message) => log.push(message) },
     passwordFactory: () => secret,
+    verifyGuestbookDelete,
   });
   assert.deepEqual(result, {
     adminVerification: "access-denied",
@@ -94,7 +103,7 @@ test("production canary covers public, guestbook, D1, Access denial, and exact c
 });
 
 test("production canary verifies the authenticated admin list when a short-lived Access token is supplied", async () => {
-  const { d1, fetchImpl, getRow } = fixture({ authenticatedAdmin: true });
+  const { d1, fetchImpl, getRow, verifyGuestbookDelete } = fixture({ authenticatedAdmin: true });
   const result = await runPostDeployCanary({
     accessToken: "short-lived-token",
     allowProductionWrite: true,
@@ -103,13 +112,43 @@ test("production canary verifies the authenticated admin list when a short-lived
     idFactory: () => "87654321-abcd-ef00",
     logger: { info() {} },
     passwordFactory: () => "another-secret",
+    verifyGuestbookDelete,
   });
   assert.equal(result.adminVerification, "authenticated-admin");
   assert.equal(getRow(), null);
 });
 
+test("production canary binds the browser delete scenario to the activated Worker identity", async () => {
+  const { d1, fetchImpl } = fixture();
+  let observedIdentity;
+  await runPostDeployCanary({
+    allowProductionWrite: true,
+    allowD1AdminRead: true,
+    d1,
+    expectedWorkerTag: "expected-sha",
+    expectedWorkerVersion: "expected-version",
+    fetchImpl,
+    idFactory: () => "feedface-abcd-ef00",
+    logger: { info() {} },
+    passwordFactory: () => "identity-secret",
+    verifyGuestbookDelete: async (baseUrl, identity, options) => {
+      observedIdentity = options;
+      const response = await fetchImpl(new URL("/api/guestbook/entries", baseUrl), {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: identity.name, password: identity.password }),
+      });
+      assert.equal(response.status, 200);
+    },
+  });
+  assert.deepEqual(observedIdentity, {
+    expectedWorkerTag: "expected-sha",
+    expectedWorkerVersion: "expected-version",
+  });
+});
+
 test("production canary always removes its owned row when an intermediate check fails", async () => {
-  const { d1, fetchImpl, getRow } = fixture({ failUpdate: true });
+  const { d1, fetchImpl, getRow, verifyGuestbookDelete } = fixture({ failUpdate: true });
   await assert.rejects(
     runPostDeployCanary({
       allowProductionWrite: true,
@@ -119,6 +158,7 @@ test("production canary always removes its owned row when an intermediate check 
       idFactory: () => "abcdef12-3456-7890",
       logger: { info() {} },
       passwordFactory: () => "cleanup-secret",
+      verifyGuestbookDelete,
     }),
     /PATCH \/api\/guestbook\/entries 실패/,
   );
@@ -126,7 +166,7 @@ test("production canary always removes its owned row when an intermediate check 
 });
 
 test("production canary falls back to exact owned-row cleanup when author deletion fails", async () => {
-  const { d1, fetchImpl, getRow } = fixture({ failDelete: true });
+  const { d1, fetchImpl, getRow, verifyGuestbookDelete } = fixture({ failDelete: true });
   await assert.rejects(
     runPostDeployCanary({
       allowProductionWrite: true,
@@ -136,8 +176,9 @@ test("production canary falls back to exact owned-row cleanup when author deleti
       idFactory: () => "deadbeef-3456-7890",
       logger: { info() {} },
       passwordFactory: () => "cleanup-delete-secret",
+      verifyGuestbookDelete,
     }),
-    /DELETE \/api\/guestbook\/entries 실패/,
+    /browser delete failed with HTTP 500/,
   );
   assert.equal(getRow(), null);
 });

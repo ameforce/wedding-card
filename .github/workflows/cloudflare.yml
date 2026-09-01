@@ -39,6 +39,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Install Chromium for browser UI tests
+        run: npx playwright install --with-deps chromium
+
       - name: Run UI tests
         run: npm run test:ui
 
