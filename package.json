@@ -1,6 +1,6 @@
 {
   "name": "wedding-card",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -21,7 +21,7 @@
     "lint": "eslint .",
     "optimize:assets": "node scripts/optimize-assets.mjs",
     "preview": "vite preview",
-    "test:ui": "node --test tests/sesang-sticker-layout.test.mjs tests/wedding-content.test.mjs tests/text-alignment.test.mjs tests/mobile-zoom-guard.test.mjs tests/invitation-actions.test.mjs tests/admin-content.test.mjs",
+    "test:ui": "node --test tests/sesang-sticker-layout.test.mjs tests/wedding-content.test.mjs tests/text-alignment.test.mjs tests/mobile-zoom-guard.test.mjs tests/invitation-actions.test.mjs tests/admin-content.test.mjs tests/guestbook-delete-dialog.test.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs tests/guestbook-worker.test.mjs tests/content-worker.test.mjs tests/post-deploy-render-canary.test.mjs tests/post-deploy-canary.test.mjs tests/d1-migrations.test.mjs tests/cloudflare-access.test.mjs tests/cloudflare-deployment-state.test.mjs tests/cloudflare-deployment-workflow.test.mjs"
   },
   "dependencies": {
