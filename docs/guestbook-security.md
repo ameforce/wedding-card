@@ -5,14 +5,15 @@ The browser never receives a guestbook list, password hash, database credential,
 - `POST /api/guestbook/entries` creates a private entry and returns only the fixed non-sensitive `permanent` retention policy. Display names are trimmed, NFKC-normalized, and unique; a duplicate is rejected with guidance to add an affiliation or alias.
 - `POST /api/guestbook/entries/unlock` returns one entry only after its exact normalized name and password pass server-side verification.
 - `PATCH /api/guestbook/entries` updates that uniquely named entry only after the same verification.
+- `DELETE /api/guestbook/entries` permanently deletes that uniquely named entry only after the same verification. It returns no entry identifier or private content.
 - `GET /api/guestbook/entries` is always rejected.
 - `GET /api/guestbook/admin/entries` is the only list endpoint and fails closed unless a Cloudflare Access JWT passes signature, issuer, audience, expiry, and exact two-email allowlist validation inside the Worker.
 
 Author passwords are intentionally length-validated at 4–72 characters to keep guest entry practical, then processed with PBKDF2-HMAC-SHA256 at 100,000 iterations and a random 128-bit salt. This is the maximum supported by the deployed workerd runtime. The encoded verifier carries its iteration count, and the Worker rejects unsupported metadata before derivation; plaintext passwords are neither stored nor logged. Comparisons scan every derived byte. The short minimum is compensated by a shared five-per-minute unlock/update credential budget, a 15-minute D1-backed lock after five failures in one 15-minute window, and a four-check per-isolate PBKDF2 concurrency ceiling. A successful authentication resets only that entry's failure state.
 
-Public create, unlock, and update responses never expose the internal entry id. Lookup and update return the same generic authentication failure for a missing name, wrong password, or unsafe legacy duplicate. A D1 unique index provides the final duplicate-name race guard.
+Public create, unlock, update, and delete responses never expose the internal entry id. Lookup, update, and delete return the same generic authentication failure for a missing name, wrong password, concurrent deletion, or unsafe legacy duplicate. A D1 unique index provides the final duplicate-name race guard.
 
-Guestbook messages have a permanent-retention policy. The Worker has no deletion or expiry endpoint, migration, TTL, or cleanup job for entries; do not add one without an explicit change to this decision. This application retention policy has no separate backup commitment; D1 operator access controls remain required.
+Guestbook messages have a permanent-retention policy until the author explicitly deletes their own entry with the same name and password verification used for editing. The Worker has no expiry, TTL, automated cleanup, administrator deletion, or moderation deletion path. This application retention policy has no separate backup commitment; D1 operator access controls remain required.
 
 Production requires all of the following before guestbook use:
 

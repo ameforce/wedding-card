@@ -25,7 +25,7 @@ import { ContentAdmin } from "./admin-content/ContentAdmin.jsx";
 import { GuestbookAdmin } from "./admin-content/GuestbookAdmin.jsx";
 import { getInvitationPhotos } from "./admin-content/content-document.js";
 import { usePublicInvitationContent } from "./admin-content/public-content.jsx";
-import { createGuestbookEntry, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
+import { createGuestbookEntry, deleteGuestbookEntry, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
 import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
 
 const VARIANTS = {
@@ -688,7 +688,8 @@ function GuestbookSection({ notify }) {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [unlocked, setUnlocked] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState(null);
+  const busy = busyAction !== null;
 
   const switchMode = (nextMode) => {
     setMode(nextMode);
@@ -702,7 +703,7 @@ function GuestbookSection({ notify }) {
 
   const submit = async (event) => {
     event.preventDefault();
-    setBusy(true);
+    setBusyAction("submit");
     try {
       if (mode === "write") {
         await createGuestbookEntry({ name, password, message });
@@ -725,7 +726,21 @@ function GuestbookSection({ notify }) {
     } catch (error) {
       notify(error.message, "error");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm("이 방명록을 삭제할까요? 삭제 후 복구할 수 없습니다.")) return;
+    setBusyAction("delete");
+    try {
+      await deleteGuestbookEntry({ name, password });
+      switchMode("write");
+      notify("방명록을 삭제했습니다.");
+    } catch (error) {
+      notify(error.message, "error");
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -758,9 +773,16 @@ function GuestbookSection({ notify }) {
             <textarea value={message} onChange={(event) => setMessage(event.target.value)} required minLength={1} maxLength={500} rows={5} />
           </label>
         )}
-        <button className="guestbook-submit" type="submit" disabled={busy}>
-          {busy ? "처리 중…" : mode === "write" ? "비공개로 전하기" : unlocked ? "수정 저장" : "내 글 불러오기"}
-        </button>
+        <div className="guestbook-actions">
+          <button className="guestbook-submit" type="submit" disabled={busy}>
+            {busyAction === "submit" ? "처리 중…" : mode === "write" ? "비공개로 전하기" : unlocked ? "수정 저장" : "내 글 불러오기"}
+          </button>
+          {unlocked && (
+            <button className="guestbook-delete" type="button" disabled={busy} onClick={remove}>
+              {busyAction === "delete" ? "삭제 중…" : "삭제"}
+            </button>
+          )}
+        </div>
       </form>
     </section>
   );

@@ -79,6 +79,10 @@ function database() {
               auth_window_started_at_ms: 0,
               auth_locked_until_ms: 0,
             });
+          } else if (sql.startsWith("DELETE FROM guestbook_entries")) {
+            const [id] = values;
+            const deleted = rows.delete(id);
+            return { success: true, meta: { changes: deleted ? 1 : 0 } };
           } else if (sql.startsWith("UPDATE guestbook_entries SET message_search")) {
             const [messageSearch, id, expectedMessage] = values;
             const entry = rows.get(id);
@@ -219,7 +223,7 @@ test("public guestbook has no list endpoint and fails closed without D1", async 
   assert.equal((await createResponse.json()).code, "GUESTBOOK_UNAVAILABLE");
 });
 
-test("authors can create, unlock, and edit only with the matching name and password", async () => {
+test("authors can create, unlock, edit, and delete only with the matching name and password", async () => {
   const db = database();
   const env = { GUESTBOOK_DB: db };
   const createResponse = await worker.fetch(request("/api/guestbook/entries", {
@@ -264,6 +268,63 @@ test("authors can create, unlock, and edit only with the matching name and passw
   }), env);
   assert.equal(updated.status, 200);
   assert.equal(db.rows.get(id).message, "두 분 행복하세요");
+
+  const deniedDelete = await worker.fetch(request("/api/guestbook/entries", {
+    method: "DELETE",
+    body: JSON.stringify({ name: "하객", password: "wrongpass" }),
+  }), env);
+  assert.equal(deniedDelete.status, 401);
+  assert.equal(db.rows.has(id), true);
+
+  const deleted = await worker.fetch(request("/api/guestbook/entries", {
+    method: "DELETE",
+    body: JSON.stringify({ name: "하객", password: "eightchars" }),
+  }), env);
+  assert.equal(deleted.status, 200);
+  assert.deepEqual(await deleted.json(), { deleted: true });
+  assert.equal(db.rows.has(id), false);
+
+  const missingAfterDelete = await worker.fetch(request("/api/guestbook/entries/unlock", {
+    method: "POST",
+    body: JSON.stringify({ name: "하객", password: "eightchars" }),
+  }), env);
+  assert.equal(missingAfterDelete.status, 401);
+});
+
+test("a concurrent author deletion keeps the same generic authentication failure", async () => {
+  const db = database();
+  const env = { GUESTBOOK_DB: db };
+  const created = await worker.fetch(request("/api/guestbook/entries", {
+    method: "POST",
+    body: JSON.stringify({ name: "동시 삭제", password: "eightchars", message: "곧 삭제됩니다" }),
+  }), env);
+  assert.equal(created.status, 201);
+
+  const originalPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    if (!sql.startsWith("DELETE FROM guestbook_entries")) return originalPrepare(sql);
+    let id;
+    return {
+      bind(nextId) {
+        id = nextId;
+        return this;
+      },
+      async run() {
+        db.rows.delete(id);
+        return { success: true, meta: { changes: 0 } };
+      },
+    };
+  };
+
+  const response = await worker.fetch(request("/api/guestbook/entries", {
+    method: "DELETE",
+    body: JSON.stringify({ name: "동시 삭제", password: "eightchars" }),
+  }), env);
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), {
+    code: "ENTRY_AUTH_FAILED",
+    message: "이름 또는 비밀번호를 확인해 주세요.",
+  });
 });
 
 test("duplicate normalized names are rejected and authentication failures stay generic", async () => {
@@ -338,6 +399,14 @@ test("guestbook accepts a four-character password and rejects shorter values", a
   }), env);
   assert.equal(accepted.status, 201);
   assert.equal((await accepted.json()).retention, "permanent");
+
+  const invalidDelete = await worker.fetch(request("/api/guestbook/entries", {
+    method: "DELETE",
+    body: JSON.stringify({ name: "하객", password: "abc" }),
+  }), env);
+  assert.equal(invalidDelete.status, 400);
+  assert.equal((await invalidDelete.json()).code, "INVALID_PASSWORD");
+  assert.equal(db.rows.size, 1);
 });
 
 test("embedded null characters are rejected before a guestbook write", async () => {
@@ -483,7 +552,7 @@ test("different names share caller and authentication budgets before D1 work", a
   assert.equal(counts.has("authentication:global"), true);
 });
 
-test("unlock and update share one privacy-preserving credential budget", async () => {
+test("unlock, update, and delete share one privacy-preserving credential budget", async () => {
   const credentialKeys = [];
   const env = {
     GUESTBOOK_DB: database(),
@@ -504,10 +573,16 @@ test("unlock and update share one privacy-preserving credential budget", async (
     method: "PATCH",
     body: JSON.stringify({ name: "같은 하객", password: "1234", message: "수정" }),
   }), env);
+  const deletion = await worker.fetch(request("/api/guestbook/entries", {
+    method: "DELETE",
+    body: JSON.stringify({ name: "같은 하객", password: "1234" }),
+  }), env);
   assert.equal(unlock.status, 401);
   assert.equal(update.status, 401);
-  assert.equal(credentialKeys.length, 2);
+  assert.equal(deletion.status, 401);
+  assert.equal(credentialKeys.length, 3);
   assert.equal(credentialKeys[0], credentialKeys[1]);
+  assert.equal(credentialKeys[1], credentialKeys[2]);
   assert.match(credentialKeys[0], /^credential:[a-f0-9]{64}$/);
   assert.equal(credentialKeys[0].includes("같은 하객"), false);
 });

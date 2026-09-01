@@ -9,7 +9,7 @@ function json(payload, status = 200, headers = {}) {
   return Response.json(payload, { status, headers: { "x-robots-tag": "noindex, nofollow", ...headers } });
 }
 
-function fixture({ failUpdate = false, authenticatedAdmin = false } = {}) {
+function fixture({ failUpdate = false, failDelete = false, authenticatedAdmin = false } = {}) {
   let row = null;
   const calls = [];
   const fetchImpl = async (input, options = {}) => {
@@ -47,6 +47,11 @@ function fixture({ failUpdate = false, authenticatedAdmin = false } = {}) {
       row.message = body.message;
       return json({ updatedAt: "2026-08-18T00:00:00.000Z" });
     }
+    if (url.pathname === "/api/guestbook/entries" && method === "DELETE") {
+      if (failDelete) return json({ code: "INTERNAL_ERROR" }, 500);
+      row = null;
+      return json({ deleted: true });
+    }
     throw new Error(`unexpected request: ${method} ${url.pathname}`);
   };
   const d1 = {
@@ -63,7 +68,7 @@ function fixture({ failUpdate = false, authenticatedAdmin = false } = {}) {
 }
 
 test("production canary covers public, guestbook, D1, Access denial, and exact cleanup without logging secrets", async () => {
-  const { d1, fetchImpl, getRow } = fixture();
+  const { calls, d1, fetchImpl, getRow } = fixture();
   const log = [];
   const secret = "not-printed-secret";
   const result = await runPostDeployCanary({
@@ -79,9 +84,11 @@ test("production canary covers public, guestbook, D1, Access denial, and exact c
     adminVerification: "access-denied",
     publicVerified: true,
     guestbookLifecycleVerified: true,
+    guestbookDeleteVerified: true,
     cleanupVerified: true,
   });
   assert.equal(getRow(), null);
+  assert.equal(calls.some(({ path, method }) => path === "/api/guestbook/entries" && method === "DELETE"), true);
   assert.equal(JSON.stringify(result).includes(secret), false);
   assert.equal(log.join("\n").includes(secret), false);
 });
@@ -114,6 +121,23 @@ test("production canary always removes its owned row when an intermediate check 
       passwordFactory: () => "cleanup-secret",
     }),
     /PATCH \/api\/guestbook\/entries 실패/,
+  );
+  assert.equal(getRow(), null);
+});
+
+test("production canary falls back to exact owned-row cleanup when author deletion fails", async () => {
+  const { d1, fetchImpl, getRow } = fixture({ failDelete: true });
+  await assert.rejects(
+    runPostDeployCanary({
+      allowProductionWrite: true,
+      allowD1AdminRead: true,
+      d1,
+      fetchImpl,
+      idFactory: () => "deadbeef-3456-7890",
+      logger: { info() {} },
+      passwordFactory: () => "cleanup-delete-secret",
+    }),
+    /DELETE \/api\/guestbook\/entries 실패/,
   );
   assert.equal(getRow(), null);
 });

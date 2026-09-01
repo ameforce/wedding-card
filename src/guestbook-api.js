@@ -43,6 +43,13 @@ export function updateGuestbookEntry(entry) {
   });
 }
 
+export function deleteGuestbookEntry(credentials) {
+  return requestJson("/api/guestbook/entries", {
+    method: "DELETE",
+    body: JSON.stringify(credentials),
+  });
+}
+
 export function getAdminGuestbookEntries({ query = "", range = "all", cursor = "", limit = 50 } = {}) {
   const search = new URLSearchParams();
   const trimmedQuery = query.trim();

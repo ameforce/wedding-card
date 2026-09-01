@@ -320,9 +320,19 @@ test("private guestbook recovery uses only name and password without exposing a 
   assert.doesNotMatch(app, /GUESTBOOK_RECEIPT_KEY|localStorage|접수 번호|copyText\(receipt\)/);
   assert.match(app, /unlockGuestbookEntry\(\{ name, password \}\)/);
   assert.match(app, /updateGuestbookEntry\(\{ name, password, message \}\)/);
+  assert.match(app, /deleteGuestbookEntry\(\{ name, password \}\)/);
   assert.match(guestbookApi, /"\/api\/guestbook\/entries\/unlock"/);
+  assert.match(guestbookApi, /method: "DELETE"/);
   assert.doesNotMatch(guestbookApi, /encodeURIComponent\(id\)|entries\/\$\{/);
   assert.match(guestbookApi, /메시지는 전송되지 않았습니다/);
+});
+
+test("guestbook edit exposes a confirmed destructive author action and resets after deletion", () => {
+  assert.match(app, /className="guestbook-delete"/);
+  assert.match(app, /삭제 후 복구할 수 없습니다/);
+  assert.match(app, /if \(!window\.confirm/);
+  assert.match(app, /await deleteGuestbookEntry\(\{ name, password \}\);\s*switchMode\("write"\);/);
+  assert.match(app, /방명록을 삭제했습니다/);
 });
 
 test("guestbook labels, privacy break, and password guidance stay private without exposing hashing", () => {
