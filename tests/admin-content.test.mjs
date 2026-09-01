@@ -9,6 +9,7 @@ import {
   CONTENT_SCHEMA_VERSION,
   createContentDocument,
   deriveEventDisplay,
+  contentDocumentsEqual,
   normalizeContentDocument,
   serializeContentDocument,
   validateEditableContentDocument,
@@ -39,6 +40,31 @@ test("strict serialization preserves invalid values and reports field paths", ()
     assert.equal(invalid.content.couple.groom, "");
     return true;
   });
+});
+
+test("edit-revert equality follows the applied document instead of sticky input history", () => {
+  const applied = createContentDocument(weddingContent);
+  const editing = cloneContentDocument(applied);
+  editing.content.hero.introLines[1] += "!";
+  assert.equal(contentDocumentsEqual(editing, applied), false);
+  editing.content.hero.introLines[1] = applied.content.hero.introLines[1];
+  assert.equal(contentDocumentsEqual(editing, applied), true);
+});
+
+test("legacy event timezone gaps normalize and serialize to the canonical Seoul contract", () => {
+  const legacy = createContentDocument(weddingContent);
+  delete legacy.content.event.timezone.iana;
+
+  const normalized = normalizeContentDocument(legacy, weddingContent);
+  assert.deepEqual(normalized.content.event.timezone, {
+    iana: "Asia/Seoul",
+    utcOffset: "+09:00",
+  });
+  assert.deepEqual(serializeContentDocument(normalized).content.event.timezone, {
+    iana: "Asia/Seoul",
+    utcOffset: "+09:00",
+  });
+  assert.deepEqual(validateEditableContentDocument(normalized), {});
 });
 
 function bootstrapRoot(payload, schemaVersion = "1") {
@@ -569,7 +595,9 @@ test("authentication, refresh, dialog focus, and rollback guards protect privile
   assert.match(source, /dirty && !window\.confirm\("미적용 변경사항을 버리고 저장된 초안을 다시 불러올까요\?"\)/);
   assert.match(source, /load\(\{ preserveEditingDocument: dirty \}\)/);
   assert.match(source, /if \(!preserveEditingDocument\) setEditingDocument\(next\)/);
-  assert.match(source, /if \(!preserveEditingDocument\) setDirty\(false\)/);
+  assert.match(source, /setAppliedDocument\(next\)/);
+  assert.match(source, /const dirty = !contentDocumentsEqual\(editingDocument, appliedDocument\)/);
+  assert.doesNotMatch(source, /setDirty\(/);
   assert.match(source, /item\.status === "draft" \? \{ \.\.\.item, status: "archived" \} : item/);
   assert.match(source, /revision\.status === "archived" \? "이전 초안" : "초안"/);
   assert.match(source, /maxLength=\{50\}/);
