@@ -279,18 +279,18 @@ export function ContentAdmin() {
     setStatus({ tone: "error", message: error.message || fallbackMessage });
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ preserveEditingDocument = false } = {}) => {
     setBusy(true);
     try {
       const [state, usage] = await Promise.all([adapter.getAdminState(), adapter.getMediaUsage()]);
       const next = normalizeContentDocument(state.draft || state.published, weddingContent, { allowLocalPreview: localReview });
-      setEditingDocument(next);
+      if (!preserveEditingDocument) setEditingDocument(next);
       setDraftRevisionId(state.draftRevisionId || null);
       setPublishedRevisionId(state.publishedRevisionId || null);
       setPublishedDocument(normalizeContentDocument(state.published, weddingContent, { allowLocalPreview: localReview }));
       setHistory(Array.isArray(state.history) ? state.history : []);
       setLastUpdated(formatAdminTimestamp(state.draft?.createdAt || state.published?.publishedAt || new Date().toISOString()));
-      setDirty(false);
+      if (!preserveEditingDocument) setDirty(false);
       setMediaUsage(usage);
       setAuthRequired(false);
       setStatus({
@@ -435,7 +435,7 @@ export function ContentAdmin() {
       const result = await adapter.republish(republishTarget.id);
       setRepublishTarget(null);
       setPublishedRevisionId(result.revisionId || republishTarget.id);
-      await load();
+      await load({ preserveEditingDocument: dirty });
       setStatus({ tone: "success", message: `${republishTarget.label}을 다시 공개했습니다.` });
     } catch (error) {
       showAdminError(error, "선택한 버전을 다시 공개하지 못했습니다.");

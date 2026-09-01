@@ -15,6 +15,21 @@ export const ACCESS_LOGOUT_PATH = "/cdn-cgi/access/logout";
 const LOCAL_AUDIO_REFERENCE_PREFIX = "local-review-audio:";
 const LOCAL_AUDIO_DATABASE_NAME = "wedding-card.content-review-media.v1";
 const LOCAL_AUDIO_STORE_NAME = "audio";
+let localIdCounter = 0;
+
+function randomToken() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const words = crypto.getRandomValues(new Uint32Array(4));
+    return Array.from(words, (word) => word.toString(16).padStart(8, "0")).join("");
+  }
+
+  localIdCounter += 1;
+  return `${Date.now().toString(36)}-${localIdCounter.toString(36)}`;
+}
 
 export function isAdminAuthRequiredError(error) {
   return error?.code === "ADMIN_AUTH_REQUIRED" || error?.status === 401;
@@ -71,7 +86,9 @@ function initialLocalState(staticContent) {
 function normalizeLocalState(value, staticContent) {
   if (!value || value.schemaVersion !== 1) return initialLocalState(staticContent);
   const fallback = initialLocalState(staticContent);
-  const draftRevisionId = typeof value.draftRevisionId === "string" ? value.draftRevisionId : fallback.draftRevisionId;
+  const draftRevisionId = value.draftRevisionId === null || typeof value.draftRevisionId === "string"
+    ? value.draftRevisionId
+    : fallback.draftRevisionId;
   const publishedRevisionId = typeof value.publishedRevisionId === "string" ? value.publishedRevisionId : fallback.publishedRevisionId;
   const draft = normalizeContentDocument(value.draft, staticContent, { allowLocalPreview: true });
   const published = normalizeContentDocument(value.published, staticContent, { allowLocalPreview: true });
@@ -83,13 +100,13 @@ function normalizeLocalState(value, staticContent) {
     draft,
     published,
     revisions: Array.isArray(value.revisions) ? value.revisions.slice(0, 20).map((revision) => ({
-      id: typeof revision.id === "string" ? revision.id : crypto.randomUUID(),
+      id: typeof revision.id === "string" ? revision.id : randomToken(),
       status: ["draft", "published", "archived"].includes(revision.status) ? revision.status : "archived",
       createdAt: typeof revision.createdAt === "string" ? revision.createdAt : null,
       publishedAt: typeof revision.publishedAt === "string" ? revision.publishedAt : null,
       document: normalizeContentDocument(revision.document, staticContent, { allowLocalPreview: true }),
     })) : [
-      { id: draftRevisionId, status: "draft", createdAt, publishedAt: null, document: draft },
+      ...(draftRevisionId ? [{ id: draftRevisionId, status: "draft", createdAt, publishedAt: null, document: draft }] : []),
       { id: publishedRevisionId, status: "published", createdAt, publishedAt: createdAt, document: published },
     ],
   };
@@ -106,7 +123,7 @@ function copyState(state) {
 }
 
 function localRevision(prefix, now) {
-  return `${prefix}-${now().replace(/[^\d]/g, "").slice(0, 14)}`;
+  return `${prefix}-${now().replace(/[^\d]/g, "").slice(0, 14)}-${randomToken()}`;
 }
 
 function defaultStorage() {
@@ -409,7 +426,7 @@ export function createLocalReviewContentAdapter({
     },
     async uploadAudio({ file }) {
       validAudioFile(file);
-      const id = crypto.randomUUID();
+      const id = randomToken();
       const reference = `${LOCAL_AUDIO_REFERENCE_PREFIX}${id}`;
       await audioStore.put(id, file);
       const source = URL.createObjectURL(file);

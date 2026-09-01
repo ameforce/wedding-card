@@ -130,6 +130,50 @@ test("development review keeps draft and published content as separate explicit 
   await adapter.publish(saved.draftRevisionId);
   assert.equal((await adapter.getPublicContent()).content.venue.name, "검토용 예식장");
   assert.equal(storage.values.has(LOCAL_REVIEW_STORAGE_KEY), true);
+
+  const reloaded = createLocalReviewContentAdapter({
+    staticContent: weddingContent,
+    storage,
+    eventTarget: new EventTarget(),
+    now: () => "2026-08-17T12:34:56.000Z",
+  });
+  assert.equal((await reloaded.getAdminState()).draftRevisionId, null);
+});
+
+test("local review revision IDs remain unique within the same second", async () => {
+  const storage = memoryStorage();
+  const adapter = createLocalReviewContentAdapter({
+    staticContent: weddingContent,
+    storage,
+    eventTarget: new EventTarget(),
+    now: () => "2026-08-17T12:34:56.000Z",
+  });
+  const document = createContentDocument(weddingContent);
+  const first = await adapter.saveDraft(document);
+  const second = await adapter.saveDraft(document);
+
+  assert.notEqual(first.draftRevisionId, second.draftRevisionId);
+  assert.match(first.draftRevisionId, /^local-draft-20260817123456-[a-f0-9-]{32,36}$/i);
+  assert.equal(new Set((await adapter.getAdminState()).history.map((revision) => revision.id)).size, 4);
+});
+
+test("local review IDs retain a non-secure-context fallback", async () => {
+  const source = await readFile(new URL("../src/admin-content/content-client.js", import.meta.url), "utf8");
+  assert.match(source, /typeof crypto\.randomUUID === "function"/);
+  assert.match(source, /crypto\.getRandomValues\(new Uint32Array\(4\)\)/);
+  assert.match(source, /localIdCounter \+= 1/);
+});
+
+test("photo alt validation and normalization share the 300 character Worker contract", () => {
+  const document = createContentDocument(weddingContent);
+  const acceptedAlt = "가".repeat(300);
+  document.photos.pastel.hero.alt = acceptedAlt;
+  assert.equal(normalizeContentDocument(document, weddingContent).photos.pastel.hero.alt, acceptedAlt);
+  assert.equal(validateEditableContentDocument(document)["사진"], undefined);
+
+  document.photos.pastel.hero.alt = "가".repeat(301);
+  assert.equal(typeof validateEditableContentDocument(document)["사진"], "string");
+  assert.throws(() => serializeContentDocument(document), (error) => error.code === "INVALID_CONTENT" && typeof error.fieldErrors["사진"] === "string");
 });
 
 test("public bootstrap selects exactly one published or bundled source before React", () => {
@@ -482,6 +526,9 @@ test("authentication, refresh, dialog focus, and rollback guards protect privile
   assert.match(source, /setAuthRequired\(true\);\s*setPublishReviewOpen\(false\);\s*setRepublishTarget\(null\)/);
   assert.match(source, /!authRequired && <div className="content-admin-top-actions">/);
   assert.match(source, /dirty && !window\.confirm\("미적용 변경사항을 버리고 저장된 초안을 다시 불러올까요\?"\)/);
+  assert.match(source, /load\(\{ preserveEditingDocument: dirty \}\)/);
+  assert.match(source, /if \(!preserveEditingDocument\) setEditingDocument\(next\)/);
+  assert.match(source, /if \(!preserveEditingDocument\) setDirty\(false\)/);
   assert.match(source, /function useDialogFocus/);
   assert.match(source, /event\.key === "Escape"/);
   assert.match(source, /event\.key !== "Tab"/);

@@ -6,7 +6,7 @@ const SUPPORTED_CONTENT_SCHEMA_VERSIONS = new Set([1, CONTENT_SCHEMA_VERSION]);
 const MAX_LENGTH = {
   short: 80,
   copy: 240,
-  photoAlt: 180,
+  photoAlt: 300,
   photoUrl: 2048,
   url: 2048,
 };
@@ -150,7 +150,8 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
   }
   Object.assign(errors, validateMusicContent(document?.content?.music, { allowLocalPreview }));
   const photos = [document?.photos?.pastel?.hero, ...(document?.photos?.pastel?.gallery || [])];
-  if (photos.length !== 5 || photos.some((photo) => !photoUrl(photo?.src, allowLocalPreview) || !photo?.alt?.trim() || !cropPosition(photo?.position, ""))) {
+  if (photos.length !== 5 || photos.some((photo) => !photoUrl(photo?.src, allowLocalPreview)
+    || !photo?.alt?.trim() || photo.alt.length > MAX_LENGTH.photoAlt || !cropPosition(photo?.position, ""))) {
     errors["사진"] = "모든 사진의 파일, 대체 텍스트, 초점 위치를 확인해 주세요.";
   }
   return errors;
