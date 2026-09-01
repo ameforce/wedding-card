@@ -93,7 +93,14 @@ function invitationDatabase() {
           return null;
         },
         async all() {
-          if (sql.includes("FROM invitation_revisions")) return { results: [...revisions.values()] };
+          if (sql.includes("FROM invitation_revisions")) {
+            const results = [...revisions.values()];
+            if (sql.includes("ORDER BY created_at DESC LIMIT 20")) {
+              results.sort((left, right) => right.created_at.localeCompare(left.created_at));
+              return { results: results.slice(0, 20) };
+            }
+            return { results };
+          }
           return { results: [] };
         },
         async run() {
@@ -364,6 +371,49 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
 
 test("rollback rejects archived drafts that were never public", async () => {
   assert.match(workerSource, /!target\.publishedAt/);
+});
+
+test("admin history always includes active pointers beyond the recent revision limit", async () => {
+  const db = invitationDatabase();
+  const fixture = await accessFixture();
+  const document = JSON.stringify(confirmedDocument());
+  const publishedId = "published-outside-limit";
+  db.revisions.set(publishedId, {
+    id: publishedId,
+    content_json: document,
+    status: "published",
+    created_at: "2026-01-01T00:00:00.000Z",
+    created_by: "groom@example.test",
+    published_at: "2026-01-01T00:00:00.000Z",
+  });
+  db.state.published_revision_id = publishedId;
+  for (let index = 1; index <= 21; index += 1) {
+    const id = `newer-draft-${String(index).padStart(2, "0")}`;
+    db.revisions.set(id, {
+      id,
+      content_json: document,
+      status: index === 21 ? "draft" : "archived",
+      created_at: `2026-02-${String(index).padStart(2, "0")}T00:00:00.000Z`,
+      created_by: "groom@example.test",
+      published_at: null,
+    });
+    if (index === 21) db.state.draft_revision_id = id;
+  }
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(request("/api/admin/content", {
+      method: "GET",
+      headers: { "cf-access-jwt-assertion": fixture.assertion },
+    }), { GUESTBOOK_DB: db, ...fixture.env });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.history.length, 21);
+    assert.equal(payload.history.some((revision) => revision.id === publishedId), true);
+    assert.equal(payload.history.some((revision) => revision.id === db.state.draft_revision_id), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("content validation dual-reads schema v1, requires v2 writes, and validates music credits", () => {
