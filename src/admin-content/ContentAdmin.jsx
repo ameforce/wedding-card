@@ -5,6 +5,7 @@ import { weddingContent } from "../content.js";
 import {
   buildPublishDiff,
   cloneContentDocument,
+  contentDocumentsEqual,
   createContentDocument,
   deriveEventDisplay,
   normalizeContentDocument,
@@ -256,6 +257,7 @@ export function ContentAdmin() {
   const adapter = useMemo(() => createContentAdapter({ staticContent: weddingContent }), []);
   const previewRef = useRef(null);
   const [editingDocument, setEditingDocument] = useState(() => createContentDocument(weddingContent));
+  const [appliedDocument, setAppliedDocument] = useState(() => createContentDocument(weddingContent));
   const documentRef = useRef(editingDocument);
   const [draftRevisionId, setDraftRevisionId] = useState(null);
   const [publishedRevisionId, setPublishedRevisionId] = useState(null);
@@ -263,7 +265,6 @@ export function ContentAdmin() {
   const [history, setHistory] = useState([]);
   const [lastUpdated, setLastUpdated] = useState("");
   const [status, setStatus] = useState({ tone: "neutral", message: "관리 콘텐츠를 불러오는 중입니다." });
-  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(true);
   const [uploadingSlot, setUploadingSlot] = useState("");
   const [mediaUsage, setMediaUsage] = useState(null);
@@ -290,12 +291,12 @@ export function ContentAdmin() {
       const [state, usage] = await Promise.all([adapter.getAdminState(), adapter.getMediaUsage()]);
       const next = normalizeContentDocument(state.draft || state.published, weddingContent, { allowLocalPreview: localReview });
       if (!preserveEditingDocument) setEditingDocument(next);
+      setAppliedDocument(next);
       setDraftRevisionId(state.draftRevisionId || null);
       setPublishedRevisionId(state.publishedRevisionId || null);
       setPublishedDocument(normalizeContentDocument(state.published, weddingContent, { allowLocalPreview: localReview }));
       setHistory(Array.isArray(state.history) ? state.history : []);
       setLastUpdated(formatAdminTimestamp(state.draft?.createdAt || state.published?.publishedAt || new Date().toISOString()));
-      if (!preserveEditingDocument) setDirty(false);
       setMediaUsage(usage);
       setAuthRequired(false);
       setStatus({
@@ -365,17 +366,17 @@ export function ContentAdmin() {
   }, [editingDocument, previewFocus]);
 
   const update = (path, value) => {
-    setEditingDocument((current) => {
-      const next = setAtPath(current, path, value);
-      if (path[0] === "content" && path[1] === "event" && ["isoDate", "startTime24h"].includes(path[2])) {
-        const derived = deriveEventDisplay(next.content.event.isoDate, next.content.event.startTime24h);
-        if (derived) Object.assign(next.content.event, derived);
-      }
-      return next;
-    });
-    setDirty(true);
+    const next = setAtPath(documentRef.current, path, value);
+    if (path[0] === "content" && path[1] === "event" && ["isoDate", "startTime24h"].includes(path[2])) {
+      const derived = deriveEventDisplay(next.content.event.isoDate, next.content.event.startTime24h);
+      if (derived) Object.assign(next.content.event, derived);
+    }
+    documentRef.current = next;
+    setEditingDocument(next);
+    setStatus(contentDocumentsEqual(next, appliedDocument)
+      ? { tone: "success", message: "현재 내용은 마지막 임시 적용본과 같습니다." }
+      : { tone: "neutral", message: "아직 적용하지 않은 변경사항이 있습니다." });
     setPreviewFocus(previewSelectorForPath(path));
-    setStatus({ tone: "neutral", message: "아직 저장하지 않은 변경사항이 있습니다." });
   };
 
   const saveDraft = async ({ quiet = false, keepBusy = false } = {}) => {
@@ -389,8 +390,9 @@ export function ContentAdmin() {
       const state = await adapter.saveDraft(editingDocument);
       setDraftRevisionId(state.draftRevisionId || null);
       if (state.publishedRevisionId) setPublishedRevisionId(state.publishedRevisionId);
-      setEditingDocument(normalizeContentDocument(state.draft || editingDocument, weddingContent, { allowLocalPreview: localReview }));
-      setDirty(false);
+      const applied = normalizeContentDocument(state.draft || editingDocument, weddingContent, { allowLocalPreview: localReview });
+      setEditingDocument(applied);
+      setAppliedDocument(applied);
       if (!quiet) setStatus({ tone: "success", message: "임시 적용했습니다. 미리보기와 변경사항을 확인한 뒤 게시해 주세요." });
       setHistory((current) => [{
         id: state.draftRevisionId,
@@ -508,6 +510,8 @@ export function ContentAdmin() {
   const musicErrors = validateMusicContent(music, { allowLocalPreview: localReview });
   const musicReady = Object.keys(musicErrors).length === 0;
   const validationErrors = validateEditableContentDocument(editingDocument, { allowLocalPreview: localReview });
+  const dirty = !contentDocumentsEqual(editingDocument, appliedDocument);
+  const unappliedDiff = buildPublishDiff(editingDocument, appliedDocument);
   const publishDiff = buildPublishDiff(editingDocument, publishedDocument);
   const workflow = deriveAdminWorkflowState({ dirty, draftRevisionId, busy, validationErrors });
   const previewStateLabel = dirty ? "미적용 변경" : draftRevisionId ? "초안" : publishedRevisionId ? "공개본" : "저장 전";
@@ -524,7 +528,7 @@ export function ContentAdmin() {
           <h1>콘텐츠 편집</h1>
           <div className="content-admin-badges" aria-label="편집 상태">
             <span className="is-draft"><i />{workflow.label}</span>
-            <span><PencilSimple aria-hidden="true" />변경사항 {publishDiff.changes.length}개</span>
+            <span><PencilSimple aria-hidden="true" />미적용 변경 {unappliedDiff.changes.length}개</span>
             {workflow.errorCount > 0 && <span className="is-error"><Warning aria-hidden="true" />입력 오류 {workflow.errorCount}개</span>}
           </div>
         </div>

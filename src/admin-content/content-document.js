@@ -13,6 +13,7 @@ const MAX_LENGTH = {
 };
 
 const DAY_LABELS = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
+export const EVENT_TIMEZONE = Object.freeze({ iana: "Asia/Seoul", utcOffset: "+09:00" });
 
 const DIFF_FIELDS = [
   { section: "기본 정보", label: "신랑 이름", path: ["content", "couple", "groom"] },
@@ -38,6 +39,18 @@ const DIFF_FIELDS = [
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function contentDocumentsEqual(current, applied) {
+  return canonicalJson(current) === canonicalJson(applied);
 }
 
 function text(value, fallback, maxLength = MAX_LENGTH.copy) {
@@ -145,6 +158,8 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
   if (!derived) errors["예식 일시"] = "유효한 예식 날짜와 시간을 입력해 주세요.";
   else if (event.dateLabel !== derived.dateLabel || event.day !== derived.day || event.time !== derived.time) {
     errors["예식 일시"] = "예식 표시 정보가 날짜와 시간에서 올바르게 파생되지 않았습니다.";
+  } else if (event.timezone?.iana !== EVENT_TIMEZONE.iana || event.timezone?.utcOffset !== EVENT_TIMEZONE.utcOffset) {
+    errors["예식 일시"] = "예식 시간대가 Asia/Seoul로 설정되지 않았습니다.";
   }
   required(document?.content?.venue?.name, "예식장", MAX_LENGTH.short);
   required(document?.content?.venue?.floor, "층", MAX_LENGTH.short);
@@ -173,20 +188,15 @@ export const validateContentDocument = validateEditableContentDocument;
 export function serializeContentDocument(document, { allowLocalPreview = false } = {}) {
   const serialized = clone(document);
   const derived = deriveEventDisplay(serialized?.content?.event?.isoDate, serialized?.content?.event?.startTime24h);
-  if (derived) Object.assign(serialized.content.event, derived);
+  if (derived) {
+    Object.assign(serialized.content.event, derived);
+    serialized.content.event.timezone = { ...EVENT_TIMEZONE };
+  }
   const fieldErrors = validateContentDocument(serialized, { allowLocalPreview });
   if (Object.keys(fieldErrors).length > 0) {
     throw Object.assign(new Error(Object.values(fieldErrors)[0]), { code: "INVALID_CONTENT", fieldErrors });
   }
   return serialized;
-}
-
-function timezone(value, fallback) {
-  return /^[A-Za-z][A-Za-z0-9_+\-/]{1,63}$/.test(value) ? value : fallback;
-}
-
-function utcOffset(value, fallback) {
-  return /^[+-]\d{2}:\d{2}$/.test(value) ? value : fallback;
 }
 
 function cropPosition(value, fallback) {
@@ -308,11 +318,7 @@ export function normalizeContentDocument(document, fallbackContent, options = {}
     ...content.event,
     isoDate: date(event.isoDate, content.event.isoDate),
     startTime24h: time(event.startTime24h, content.event.startTime24h),
-    timezone: {
-      ...content.event.timezone,
-      iana: timezone(event.timezone?.iana, content.event.timezone.iana),
-      utcOffset: utcOffset(event.timezone?.utcOffset, content.event.timezone.utcOffset),
-    },
+    timezone: { ...EVENT_TIMEZONE },
   };
   const derivedEvent = deriveEventDisplay(content.event.isoDate, content.event.startTime24h);
   if (derivedEvent) Object.assign(content.event, derivedEvent);
