@@ -273,6 +273,10 @@ export function ContentAdmin() {
   const [republishTarget, setRepublishTarget] = useState(null);
   const [previewFocus, setPreviewFocus] = useState(".pastel-hero");
   const [previewExpanded, setPreviewExpanded] = useState(false);
+  const dirty = useMemo(
+    () => !contentDocumentsEqual(editingDocument, appliedDocument),
+    [editingDocument, appliedDocument],
+  );
 
   const showAdminError = useCallback((error, fallbackMessage) => {
     if (isAdminAuthRequiredError(error)) {
@@ -510,7 +514,6 @@ export function ContentAdmin() {
   const musicErrors = validateMusicContent(music, { allowLocalPreview: localReview });
   const musicReady = Object.keys(musicErrors).length === 0;
   const validationErrors = validateEditableContentDocument(editingDocument, { allowLocalPreview: localReview });
-  const dirty = !contentDocumentsEqual(editingDocument, appliedDocument);
   const unappliedDiff = buildPublishDiff(editingDocument, appliedDocument);
   const publishDiff = buildPublishDiff(editingDocument, publishedDocument);
   const workflow = deriveAdminWorkflowState({ dirty, draftRevisionId, busy, validationErrors });
