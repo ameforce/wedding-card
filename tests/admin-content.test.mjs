@@ -158,7 +158,7 @@ test("local review revision IDs remain unique within the same second", async () 
   const second = await adapter.saveDraft(document);
 
   assert.notEqual(first.draftRevisionId, second.draftRevisionId);
-  assert.match(first.draftRevisionId, /^local-draft-20260817123456-[a-f0-9-]{32,36}$/i);
+  assert.match(first.draftRevisionId, /^local-draft-20260817123456-[a-f0-9-]{36}$/i);
   const history = (await adapter.getAdminState()).history;
   assert.equal(new Set(history.map((revision) => revision.id)).size, 4);
   assert.equal(history.filter((revision) => revision.status === "draft").length, 1);
@@ -168,7 +168,8 @@ test("local review revision IDs remain unique within the same second", async () 
 test("local review IDs retain a non-secure-context fallback", async () => {
   const source = await readFile(new URL("../src/admin-content/content-client.js", import.meta.url), "utf8");
   assert.match(source, /typeof crypto\.randomUUID === "function"/);
-  assert.match(source, /crypto\.getRandomValues\(new Uint32Array\(4\)\)/);
+  assert.match(source, /crypto\.getRandomValues\(new Uint8Array\(16\)\)/);
+  assert.match(source, /return uuidToken/);
   assert.match(source, /localIdCounter \+= 1/);
 });
 

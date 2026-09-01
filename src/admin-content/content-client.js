@@ -17,18 +17,28 @@ const LOCAL_AUDIO_DATABASE_NAME = "wedding-card.content-review-media.v1";
 const LOCAL_AUDIO_STORE_NAME = "audio";
 let localIdCounter = 0;
 
+function uuidToken(hex) {
+  const characters = hex.padStart(32, "0").slice(-32).split("");
+  characters[12] = "4";
+  characters[16] = ["8", "9", "a", "b"][Number.parseInt(characters[16], 16) % 4];
+  const value = characters.join("");
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
 function randomToken() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
 
   if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
-    const words = crypto.getRandomValues(new Uint32Array(4));
-    return Array.from(words, (word) => word.toString(16).padStart(8, "0")).join("");
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return uuidToken(Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(""));
   }
 
   localIdCounter += 1;
-  return `${Date.now().toString(36)}-${localIdCounter.toString(36)}`;
+  const timestamp = Date.now().toString(16).padStart(12, "0");
+  const counter = localIdCounter.toString(16).padStart(20, "0");
+  return uuidToken(`${timestamp}${counter}`);
 }
 
 export function isAdminAuthRequiredError(error) {
