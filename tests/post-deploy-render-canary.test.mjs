@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  collectScenarioWithVersionConvergence,
   formatRenderDiagnostic,
   resolveExpectedWorkerIdentity,
   validateRenderEvidence,
@@ -160,6 +161,70 @@ test("render canary bounds version convergence failure and reports observed vers
     logger: { info() {} },
     now: () => 123,
   }), new RegExp(`수렴하지 않았습니다.*${STALE_VERSION}`));
+});
+
+test("each browser scenario retries only Worker identity drift after bounded re-convergence", async () => {
+  let collections = 0;
+  let convergenceChecks = 0;
+  const result = await collectScenarioWithVersionConvergence({
+    scenario: { name: "cold-400ms", latencyMs: 400 },
+    browser: {},
+    baseUrl: new URL(BASE),
+    expectedWorkerTag: TARGET_SHA,
+    expectedWorkerVersion: TARGET_VERSION,
+    logger: { info() {} },
+    collectScenarioImpl: async () => {
+      collections += 1;
+      if (collections === 1) {
+        const error = new Error(`[cold-400ms] HTML Worker tag가 배포 SHA와 다릅니다: ${STALE_SHA}; diagnostics={}`);
+        error.code = "WORKER_IDENTITY_MISMATCH";
+        throw error;
+      }
+      return evidence();
+    },
+    waitForWorkerVersionImpl: async ({ expectedTag, expectedVersion }) => {
+      convergenceChecks += 1;
+      assert.equal(expectedTag, TARGET_SHA);
+      assert.equal(expectedVersion, TARGET_VERSION);
+    },
+  });
+  assert.equal(result.responseHeaders.workerVersion, TARGET_VERSION);
+  assert.equal(collections, 2);
+  assert.equal(convergenceChecks, 1);
+
+  await assert.rejects(collectScenarioWithVersionConvergence({
+    scenario: { name: "warm-cache", warm: true },
+    browser: {},
+    baseUrl: new URL(BASE),
+    expectedWorkerTag: TARGET_SHA,
+    expectedWorkerVersion: TARGET_VERSION,
+    logger: { info() {} },
+    collectScenarioImpl: async () => { throw new Error('hero decode failed; diagnostics={"consoleErrors":["HTML Worker tag가 unavailable"]}'); },
+    waitForWorkerVersionImpl: async () => assert.fail("non-identity failures must not retry"),
+  }), /hero decode failed/);
+});
+
+test("scenario re-convergence preserves the browser identity diagnostics when the probe fails", async () => {
+  const identityError = new Error('[cold-400ms] HTML Worker version ID가 활성 버전과 다릅니다; diagnostics={"response":503,"network":"ERR"}');
+  identityError.code = "WORKER_IDENTITY_MISMATCH";
+  await assert.rejects(collectScenarioWithVersionConvergence({
+    scenario: { name: "cold-400ms", latencyMs: 400 },
+    browser: {},
+    baseUrl: new URL(BASE),
+    expectedWorkerTag: TARGET_SHA,
+    expectedWorkerVersion: TARGET_VERSION,
+    logger: { info() {} },
+    collectScenarioImpl: async () => { throw identityError; },
+    waitForWorkerVersionImpl: async () => { throw new Error("custom domain Worker가 수렴하지 않았습니다"); },
+  }), (error) => {
+    assert.match(error.message, /cold-400ms/);
+    assert.match(error.message, /response/);
+    assert.match(error.message, /503/);
+    assert.match(error.message, /network/);
+    assert.match(error.message, /ERR/);
+    assert.match(error.message, /custom domain Worker가 수렴하지 않았습니다/);
+    return true;
+  });
 });
 
 test("standalone render canary reads the exact active identity when CI inputs are absent", async () => {
