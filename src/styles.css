@@ -638,8 +638,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 @media (max-width: 760px) {
   .admin-shell { display: block; }
   .admin-shell input, .admin-shell textarea, .admin-shell select { font-size: 16px; }
-  .admin-sidebar { position: fixed; left: 0; transform: translateX(-105%); width: min(82vw, 280px); transition: transform .18s ease; box-shadow: 20px 0 50px rgba(11,41,68,.18); }
-  .admin-sidebar.is-open { transform: translateX(0); }
+  .admin-sidebar { position: fixed; left: 0; visibility: hidden; transform: translateX(-105%); width: min(82vw, 280px); transition: transform .18s ease, visibility 0s linear .18s; box-shadow: 20px 0 50px rgba(11,41,68,.18); }
+  .admin-sidebar.is-open { visibility: visible; transform: translateX(0); transition-delay: 0s; }
   .admin-sidebar-heading button { display: grid; }
   .admin-sidebar-backdrop { position: fixed; inset: 0; z-index: 30; display: block; padding: 0; background: rgba(8,31,52,.25); border: 0; }
   .admin-mobile-header { position: sticky; top: 0; z-index: 25; display: grid; min-height: 54px; padding: 5px 8px; grid-template-columns: 44px 1fr 44px; place-items: center; background: rgba(255,255,255,.94); border-bottom: 1px solid var(--admin-border); backdrop-filter: blur(12px); }

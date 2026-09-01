@@ -116,7 +116,7 @@ function copyState(state) {
   return {
     draftRevisionId: state.draftRevisionId,
     publishedRevisionId: state.publishedRevisionId,
-    draft: cloneContentDocument(state.draft),
+    draft: state.draftRevisionId ? cloneContentDocument(state.draft) : null,
     published: cloneContentDocument(state.published),
     history: (state.revisions || []).map(({ id, status, createdAt, publishedAt }) => ({ id, status, createdAt, publishedAt })),
   };
@@ -405,6 +405,7 @@ export function createLocalReviewContentAdapter({
         ...current,
         publishedRevisionId: revisionId,
         published: cloneContentDocument(target.document),
+        draft: current.draftRevisionId ? current.draft : cloneContentDocument(target.document),
         revisions: current.revisions.map((revision) => revision.id === revisionId
           ? { ...revision, status: "published", publishedAt }
           : revision.status === "published" ? { ...revision, status: "archived" } : revision),
@@ -477,7 +478,7 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
       return {
         draftRevisionId: payload.draftRevisionId ?? null,
         publishedRevisionId: payload.publishedRevisionId ?? null,
-        draft: normalizeContentDocument(payload.draft?.document, staticContent),
+        draft: payload.draft?.document ? normalizeContentDocument(payload.draft.document, staticContent) : null,
         published: normalizeContentDocument(payload.published?.document, staticContent),
         history: Array.isArray(payload.history) ? payload.history : [],
       };

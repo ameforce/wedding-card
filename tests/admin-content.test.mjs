@@ -130,6 +130,11 @@ test("development review keeps draft and published content as separate explicit 
   await adapter.publish(saved.draftRevisionId);
   assert.equal((await adapter.getPublicContent()).content.venue.name, "검토용 예식장");
   assert.equal(storage.values.has(LOCAL_REVIEW_STORAGE_KEY), true);
+  await adapter.republish(initial.publishedRevisionId);
+  const republishedState = await adapter.getAdminState();
+  assert.equal(republishedState.draftRevisionId, null);
+  assert.equal(republishedState.draft, null);
+  assert.equal(republishedState.published.content.venue.name, weddingContent.venue.name);
 
   const reloaded = createLocalReviewContentAdapter({
     staticContent: weddingContent,
@@ -154,7 +159,10 @@ test("local review revision IDs remain unique within the same second", async () 
 
   assert.notEqual(first.draftRevisionId, second.draftRevisionId);
   assert.match(first.draftRevisionId, /^local-draft-20260817123456-[a-f0-9-]{32,36}$/i);
-  assert.equal(new Set((await adapter.getAdminState()).history.map((revision) => revision.id)).size, 4);
+  const history = (await adapter.getAdminState()).history;
+  assert.equal(new Set(history.map((revision) => revision.id)).size, 4);
+  assert.equal(history.filter((revision) => revision.status === "draft").length, 1);
+  assert.equal(history.find((revision) => revision.id === first.draftRevisionId).status, "archived");
 });
 
 test("local review IDs retain a non-secure-context fallback", async () => {
@@ -261,6 +269,10 @@ test("production draft persists for administrator reloads and moves the public p
 
   await adapter.publish(saved.draftRevisionId);
   assert.equal((await adapter.getPublicContent()).content.venue.name, "초안 전용 예식장");
+  const publishedAdmin = await adapter.getAdminState();
+  assert.equal(publishedAdmin.draftRevisionId, null);
+  assert.equal(publishedAdmin.draft, null);
+  assert.equal(publishedAdmin.published.content.venue.name, "초안 전용 예식장");
 });
 
 test("draft preview is embedded-only and production keeps its public-content transport separate", () => {
@@ -520,21 +532,57 @@ test("publish review includes every editable parking field and material media de
   assert.doesNotMatch(gallery.current, /\[object Object\]/);
 });
 
+test("publish review bounds uploaded media labels instead of rendering data URLs", () => {
+  const published = createContentDocument(weddingContent);
+  const current = cloneContentDocument(published);
+  current.photos.pastel.hero.src = `data:image/webp;base64,${"A".repeat(200_000)}`;
+  current.content.music.src = `data:audio/mpeg;base64,${"B".repeat(200_000)}`;
+
+  const diff = buildPublishDiff(current, published);
+  const mediaValues = diff.changes.flatMap((change) => [change.current, change.published]).join(" ");
+  assert.equal(mediaValues.length < 2_000, true);
+  assert.doesNotMatch(mediaValues, /base64/);
+  assert.match(mediaValues, /새 파일/);
+  assert.match(mediaValues, /기존 파일/);
+});
+
+test("name validation matches the Worker's 50 character contract", () => {
+  const document = createContentDocument(weddingContent);
+  document.content.couple.groom = "가".repeat(50);
+  document.content.couple.bride = "나".repeat(50);
+  assert.equal(validateEditableContentDocument(document)["신랑 이름"], undefined);
+  assert.equal(validateEditableContentDocument(document)["신부 이름"], undefined);
+  document.content.couple.groom += "가";
+  document.content.couple.bride += "나";
+  assert.equal(typeof validateEditableContentDocument(document)["신랑 이름"], "string");
+  assert.equal(typeof validateEditableContentDocument(document)["신부 이름"], "string");
+});
+
 test("authentication, refresh, dialog focus, and rollback guards protect privileged changes", async () => {
   const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
   const client = await readFile(new URL("../src/admin-content/content-client.js", import.meta.url), "utf8");
+  const shell = await readFile(new URL("../src/admin-content/AdminShell.jsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(source, /setAuthRequired\(true\);\s*setPublishReviewOpen\(false\);\s*setRepublishTarget\(null\)/);
   assert.match(source, /!authRequired && <div className="content-admin-top-actions">/);
   assert.match(source, /dirty && !window\.confirm\("미적용 변경사항을 버리고 저장된 초안을 다시 불러올까요\?"\)/);
   assert.match(source, /load\(\{ preserveEditingDocument: dirty \}\)/);
   assert.match(source, /if \(!preserveEditingDocument\) setEditingDocument\(next\)/);
   assert.match(source, /if \(!preserveEditingDocument\) setDirty\(false\)/);
+  assert.match(source, /item\.status === "draft" \? \{ \.\.\.item, status: "archived" \} : item/);
+  assert.match(source, /revision\.status === "archived" \? "이전 초안" : "초안"/);
+  assert.match(source, /maxLength=\{50\}/);
   assert.match(source, /function useDialogFocus/);
   assert.match(source, /event\.key === "Escape"/);
   assert.match(source, /event\.key !== "Tab"/);
   assert.match(source, /opener\?\.focus\(\)/);
   assert.match(source, /revision\.publishedAt && !\[draftRevisionId, publishedRevisionId\]\.includes/);
   assert.match(client, /!target\.publishedAt/);
+  assert.match(shell, /inert=\{sidebarHidden \? true : undefined\}/);
+  assert.match(shell, /closeButtonRef\.current\?\.focus\(\)/);
+  assert.match(shell, /restoreMenuFocusRef\.current = true/);
+  assert.match(shell, /menuButtonRef\.current\?\.focus\(\)/);
+  assert.match(styles, /\.admin-sidebar \{[^}]*visibility: hidden/);
 });
 
 test("applied admin content keeps full runtime photo objects", () => {

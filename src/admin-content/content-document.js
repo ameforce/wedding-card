@@ -4,6 +4,7 @@ export const CONTENT_SCHEMA_VERSION = 2;
 const SUPPORTED_CONTENT_SCHEMA_VERSIONS = new Set([1, CONTENT_SCHEMA_VERSION]);
 
 const MAX_LENGTH = {
+  name: 50,
   short: 80,
   copy: 240,
   photoAlt: 300,
@@ -89,16 +90,21 @@ function valueAtPath(value, path) {
   return path.reduce((current, key) => current?.[key], value);
 }
 
-function displayDiffValue(value) {
-  if (Array.isArray(value)) return value.map(displayDiffValue).join(" / ");
+function mediaLabel(value, counterpart, current) {
+  if (value === counterpart) return "같은 파일";
+  return current ? "새 파일" : "기존 파일";
+}
+
+function displayDiffValue(value, counterpart, current) {
+  if (Array.isArray(value)) return value.map((item, index) => displayDiffValue(item, counterpart?.[index], current)).join(" / ");
   if (value && typeof value === "object") {
     if (typeof value.title === "string") {
-      return [value.title, value.artist, value.src, value.sourceUrl, value.licenseLabel, value.licenseUrl]
+      return [value.title, value.artist, mediaLabel(value.src, counterpart?.src, current), value.sourceUrl, value.licenseLabel, value.licenseUrl]
         .filter(Boolean)
         .join(" · ");
     }
     if (typeof value.alt === "string") {
-      return [value.alt, value.src, value.position].filter(Boolean).join(" · ");
+      return [value.alt, mediaLabel(value.src, counterpart?.src, current), value.position].filter(Boolean).join(" · ");
     }
     return JSON.stringify(value);
   }
@@ -113,8 +119,8 @@ export function buildPublishDiff(currentDocument, publishedDocument) {
     return [{
       section: field.section,
       label: field.label,
-      current: displayDiffValue(current),
-      published: displayDiffValue(published),
+      current: displayDiffValue(current, published, true),
+      published: displayDiffValue(published, current, false),
     }];
   });
   return {
@@ -128,8 +134,8 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
   const required = (value, path, maxLength = MAX_LENGTH.copy) => {
     if (typeof value !== "string" || !value.trim() || value.length > maxLength) errors[path] = `${path} 값을 확인해 주세요.`;
   };
-  required(document?.content?.couple?.groom, "신랑 이름", MAX_LENGTH.short);
-  required(document?.content?.couple?.bride, "신부 이름", MAX_LENGTH.short);
+  required(document?.content?.couple?.groom, "신랑 이름", MAX_LENGTH.name);
+  required(document?.content?.couple?.bride, "신부 이름", MAX_LENGTH.name);
   if (!Array.isArray(document?.content?.hero?.introLines) || document.content.hero.introLines.length !== 2
     || document.content.hero.introLines.some((line) => typeof line !== "string" || !line.trim() || line.length > MAX_LENGTH.short)) {
     errors["상단 인사"] = "상단 인사는 두 줄 모두 입력해 주세요.";

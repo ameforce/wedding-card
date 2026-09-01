@@ -31,11 +31,11 @@ function setAtPath(document, path, value) {
   return next;
 }
 
-function Field({ label, value, onChange, type = "text", hint, error, required = true, wide = false }) {
+function Field({ label, value, onChange, type = "text", hint, error, required = true, wide = false, maxLength }) {
   return (
     <label className={`content-admin-field ${wide ? "is-wide" : ""}`}>
       <span>{label}</span>
-      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} aria-invalid={error ? "true" : undefined} />
+      <input type={type} value={value} maxLength={maxLength} onChange={(event) => onChange(event.target.value)} required={required} aria-invalid={error ? "true" : undefined} />
       {error ? <small className="is-error" role="alert">{error}</small> : hint && <small>{hint}</small>}
     </label>
   );
@@ -392,7 +392,8 @@ export function ContentAdmin() {
         status: "draft",
         createdAt: new Date().toISOString(),
         publishedAt: null,
-      }, ...current.filter((item) => item.id !== state.draftRevisionId)]);
+      }, ...current.filter((item) => item.id !== state.draftRevisionId)
+        .map((item) => item.status === "draft" ? { ...item, status: "archived" } : item)]);
       setLastUpdated(formatAdminTimestamp(new Date().toISOString()));
       return state.draftRevisionId;
     } catch (error) {
@@ -529,8 +530,8 @@ export function ContentAdmin() {
           <fieldset disabled={busy}>
             <legend>기본 정보</legend>
             <div className="content-admin-grid">
-              <Field label="신랑 이름" value={editingDocument.content.couple.groom} onChange={(value) => update(["content", "couple", "groom"], value)} />
-              <Field label="신부 이름" value={editingDocument.content.couple.bride} onChange={(value) => update(["content", "couple", "bride"], value)} />
+              <Field label="신랑 이름" value={editingDocument.content.couple.groom} maxLength={50} onChange={(value) => update(["content", "couple", "groom"], value)} />
+              <Field label="신부 이름" value={editingDocument.content.couple.bride} maxLength={50} onChange={(value) => update(["content", "couple", "bride"], value)} />
               <CopyField label="상단 인사" lines={editingDocument.content.hero.introLines} onChange={(value) => update(["content", "hero", "introLines"], value)} hint="줄바꿈 그대로 표시됩니다." />
             </div>
           </fieldset>
@@ -637,14 +638,16 @@ export function ContentAdmin() {
             {versionHistory.map((revision, index) => {
               const label = `v${versionHistory.length - index}`;
               const active = revision.id === draftRevisionId || revision.id === publishedRevisionId;
-              const statusLabel = revision.status === "published" ? "공개 중" : revision.publishedAt ? "이전 공개" : "초안";
+              const statusLabel = revision.status === "published" ? "공개 중"
+                : revision.publishedAt ? "이전 공개"
+                  : revision.status === "archived" ? "이전 초안" : "초안";
               return (
                 <li key={revision.id} className={active ? "is-active" : ""}>
                   <span className="content-admin-history-marker" />
                   <div>
                     <div><strong>{label}</strong><em className={`is-${revision.status}`}>{statusLabel}</em></div>
                     <time dateTime={revision.publishedAt || revision.createdAt || ""}>{formatAdminTimestamp(revision.publishedAt || revision.createdAt)}</time>
-                    <small>{revision.id === draftRevisionId ? "현재 작업" : revision.id === publishedRevisionId ? "현재 공개 버전" : revision.publishedAt ? "이 버전으로 공개됨" : "임시 적용"}</small>
+                    <small>{revision.id === draftRevisionId ? "현재 작업" : revision.id === publishedRevisionId ? "현재 공개 버전" : revision.publishedAt ? "이 버전으로 공개됨" : revision.status === "archived" ? "이전 임시 적용" : "임시 적용"}</small>
                     {revision.publishedAt && ![draftRevisionId, publishedRevisionId].includes(revision.id) && (
                       <button type="button" onClick={() => setRepublishTarget({ id: revision.id, label })}><ArrowClockwise aria-hidden="true" />이 버전을 다시 공개</button>
                     )}

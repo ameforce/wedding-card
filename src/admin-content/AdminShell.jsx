@@ -1,5 +1,5 @@
 import { ArrowClockwise, ArrowSquareOut, Briefcase, ChatCircleDots, List, X } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ACCESS_LOGOUT_PATH } from "./content-client.js";
 
 const NAV_ITEMS = [
@@ -9,14 +9,40 @@ const NAV_ITEMS = [
 
 export function AdminShell({ active, children, lastUpdated, localReview = false, onRefresh }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [compact, setCompact] = useState(false);
+  const menuButtonRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const restoreMenuFocusRef = useRef(false);
   const activeLabel = NAV_ITEMS.find((item) => item.href === active)?.label || "관리";
+  const sidebarHidden = compact && !menuOpen;
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 760px)");
+    const updateCompact = () => setCompact(query.matches);
+    updateCompact();
+    query.addEventListener("change", updateCompact);
+    return () => query.removeEventListener("change", updateCompact);
+  }, []);
+
+  useEffect(() => {
+    if (compact && menuOpen) closeButtonRef.current?.focus();
+    if (!menuOpen && restoreMenuFocusRef.current) {
+      restoreMenuFocusRef.current = false;
+      menuButtonRef.current?.focus();
+    }
+  }, [compact, menuOpen]);
+
+  const closeMenu = () => {
+    restoreMenuFocusRef.current = true;
+    setMenuOpen(false);
+  };
 
   return (
     <main className="admin-shell">
-      <aside className={`admin-sidebar ${menuOpen ? "is-open" : ""}`} aria-label="청첩장 관리 메뉴">
+      <aside className={`admin-sidebar ${menuOpen ? "is-open" : ""}`} aria-label="청첩장 관리 메뉴" aria-hidden={sidebarHidden ? "true" : undefined} inert={sidebarHidden ? true : undefined}>
         <div className="admin-sidebar-heading">
           <a href="/admin" className="admin-brand">청첩장 관리</a>
-          <button type="button" aria-label="관리 메뉴 닫기" onClick={() => setMenuOpen(false)}><X aria-hidden="true" /></button>
+          <button ref={closeButtonRef} type="button" aria-label="관리 메뉴 닫기" onClick={closeMenu}><X aria-hidden="true" /></button>
         </div>
         <nav>
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => (
@@ -39,11 +65,11 @@ export function AdminShell({ active, children, lastUpdated, localReview = false,
 
       <section className="admin-main">
         <header className="admin-mobile-header">
-          <button type="button" aria-label="관리 메뉴 열기" onClick={() => setMenuOpen(true)}><List aria-hidden="true" /></button>
+          <button ref={menuButtonRef} type="button" aria-label="관리 메뉴 열기" onClick={() => setMenuOpen(true)}><List aria-hidden="true" /></button>
           <strong>{activeLabel}</strong>
           <span aria-hidden="true" />
         </header>
-        {menuOpen && <button type="button" className="admin-sidebar-backdrop" aria-label="관리 메뉴 닫기" onClick={() => setMenuOpen(false)} />}
+        {menuOpen && <button type="button" className="admin-sidebar-backdrop" aria-label="관리 메뉴 닫기" onClick={closeMenu} />}
         {children}
       </section>
     </main>
