@@ -273,7 +273,14 @@ export async function runPostDeployCanary({
     logger.info("[canary] D1 저장 결과와 관리자 경계 확인");
     assertOwnedRows(await d1.findByName(identity.name), identity, identity.updatedMessage);
     const adminVerification = await verifyAdminBoundary(fetchImpl, url, identity, accessToken);
-    result = { adminVerification, publicVerified: true, guestbookLifecycleVerified: true };
+    logger.info("[canary] 작성자 인증 방명록 삭제와 잔여 0 확인");
+    const deleted = await requestGuestbook(fetchImpl, url, "/api/guestbook/entries", "DELETE", {
+      name: identity.name,
+      password: identity.password,
+    }, 200);
+    invariant(deleted.deleted === true, "방명록 삭제 응답이 성공을 확인하지 못했습니다.");
+    invariant((await d1.findByName(identity.name)).length === 0, "작성자 삭제 후 D1 행이 남아 있습니다.");
+    result = { adminVerification, publicVerified: true, guestbookLifecycleVerified: true, guestbookDeleteVerified: true };
   } catch (error) {
     primaryError = error;
   }

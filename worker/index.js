@@ -384,6 +384,20 @@ async function updateEntry(request, env) {
   return json({ updatedAt });
 }
 
+async function deleteEntry(request, env) {
+  requireSameOrigin(request);
+  const db = requireDatabase(env);
+  await enforceGuestbookCallerRateLimit(env, request, { authentication: true });
+  const { name, password } = normalizeEntry(await readJson(request), { requireMessage: false });
+  await enforceGuestbookCredentialRateLimit(env, name);
+  const entry = await requireUniqueCredentialMatch(db, name, password);
+  const result = await db.prepare("DELETE FROM guestbook_entries WHERE id = ?").bind(entry.id).run();
+  if (Number(result?.meta?.changes ?? result?.changes ?? 0) !== 1) {
+    throw { status: 401, code: "ENTRY_AUTH_FAILED", message: "이름 또는 비밀번호를 확인해 주세요." };
+  }
+  return json({ deleted: true });
+}
+
 function decodeBase64Url(value) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
@@ -1296,6 +1310,7 @@ async function handleGuestbook(request, env, url) {
     if (url.pathname === `${API_PREFIX}/entries`) {
       if (request.method === "POST") return await createEntry(request, env);
       if (request.method === "PATCH") return await updateEntry(request, env);
+      if (request.method === "DELETE") return await deleteEntry(request, env);
       return apiError(405, "METHOD_NOT_ALLOWED", "공개 방명록 조회는 제공되지 않습니다.");
     }
     if (url.pathname === `${API_PREFIX}/entries/unlock`) {

@@ -359,8 +359,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .guestbook-identity-fields input { height: 46px; min-height: 46px; }
 .guestbook-form textarea { min-height: 120px; resize: vertical; line-height: 1.65; }
 .guestbook-form small { color: #817a74; font-size: 12px; line-height: 1.5; }
-.guestbook-submit { min-height: 48px; margin-top: 3px; color: #fff; background: #6d625a; border: 0; border-radius: 12px; cursor: pointer; font: inherit; font-size: 14px; font-weight: 650; }
-.guestbook-submit:disabled { cursor: wait; opacity: .58; }
+.guestbook-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 3px; }
+.guestbook-submit, .guestbook-delete { min-height: 48px; color: #fff; border-radius: 12px; cursor: pointer; font: inherit; font-size: 14px; font-weight: 650; }
+.guestbook-submit { margin-top: 3px; background: #6d625a; border: 0; }
+.guestbook-actions .guestbook-submit { margin-top: 0; }
+.guestbook-delete { min-width: 78px; padding: 0 16px; color: #9b3d42; background: rgba(255, 255, 255, .54); border: 1px solid rgba(155, 61, 66, .3); }
+.guestbook-submit:disabled, .guestbook-delete:disabled { cursor: wait; opacity: .58; }
 
 .music-control { position: fixed; z-index: 24; top: calc(96px + env(safe-area-inset-top)); right: max(16px, calc((100vw - 430px) / 2 + 16px)); }
 .music-control button { display: grid; width: 44px; height: 44px; padding: 0; place-items: center; color: #415a79; background: rgba(255, 255, 255, .86); border: 1px solid rgba(71, 98, 127, .16); border-radius: 50%; cursor: pointer; box-shadow: 0 8px 22px rgba(42, 59, 77, .12); backdrop-filter: blur(10px); }
@@ -379,6 +383,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .pastel-invitation .guestbook-form textarea { color: #294765; background: rgba(255, 255, 255, .48); border-color: rgba(71, 98, 127, .14); }
 .pastel-invitation .guestbook-tabs button.is-active { background: rgba(213, 229, 241, .66); border-color: rgba(96, 127, 158, .3); }
 .pastel-invitation .guestbook-submit { background: #6f8aa6; }
+.pastel-invitation .guestbook-delete { color: #9b4d58; background: rgba(255, 250, 250, .62); border-color: rgba(155, 77, 88, .28); }
 .pastel-invitation .music-credit { color: #74869a; }
 
 .guestbook-admin-shell { min-height: 100vh; padding: 40px 20px; color: #233d60; background: #f8f7f2; }
