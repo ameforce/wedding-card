@@ -12,6 +12,7 @@ const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8"
 const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const staticHeaders = await readFile(new URL("../public/_headers", import.meta.url), "utf8");
 const guestbookApi = await readFile(new URL("../src/guestbook-api.js", import.meta.url), "utf8");
+const guestbookAdmin = await readFile(new URL("../src/admin-content/GuestbookAdmin.jsx", import.meta.url), "utf8");
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 
 test("Pastel Letter is the fixed public default while Quiet remains an explicit regression route", () => {
@@ -333,23 +334,23 @@ test("guestbook labels, privacy break, and password guidance stay private withou
 });
 
 test("couple-only guestbook admin loads once on mount and reports a successful empty state", () => {
-  assert.match(app, /useState\(\{ status: "loading", entries: \[\], message: "" \}\)/);
-  assert.match(app, /const hasLoadedRef = useRef\(false\)/);
-  assert.match(app, /if \(hasLoadedRef\.current\) return;\s*hasLoadedRef\.current = true;\s*queueMicrotask\(\(\) => \{ void fetchEntries\(\); \}\)/);
-  assert.match(app, /useEffect\(\(\) => \{[\s\S]*?\}, \[fetchEntries\]\)/);
-  assert.match(app, /const reloadEntries = \(\) => \{\s*setState\(\{ status: "loading", entries: \[\], message: "" \}\);\s*void fetchEntries\(\)/);
-  assert.doesNotMatch(app, /인증 확인 후 불러오기/);
-  assert.match(app, /state\.status === "ready" && state\.entries\.length === 0/);
-  assert.match(app, /아직 도착한 방명록 메시지가 없습니다/);
-  assert.match(app, /state\.status === "ready" \? "새로고침"/);
+  assert.match(guestbookAdmin, /status: "loading",\s*entries: \[\],\s*count: 0/);
+  assert.match(guestbookAdmin, /useEffect\(\(\) => \{ void load\(\); \}, \[load\]\)/);
+  assert.doesNotMatch(guestbookAdmin, /인증 확인 후 불러오기/);
+  assert.match(guestbookAdmin, /state\.status === "loading"/);
+  assert.match(guestbookAdmin, /state\.status === "ready" && state\.entries\.length === 0/);
+  assert.match(guestbookAdmin, /아직 도착한 방명록 메시지가 없습니다/);
+  assert.match(guestbookAdmin, /aria-label="방명록 새로고침"/);
 });
 
 test("couple-only guestbook admin preserves auth-required and unavailable transitions", () => {
-  assert.match(app, /if \(!Array\.isArray\(result\.entries\)\)[\s\S]*?invalidResponse\.status = 503/);
-  assert.match(app, /status: authRequired \? "auth-required" : error\.status === 503 \? "unavailable" : "error"/);
-  assert.match(app, /state\.status === "auth-required" \? \(/);
-  assert.match(app, /Google 계정으로 다시 로그인/);
-  assert.match(app, /state\.status === "ready" && state\.entries\.length > 0/);
+  assert.match(guestbookAdmin, /const totalCount = Number\.isFinite\(result\.totalCount\) \? result\.totalCount : result\.count/);
+  assert.match(guestbookAdmin, /!Array\.isArray\(result\.entries\) \|\| !Number\.isFinite\(totalCount\)/);
+  assert.match(guestbookAdmin, /statusFromError\(error\)/);
+  assert.match(guestbookAdmin, /state\.status === "auth-required" \? \(/);
+  assert.match(guestbookAdmin, /Google 계정으로 다시 로그인/);
+  assert.match(guestbookAdmin, /\["error", "unavailable"\]\.includes\(state\.status\)/);
+  assert.match(guestbookAdmin, /\["ready", "loading-more"\]\.includes\(state\.status\) && state\.entries\.length > 0/);
 });
 
 test("public section motion stays active in Chrome while capture mode remains static", () => {

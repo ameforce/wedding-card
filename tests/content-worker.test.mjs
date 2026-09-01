@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import worker, { __test } from "../worker/index.js";
 import { WEDDING_PHOTOS, weddingContent } from "../src/content.js";
+
+const workerSource = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
 
 function request(path, init = {}) {
   return new Request(`https://example.test${path}`, {
@@ -359,6 +362,10 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
   }
 });
 
+test("rollback rejects archived drafts that were never public", async () => {
+  assert.match(workerSource, /!target\.publishedAt/);
+});
+
 test("content validation dual-reads schema v1, requires v2 writes, and validates music credits", () => {
   const legacy = confirmedDocument();
   legacy.schemaVersion = 1;
@@ -394,6 +401,18 @@ test("content publishing rejects unconfirmed or search-indexable documents", asy
     }), env);
     assert.equal(unsafeResponse.status, 400);
     assert.equal((await unsafeResponse.json()).code, "SEARCH_PRIVACY_REQUIRED");
+
+    const invalid = confirmedDocument();
+    invalid.content.couple.groom = "";
+    const invalidResponse = await worker.fetch(request("/api/admin/content", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ document: invalid }),
+    }), env);
+    assert.equal(invalidResponse.status, 400);
+    const invalidPayload = await invalidResponse.json();
+    assert.equal(invalidPayload.code, "INVALID_CONTENT");
+    assert.equal(typeof invalidPayload.fieldErrors["content.couple.groom"], "string");
 
     const unconfirmed = confirmedDocument();
     unconfirmed.content.unconfirmedContent = [{ key: "publishing.og", label: "OG" }];
