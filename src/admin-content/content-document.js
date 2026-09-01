@@ -156,10 +156,15 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
   }
   Object.assign(errors, validateMusicContent(document?.content?.music, { allowLocalPreview }));
   const photos = [document?.photos?.pastel?.hero, ...(document?.photos?.pastel?.gallery || [])];
-  if (photos.length !== 5 || photos.some((photo) => !photoUrl(photo?.src, allowLocalPreview)
-    || !photo?.alt?.trim() || photo.alt.length > MAX_LENGTH.photoAlt || !cropPosition(photo?.position, ""))) {
+  if (photos.length !== 5) {
     errors["사진"] = "모든 사진의 파일, 대체 텍스트, 초점 위치를 확인해 주세요.";
   }
+  photos.forEach((photo, index) => {
+    const label = index === 0 ? "상단 대표 사진" : `갤러리 ${index}`;
+    if (!photoUrl(photo?.src, allowLocalPreview)) errors[`${label} 파일`] = `${label} 파일을 확인해 주세요.`;
+    if (!photo?.alt?.trim() || photo.alt.length > MAX_LENGTH.photoAlt) errors[`${label} 대체 텍스트`] = `${label} 대체 텍스트를 확인해 주세요.`;
+    if (!cropPosition(photo?.position, "")) errors[`${label} 초점 위치`] = `${label} 초점 위치를 백분율 두 개로 입력해 주세요. 예: 50% 58%`;
+  });
   return errors;
 }
 

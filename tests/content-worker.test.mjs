@@ -69,6 +69,11 @@ function invitationDatabase() {
     revisions,
     mediaSets,
     queries,
+    async batch(statements) {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    },
     prepare(sql) {
       queries.push(sql);
       let values = [];
@@ -143,15 +148,26 @@ function invitationDatabase() {
             [state.published_revision_id, state.updated_at] = values;
             state.draft_revision_id = null;
           } else if (sql.includes("SET published_revision_id = ?, updated_at = ?")) {
-            [state.published_revision_id, state.updated_at] = values;
+            const [nextRevisionId, updatedAt, expectedRevisionId] = values;
+            if (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId) {
+              [state.published_revision_id, state.updated_at] = [nextRevisionId, updatedAt];
+            } else {
+              changes = 0;
+            }
           } else if (sql.includes("SET status = 'archived'")) {
-            const row = revisions.get(values[0]);
-            if (row) row.status = "archived";
-          } else if (sql.includes("SET status = 'published'")) {
-            const [publishedAt, id] = values;
+            const [id, expectedRevisionId] = values;
             const row = revisions.get(id);
-            row.status = "published";
-            row.published_at = publishedAt;
+            if (row && (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)) row.status = "archived";
+            else changes = 0;
+          } else if (sql.includes("SET status = 'published'")) {
+            const [publishedAt, id, expectedRevisionId] = values;
+            const row = revisions.get(id);
+            if (row && (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)) {
+              row.status = "published";
+              row.published_at = publishedAt;
+            } else {
+              changes = 0;
+            }
           }
           return { success: true, meta: { changes } };
         },
@@ -359,7 +375,7 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
     const rollbackResponse = await worker.fetch(request("/api/admin/content/rollback", {
       method: "POST",
       headers,
-      body: JSON.stringify({ revisionId }),
+      body: JSON.stringify({ revisionId, expectedPublishedRevisionId: secondRevisionId }),
     }), env);
     assert.equal(rollbackResponse.status, 200);
     assert.equal(db.state.published_revision_id, revisionId);
@@ -371,6 +387,42 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
 
 test("rollback rejects archived drafts that were never public", async () => {
   assert.match(workerSource, /!target\.publishedAt/);
+  assert.match(workerSource, /const rollbackResults = await db\.batch\(statements\)/);
+  assert.match(workerSource, /published_revision_id = \?\)"/);
+  assert.match(workerSource, /rollbackResults\.at\(-1\)\?\.meta\?\.changes/);
+});
+
+test("rollback rejects a stale public pointer before replacing another administrator's publication", async () => {
+  const db = invitationDatabase();
+  const fixture = await accessFixture();
+  const env = { GUESTBOOK_DB: db, ...fixture.env };
+  const document = JSON.stringify(confirmedDocument());
+  for (const [id, status] of [["current-public", "published"], ["older-public", "archived"]]) {
+    db.revisions.set(id, {
+      id,
+      content_json: document,
+      status,
+      created_at: `2026-08-${id === "current-public" ? "20" : "10"}T00:00:00.000Z`,
+      created_by: "groom@example.test",
+      published_at: `2026-08-${id === "current-public" ? "20" : "10"}T00:00:00.000Z`,
+    });
+  }
+  db.state.published_revision_id = "current-public";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(request("/api/admin/content/rollback", {
+      method: "POST",
+      headers: { "cf-access-jwt-assertion": fixture.assertion },
+      body: JSON.stringify({ revisionId: "older-public", expectedPublishedRevisionId: "stale-public" }),
+    }), env);
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "STALE_PUBLISHED_REVISION");
+    assert.equal(db.state.published_revision_id, "current-public");
+    assert.equal(db.revisions.get("current-public").status, "published");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("admin history always includes active pointers beyond the recent revision limit", async () => {

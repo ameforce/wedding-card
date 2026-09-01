@@ -65,12 +65,13 @@ function database() {
         },
         async run() {
           if (sql.startsWith("INSERT")) {
-            const [id, name, message, passwordHash, createdAt, updatedAt] = values;
+            const [id, name, message, messageSearch, passwordHash, createdAt, updatedAt] = values;
             if ([...rows.values()].some((entry) => entry.name === name)) throw new Error("UNIQUE constraint failed");
             rows.set(id, {
               id,
               name,
               message,
+              message_search: messageSearch,
               password_hash: passwordHash,
               created_at: createdAt,
               updated_at: updatedAt,
@@ -78,9 +79,15 @@ function database() {
               auth_window_started_at_ms: 0,
               auth_locked_until_ms: 0,
             });
+          } else if (sql.startsWith("UPDATE guestbook_entries SET message_search")) {
+            const [messageSearch, id, expectedMessage] = values;
+            const entry = rows.get(id);
+            if (entry?.message === expectedMessage && entry.message_search == null) {
+              rows.set(id, { ...entry, message_search: messageSearch });
+            }
           } else if (sql.startsWith("UPDATE guestbook_entries SET message")) {
-            const [message, updatedAt, id] = values;
-            rows.set(id, { ...rows.get(id), message, updated_at: updatedAt });
+            const [message, messageSearch, updatedAt, id] = values;
+            rows.set(id, { ...rows.get(id), message, message_search: messageSearch, updated_at: updatedAt });
           } else if (sql.startsWith("UPDATE guestbook_entries SET auth_failure_count = 0")) {
             const [id] = values;
             rows.set(id, {
@@ -96,8 +103,10 @@ function database() {
           if (sql.startsWith("SELECT COUNT(*) AS total")) {
             let entries = [...rows.values()];
             if (sql.includes("name LIKE")) {
-              const needle = String(values[0]).replaceAll("%", "").replaceAll("\\", "").toLowerCase();
-              entries = entries.filter((entry) => `${entry.name} ${entry.message}`.toLowerCase().includes(needle));
+              const needles = values.slice(0, 3).map((value) => String(value).replaceAll("%", "").replaceAll("\\", "").toLowerCase());
+              entries = entries.filter((entry) => entry.name.toLowerCase().includes(needles[0])
+                || entry.message.toLowerCase().includes(needles[1])
+                || String(entry.message_search || "").toLowerCase().includes(needles[2]));
             }
             return { total: entries.length };
           }
@@ -126,6 +135,9 @@ function database() {
           return rows.get(values[0]) || null;
         },
         async all() {
+          if (sql.includes("WHERE message_search IS NULL")) {
+            return { results: [...rows.values()].filter((entry) => entry.message_search == null).slice(0, 100) };
+          }
           if (sql.includes("WHERE name = ?")) {
             return { results: [...rows.values()].filter((entry) => entry.name === values[0]).slice(0, 2) };
           }
@@ -133,9 +145,11 @@ function database() {
             let entries = [...rows.values()].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
             let valueIndex = 0;
             if (sql.includes("name LIKE")) {
-              const needle = String(values[valueIndex]).replaceAll("%", "").replaceAll("\\", "").toLowerCase();
-              valueIndex += 2;
-              entries = entries.filter((entry) => `${entry.name} ${entry.message}`.toLowerCase().includes(needle));
+              const needles = values.slice(valueIndex, valueIndex + 3).map((value) => String(value).replaceAll("%", "").replaceAll("\\", "").toLowerCase());
+              valueIndex += 3;
+              entries = entries.filter((entry) => entry.name.toLowerCase().includes(needles[0])
+                || entry.message.toLowerCase().includes(needles[1])
+                || String(entry.message_search || "").toLowerCase().includes(needles[2]));
             }
             if (sql.includes("created_at >= ?")) {
               const cutoff = values[valueIndex];
@@ -581,7 +595,7 @@ test("administrator list supports search, bounded limits, counts, and opaque key
     db.rows.set(`entry-${suffix}`, {
       id: `entry-${suffix}`,
       name: index === 23 ? "특별 하객" : `하객 ${suffix}`,
-      message: index === 23 ? "특별한 축하 메시지" : `축하 메시지 ${suffix}`,
+      message: index === 23 ? "특별한 축하 메시지" : index === 24 ? "ＡＢＣ 축하" : `축하 메시지 ${suffix}`,
       password_hash: "not returned",
       created_at: `2026-08-${String(31 - Math.floor(index / 2)).padStart(2, "0")}T${String(23 - (index % 2)).padStart(2, "0")}:00:00.000Z`,
       updated_at: `2026-08-31T00:00:00.000Z`,
@@ -611,6 +625,16 @@ test("administrator list supports search, bounded limits, counts, and opaque key
     const searchedPayload = await searched.json();
     assert.equal(searchedPayload.count, 1);
     assert.equal(searchedPayload.entries[0].name, "특별 하객");
+
+    const compatibilitySearch = await worker.fetch(request("/api/guestbook/admin/entries?q=%EF%BC%A1%EF%BC%A2%EF%BC%A3&limit=10", { method: "GET", headers }), env);
+    const compatibilityPayload = await compatibilitySearch.json();
+    assert.equal(compatibilityPayload.count, 1);
+    assert.equal(compatibilityPayload.entries[0].message, "ＡＢＣ 축하");
+
+    const normalizedCompatibilitySearch = await worker.fetch(request("/api/guestbook/admin/entries?q=ABC&limit=10", { method: "GET", headers }), env);
+    const normalizedCompatibilityPayload = await normalizedCompatibilitySearch.json();
+    assert.equal(normalizedCompatibilityPayload.count, 1);
+    assert.equal(normalizedCompatibilityPayload.entries[0].message, "ＡＢＣ 축하");
 
     const invalidCursor = await worker.fetch(request("/api/guestbook/admin/entries?cursor=broken&limit=20", { method: "GET", headers }), env);
     assert.equal(invalidCursor.status, 400);

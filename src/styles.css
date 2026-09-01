@@ -502,6 +502,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .admin-sidebar-footer > a { display: inline-flex; width: fit-content; min-height: 44px; margin-top: 2px; align-items: center; gap: 6px; color: var(--admin-muted); }
 .admin-sidebar-footer > a svg { width: 16px; height: 16px; }
 .admin-main { min-width: 0; }
+.admin-main-content { min-width: 0; }
 .admin-mobile-header { display: none; }
 .admin-sidebar-backdrop { display: none; }
 .admin-page { min-width: 0; padding: 20px clamp(16px, 2vw, 28px) 36px; }
@@ -523,6 +524,11 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-layout { display: grid; width: 100%; grid-template-columns: minmax(420px, 1fr) 320px 280px; align-items: start; gap: 16px; }
 .content-admin-editor { min-width: 0; padding: 0 18px 16px; background: #fff; border: 1px solid var(--admin-border); border-radius: 10px; box-shadow: 0 6px 20px rgba(23,65,104,.04); }
 .content-admin-status { margin: 14px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 12px; }
+.content-admin-validation-summary { margin: 10px 0 0; padding: 12px; color: #793d43; background: #fff5f5; border: 1px solid #efcccc; border-radius: 8px; font-size: 12px; }
+.content-admin-validation-summary > strong { display: block; margin-bottom: 7px; }
+.content-admin-validation-summary ul { display: grid; margin: 0; padding: 0; gap: 5px; list-style: none; }
+.content-admin-validation-summary li { display: grid; grid-template-columns: minmax(110px, auto) minmax(0, 1fr); gap: 8px; }
+.content-admin-validation-summary li span { overflow-wrap: anywhere; }
 .content-admin-editor fieldset { padding: 16px 0; }
 .content-admin-editor legend { margin-bottom: 13px; color: var(--admin-ink-strong); font: 650 17px "Noto Serif KR Variable", serif; }
 .content-admin-section { border-top: 1px solid var(--admin-border); }
