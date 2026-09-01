@@ -181,8 +181,8 @@ test("photo alt validation and normalization share the 300 character Worker cont
   assert.equal(validateEditableContentDocument(document)["사진"], undefined);
 
   document.photos.pastel.hero.alt = "가".repeat(301);
-  assert.equal(typeof validateEditableContentDocument(document)["사진"], "string");
-  assert.throws(() => serializeContentDocument(document), (error) => error.code === "INVALID_CONTENT" && typeof error.fieldErrors["사진"] === "string");
+  assert.equal(typeof validateEditableContentDocument(document)["상단 대표 사진 대체 텍스트"], "string");
+  assert.throws(() => serializeContentDocument(document), (error) => error.code === "INVALID_CONTENT" && typeof error.fieldErrors["상단 대표 사진 대체 텍스트"] === "string");
 });
 
 test("public bootstrap selects exactly one published or bundled source before React", () => {
@@ -583,12 +583,13 @@ test("authentication, refresh, dialog focus, and rollback guards protect privile
   assert.match(source, /STALE_PUBLISHED_REVISION/);
   assert.match(client, /expectedPublishedRevisionId/);
   assert.doesNotMatch(source, /versionHistory\.length - index/);
-  assert.match(source, /리비전 \$\{revision\.id\.slice\(0, 8\)\}/);
+  assert.match(source, /revision\.id\.startsWith\("local-"\) \? revision\.id\.slice\(-8\) : revision\.id\.slice\(0, 8\)/);
   assert.match(source, /content-admin-validation-summary/);
   assert.match(shell, /inert=\{sidebarHidden \? true : undefined\}/);
   assert.match(shell, /event\.key === "Escape"/);
   assert.match(shell, /event\.key !== "Tab"/);
   assert.match(shell, /className="admin-main-content" inert=\{compact && menuOpen \? true : undefined\}/);
+  assert.match(shell, /className="admin-mobile-header" inert=\{compact && menuOpen \? true : undefined\}/);
   assert.match(shell, /closeButtonRef\.current\?\.focus\(\)/);
   assert.match(shell, /restoreMenuFocusRef\.current = true/);
   assert.match(shell, /menuButtonRef\.current\?\.focus\(\)/);
@@ -598,7 +599,7 @@ test("authentication, refresh, dialog focus, and rollback guards protect privile
 test("guestbook append failures preserve loaded rows and raw compatibility-form searches", async () => {
   const admin = await readFile(new URL("../src/admin-content/GuestbookAdmin.jsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../src/guestbook-api.js", import.meta.url), "utf8");
-  assert.match(admin, /append && status === "error"/);
+  assert.match(admin, /append && status !== "auth-required"/);
   assert.match(admin, /status: "append-error"/);
   assert.match(admin, /현재 목록은 그대로 유지됩니다/);
   assert.match(admin, /\["ready", "loading-more", "append-error"\]/);
@@ -607,11 +608,15 @@ test("guestbook append failures preserve loaded rows and raw compatibility-form 
   assert.doesNotMatch(api, /query\.normalize\("NFKC"\)/);
 });
 
-test("photo validation exposes the exact collapsed field before apply is enabled", () => {
+test("photo validation exposes the exact collapsed field before apply is enabled", async () => {
   const document = createContentDocument(weddingContent);
   document.photos.pastel.hero.position = "invalid";
   const errors = validateEditableContentDocument(document);
   assert.match(errors["상단 대표 사진 초점 위치"], /50% 58%/);
+  assert.equal(errors["사진"], undefined);
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  assert.match(source, /altError=\{validationErrors\["상단 대표 사진 대체 텍스트"\]\}/);
+  assert.match(source, /positionError=\{validationErrors\["상단 대표 사진 초점 위치"\]\}/);
 });
 
 test("applied admin content keeps full runtime photo objects", () => {

@@ -97,7 +97,7 @@ export function AdminShell({ active, children, lastUpdated, localReview = false,
       </aside>
 
       <section className="admin-main">
-        <header className="admin-mobile-header">
+        <header className="admin-mobile-header" inert={compact && menuOpen ? true : undefined} aria-hidden={compact && menuOpen ? "true" : undefined}>
           <button ref={menuButtonRef} type="button" aria-label="관리 메뉴 열기" aria-controls="admin-navigation" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><List aria-hidden="true" /></button>
           <strong>{activeLabel}</strong>
           <span aria-hidden="true" />

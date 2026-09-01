@@ -13,8 +13,8 @@ import {
 test("all checked-in D1 migrations are additive", async () => {
   const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
   assert.deepEqual(await checkMigrationDirectory(resolve(root, "migrations")), {
-    fileCount: 6,
-    statementCount: 14,
+    fileCount: 7,
+    statementCount: 16,
   });
 });
 

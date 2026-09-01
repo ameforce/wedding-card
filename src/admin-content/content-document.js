@@ -156,8 +156,7 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
   }
   Object.assign(errors, validateMusicContent(document?.content?.music, { allowLocalPreview }));
   const photos = [document?.photos?.pastel?.hero, ...(document?.photos?.pastel?.gallery || [])];
-  if (photos.length !== 5 || photos.some((photo) => !photoUrl(photo?.src, allowLocalPreview)
-    || !photo?.alt?.trim() || photo.alt.length > MAX_LENGTH.photoAlt || !cropPosition(photo?.position, ""))) {
+  if (photos.length !== 5) {
     errors["사진"] = "모든 사진의 파일, 대체 텍스트, 초점 위치를 확인해 주세요.";
   }
   photos.forEach((photo, index) => {

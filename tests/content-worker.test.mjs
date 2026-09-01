@@ -69,6 +69,11 @@ function invitationDatabase() {
     revisions,
     mediaSets,
     queries,
+    async batch(statements) {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    },
     prepare(sql) {
       queries.push(sql);
       let values = [];
@@ -143,15 +148,26 @@ function invitationDatabase() {
             [state.published_revision_id, state.updated_at] = values;
             state.draft_revision_id = null;
           } else if (sql.includes("SET published_revision_id = ?, updated_at = ?")) {
-            [state.published_revision_id, state.updated_at] = values;
+            const [nextRevisionId, updatedAt, expectedRevisionId] = values;
+            if (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId) {
+              [state.published_revision_id, state.updated_at] = [nextRevisionId, updatedAt];
+            } else {
+              changes = 0;
+            }
           } else if (sql.includes("SET status = 'archived'")) {
-            const row = revisions.get(values[0]);
-            if (row) row.status = "archived";
-          } else if (sql.includes("SET status = 'published'")) {
-            const [publishedAt, id] = values;
+            const [id, expectedRevisionId] = values;
             const row = revisions.get(id);
-            row.status = "published";
-            row.published_at = publishedAt;
+            if (row && (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)) row.status = "archived";
+            else changes = 0;
+          } else if (sql.includes("SET status = 'published'")) {
+            const [publishedAt, id, expectedRevisionId] = values;
+            const row = revisions.get(id);
+            if (row && (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)) {
+              row.status = "published";
+              row.published_at = publishedAt;
+            } else {
+              changes = 0;
+            }
           }
           return { success: true, meta: { changes } };
         },
@@ -371,6 +387,9 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
 
 test("rollback rejects archived drafts that were never public", async () => {
   assert.match(workerSource, /!target\.publishedAt/);
+  assert.match(workerSource, /const rollbackResults = await db\.batch\(statements\)/);
+  assert.match(workerSource, /published_revision_id = \?\)"/);
+  assert.match(workerSource, /rollbackResults\.at\(-1\)\?\.meta\?\.changes/);
 });
 
 test("rollback rejects a stale public pointer before replacing another administrator's publication", async () => {

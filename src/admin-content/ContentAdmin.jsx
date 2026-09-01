@@ -51,7 +51,7 @@ function CopyField({ label, lines, onChange, hint, error }) {
   );
 }
 
-function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, error }) {
+function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, fileError, altError, positionError }) {
   const [replacementAlt, setReplacementAlt] = useState("");
   const replacementReady = replacementAlt.trim().length > 0;
   return (
@@ -59,7 +59,7 @@ function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, error }
       <img src={photo.src} alt="" style={{ objectPosition: photo.position }} />
       <div>
         <strong>{title}</strong>
-        <Field label="현재 사진 대체 텍스트" value={photo.alt} onChange={(value) => onMetaChange("alt", value)} />
+        <Field label="현재 사진 대체 텍스트" value={photo.alt} onChange={(value) => onMetaChange("alt", value)} error={altError} />
         <Field
           label="새 사진 대체 텍스트"
           value={replacementAlt}
@@ -68,13 +68,14 @@ function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, error }
         />
         <label className={`content-admin-file ${replacementReady ? "" : "is-disabled"}`}>
           <span>{busy ? "이미지 처리 중…" : "사진 교체"}</span>
-          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || !replacementReady} onChange={async (event) => {
+          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || !replacementReady} aria-invalid={fileError ? "true" : undefined} onChange={async (event) => {
             const file = event.target.files?.[0];
             if (file && await onUpload(slot, file, replacementAlt.trim())) setReplacementAlt("");
             event.target.value = "";
           }} />
         </label>
-        <Field label="초점 위치" value={photo.position} onChange={(value) => onMetaChange("position", value)} error={error} hint="예: 50% 58%" />
+        {fileError && <small className="is-error" role="alert">{fileError}</small>}
+        <Field label="초점 위치" value={photo.position} onChange={(value) => onMetaChange("position", value)} error={positionError} hint="예: 50% 58%" />
       </div>
     </article>
   );
@@ -621,9 +622,9 @@ export function ContentAdmin() {
 
           <CollapsibleSection title="사진" busy={busy} attention={Boolean(uploadingSlot || validationErrors["사진"])}>
             <div className="content-admin-photo-list">
-              <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={uploadingSlot === "pastel-hero"} error={validationErrors["상단 대표 사진 초점 위치"] || validationErrors["상단 대표 사진 대체 텍스트"] || validationErrors["상단 대표 사진 파일"]} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
+              <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={uploadingSlot === "pastel-hero"} fileError={validationErrors["상단 대표 사진 파일"]} altError={validationErrors["상단 대표 사진 대체 텍스트"]} positionError={validationErrors["상단 대표 사진 초점 위치"]} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
               {photos.gallery.map((photo, index) => (
-                <PhotoEditor key={`gallery-${index}`} title={`갤러리 ${index + 1}`} slot={`pastel-gallery-${index}`} photo={photo} busy={uploadingSlot === `pastel-gallery-${index}`} error={validationErrors[`갤러리 ${index + 1} 초점 위치`] || validationErrors[`갤러리 ${index + 1} 대체 텍스트`] || validationErrors[`갤러리 ${index + 1} 파일`]} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "gallery", index, key], value)} />
+                <PhotoEditor key={`gallery-${index}`} title={`갤러리 ${index + 1}`} slot={`pastel-gallery-${index}`} photo={photo} busy={uploadingSlot === `pastel-gallery-${index}`} fileError={validationErrors[`갤러리 ${index + 1} 파일`]} altError={validationErrors[`갤러리 ${index + 1} 대체 텍스트`]} positionError={validationErrors[`갤러리 ${index + 1} 초점 위치`]} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "gallery", index, key], value)} />
               ))}
             </div>
           </CollapsibleSection>
@@ -652,7 +653,7 @@ export function ContentAdmin() {
           <h2>버전 기록</h2>
           <ol>
             {versionHistory.map((revision) => {
-              const label = `리비전 ${revision.id.slice(0, 8)}`;
+              const label = `리비전 ${revision.id.startsWith("local-") ? revision.id.slice(-8) : revision.id.slice(0, 8)}`;
               const active = revision.id === draftRevisionId || revision.id === publishedRevisionId;
               const statusLabel = revision.status === "published" ? "공개 중"
                 : revision.publishedAt ? "이전 공개"

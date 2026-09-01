@@ -66,7 +66,7 @@ export function GuestbookAdmin() {
     } catch (error) {
       if (requestSequence.current !== sequence) return;
       const status = statusFromError(error);
-      if (append && status === "error") {
+      if (append && status !== "auth-required") {
         setState((current) => ({
           ...current,
           status: "append-error",

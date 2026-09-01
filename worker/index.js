@@ -349,8 +349,8 @@ async function createEntry(request, env) {
   const passwordHash = await hashPassword(password);
   try {
     await db.prepare(
-      "INSERT INTO guestbook_entries (id, name, message, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-    ).bind(id, name, message, passwordHash, timestamp, timestamp).run();
+      "INSERT INTO guestbook_entries (id, name, message, message_search, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).bind(id, name, message, message.normalize("NFKC"), passwordHash, timestamp, timestamp).run();
   } catch (error) {
     const racedEntry = await findEntriesByName(db, name);
     if (racedEntry.length > 0) {
@@ -379,7 +379,8 @@ async function updateEntry(request, env) {
   await enforceGuestbookCredentialRateLimit(env, name);
   const entry = await requireUniqueCredentialMatch(db, name, password);
   const updatedAt = new Date().toISOString();
-  await db.prepare("UPDATE guestbook_entries SET message = ?, updated_at = ? WHERE id = ?").bind(message, updatedAt, entry.id).run();
+  await db.prepare("UPDATE guestbook_entries SET message = ?, message_search = ?, updated_at = ? WHERE id = ?")
+    .bind(message, message.normalize("NFKC"), updatedAt, entry.id).run();
   return json({ updatedAt });
 }
 
@@ -479,13 +480,27 @@ async function requireAdminEmail(request, env) {
   return email;
 }
 
+async function backfillGuestbookMessageSearch(db) {
+  for (;;) {
+    const result = await db.prepare(
+      "SELECT id, message FROM guestbook_entries WHERE message_search IS NULL LIMIT 100",
+    ).all();
+    const rows = result.results || [];
+    if (rows.length === 0) return;
+    await runDatabaseBatch(db, rows.map((entry) => db.prepare(
+      "UPDATE guestbook_entries SET message_search = ? WHERE id = ? AND message = ? AND message_search IS NULL",
+    ).bind(entry.message.normalize("NFKC"), entry.id, entry.message)));
+    if (rows.length < 100) return;
+  }
+}
+
 async function listAdminEntries(request, env) {
   const db = requireDatabase(env);
   await requireAdminEmail(request, env);
   const url = new URL(request.url);
   const rawQuery = (url.searchParams.get("q") || "").trim();
   const normalizedQuery = rawQuery.normalize("NFKC");
-  if (rawQuery.length > 50 || normalizedQuery.length > 50) throw { status: 400, code: "INVALID_QUERY", message: "검색어는 50자 이내로 입력해 주세요." };
+  if (normalizedQuery.length > 50) throw { status: 400, code: "INVALID_QUERY", message: "검색어는 50자 이내로 입력해 주세요." };
   const range = url.searchParams.get("range") || "all";
   if (!["all", "7d", "30d"].includes(range)) {
     throw { status: 400, code: "INVALID_RANGE", message: "조회 기간을 확인해 주세요." };
@@ -510,10 +525,11 @@ async function listAdminEntries(request, env) {
   const where = [];
   const values = [];
   if (rawQuery) {
+    await backfillGuestbookMessageSearch(db);
     const escapeLike = (value) => value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
     const rawPattern = `%${escapeLike(rawQuery)}%`;
     const normalizedPattern = `%${escapeLike(normalizedQuery)}%`;
-    where.push("(name LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\')");
+    where.push("(name LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\' OR message_search LIKE ? ESCAPE '\\')");
     values.push(normalizedPattern, rawPattern, normalizedPattern);
   }
   if (range !== "all") {
@@ -952,24 +968,28 @@ async function rollbackInvitation(request, env) {
     return apiError(404, "REVISION_NOT_FOUND", "되돌릴 콘텐츠 버전을 찾을 수 없습니다.");
   }
   validateInvitationDocument(target.document, { publish: true });
-  const state = await getInvitationState(db);
-  if (!expectedPublishedRevisionId || state?.published_revision_id !== expectedPublishedRevisionId) {
+  if (!expectedPublishedRevisionId || typeof db.batch !== "function") {
     return apiError(409, "STALE_PUBLISHED_REVISION", "공개본이 변경되었습니다. 최신 상태를 다시 확인해 주세요.");
   }
   const publishedAt = new Date().toISOString();
   const statements = [];
-  if (state?.published_revision_id && state.published_revision_id !== revisionId) {
-    statements.push(db.prepare("UPDATE invitation_revisions SET status = 'archived' WHERE id = ? AND status = 'published'")
-      .bind(state.published_revision_id));
+  if (expectedPublishedRevisionId !== revisionId) {
+    statements.push(db.prepare(
+      "UPDATE invitation_revisions SET status = 'archived' WHERE id = ? AND status = 'published' AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND published_revision_id = ?)",
+    ).bind(expectedPublishedRevisionId, expectedPublishedRevisionId));
   }
   statements.push(
-    db.prepare("UPDATE invitation_revisions SET status = 'published', published_at = ? WHERE id = ?")
-      .bind(publishedAt, revisionId),
     db.prepare(
-      "UPDATE invitation_state SET published_revision_id = ?, updated_at = ? WHERE singleton_id = 1",
-    ).bind(revisionId, publishedAt),
+      "UPDATE invitation_revisions SET status = 'published', published_at = ? WHERE id = ? AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND published_revision_id = ?)",
+    ).bind(publishedAt, revisionId, expectedPublishedRevisionId),
+    db.prepare(
+      "UPDATE invitation_state SET published_revision_id = ?, updated_at = ? WHERE singleton_id = 1 AND published_revision_id = ?",
+    ).bind(revisionId, publishedAt, expectedPublishedRevisionId),
   );
-  await runDatabaseBatch(db, statements);
+  const rollbackResults = await db.batch(statements);
+  if (Number(rollbackResults.at(-1)?.meta?.changes) !== 1) {
+    return apiError(409, "STALE_PUBLISHED_REVISION", "공개본이 변경되었습니다. 최신 상태를 다시 확인해 주세요.");
+  }
   return json({ revisionId, publishedAt });
 }
 
