@@ -16,11 +16,12 @@ test("guestbook deletion requires an in-app confirmation and sends one request o
 
   const address = server.httpServer.address();
   assert.equal(typeof address, "object");
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  let browser;
   let deleteRequests = 0;
 
   try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.route("**/api/guestbook/entries/unlock", async (route) => {
       await route.fulfill({
         status: 200,
@@ -72,7 +73,7 @@ test("guestbook deletion requires an in-app confirmation and sends one request o
     await page.getByRole("button", { name: "비공개로 전하기", exact: true }).waitFor({ state: "visible" });
     assert.equal(deleteRequests, 1);
   } finally {
-    await browser.close();
+    await browser?.close();
     await server.close();
   }
 });
