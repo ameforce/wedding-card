@@ -836,7 +836,7 @@ function GuestbookSection({ notify }) {
         </div>
       </form>
       {deleteConfirmOpen && createPortal((
-        <div className={`guestbook-delete-portal ${deleteTriggerRef.current?.closest(".pastel-invitation") ? "pastel-invitation" : "quiet-invitation"}`}>
+        <div className={`guestbook-delete-portal ${deleteTriggerRef.current?.closest(".pastel-invitation") ? "is-pastel" : "is-quiet"}`}>
         <div className="guestbook-delete-backdrop">
           <div ref={deleteDialogRef} className="guestbook-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="guestbook-delete-title" aria-describedby="guestbook-delete-description">
             <h3 id="guestbook-delete-title">이 방명록을 삭제할까요?</h3>

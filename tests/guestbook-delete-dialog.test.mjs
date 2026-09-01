@@ -52,8 +52,11 @@ test("guestbook deletion requires an accessible in-app confirmation and keeps fa
     const dialog = page.getByRole("dialog", { name: "이 방명록을 삭제할까요?" });
     await dialog.waitFor({ state: "visible" });
     assert.equal(deleteRequests, 0);
-    assert.equal(await page.locator(".guestbook-delete-portal").evaluate((element) => element.classList.contains("pastel-invitation")), true);
+    assert.equal(await page.locator(".guestbook-delete-portal").evaluate((element) => element.classList.contains("is-pastel")), true);
+    assert.equal(await page.locator(".guestbook-delete-portal").evaluate((element) => getComputedStyle(element).isolation), "auto");
     assert.equal(await page.locator(".guestbook-delete-portal").evaluate((element) => getComputedStyle(element).userSelect), "none");
+    assert.equal(await dialog.evaluate((element) => getComputedStyle(element).color), "rgb(41, 71, 101)");
+    assert.equal(await page.locator(".guestbook-delete-backdrop").evaluate((element) => getComputedStyle(element).zIndex), "80");
 
     assert.equal(await page.locator("#root").getAttribute("inert"), "");
     const cancelButton = dialog.getByRole("button", { name: "취소", exact: true });
