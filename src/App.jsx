@@ -27,6 +27,7 @@ import { getInvitationPhotos } from "./admin-content/content-document.js";
 import { usePublicInvitationContent } from "./admin-content/public-content.jsx";
 import { createGuestbookEntry, deleteGuestbookEntry, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
 import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
+import { PastelIntroCover } from "./intro/PastelIntroCover.jsx";
 
 const VARIANTS = {
   quiet: {
@@ -113,61 +114,6 @@ function InvitationLoadingShell({ captureMode }) {
         </div>
       </div>
     </main>
-  );
-}
-
-const PASTEL_INTRO_TOTAL_MS = 4600;
-
-// 매듭 풀림 플립북 프레임: F0(묶임)이 항상 있고, 이후는 imagegen으로 이어 생성한
-// 순서대로 나열한다 (끈 당김 -> 고리 무너짐 -> 리본 슬립). 프레임이 하나면 정지 상태로 유지된다.
-const PASTEL_INTRO_BOW_FRAMES = [
-  "/assets/design/intro-ribbon-bow.webp",
-  "/assets/design/intro-ribbon-bow-f1.webp",
-  "/assets/design/intro-ribbon-bow-f15.webp",
-  "/assets/design/intro-ribbon-bow-f2.webp",
-  "/assets/design/intro-ribbon-bow-f25.webp",
-  "/assets/design/intro-ribbon-bow-f3.webp",
-  "/assets/design/intro-ribbon-bow-f35.webp",
-];
-
-function PastelIntroCover({ onFinish }) {
-  const [leaving, setLeaving] = useState(false);
-  const finishRef = useRef(onFinish);
-  useEffect(() => {
-    finishRef.current = onFinish;
-  }, [onFinish]);
-  useEffect(() => {
-    document.body.classList.add("intro-lock");
-    const timer = window.setTimeout(() => finishRef.current?.(), PASTEL_INTRO_TOTAL_MS);
-    return () => {
-      window.clearTimeout(timer);
-      document.body.classList.remove("intro-lock");
-    };
-  }, []);
-  const leave = () => {
-    if (leaving) return;
-    setLeaving(true);
-    window.setTimeout(() => finishRef.current?.(), 270);
-  };
-  return (
-    <div className={`intro-cover ${leaving ? "is-leaving" : ""}`} aria-hidden="true" onPointerDown={leave}>
-      <div className="intro-cover__panel intro-cover__panel--left" />
-      <div className="intro-cover__panel intro-cover__panel--right" />
-      <div className="intro-cover__seam-light" />
-      <div className="intro-cover__ribbon">
-        <div className="intro-cover__band" />
-        <div className="intro-cover__bow">
-          {PASTEL_INTRO_BOW_FRAMES.map((src, index) => (
-            <img
-              key={src}
-              className={`intro-cover__bow-frame intro-cover__bow-frame--${index}`}
-              src={src}
-              alt=""
-            />
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }
 

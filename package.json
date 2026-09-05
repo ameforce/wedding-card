@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "check:content": "node scripts/check-content.mjs",
-    "build": "node scripts/check-content.mjs && vite build && node scripts/prepare-sites-build.mjs",
+    "check:ribbon": "node scripts/check-ribbon-assets.mjs",
+    "build": "npm run check:content && npm run check:ribbon && vite build && node scripts/prepare-sites-build.mjs",
     "build:design": "cross-env ALLOW_DESIGN_PLACEHOLDERS=1 npm run build",
     "deploy:cloudflare": "npm run build && npm run deploy:cloudflare:built",
     "deploy:cloudflare:built": "wrangler deploy",
@@ -21,7 +22,7 @@
     "lint": "eslint .",
     "optimize:assets": "node scripts/optimize-assets.mjs",
     "preview": "vite preview",
-    "test:ui": "node --test tests/sesang-sticker-layout.test.mjs tests/wedding-content.test.mjs tests/text-alignment.test.mjs tests/mobile-zoom-guard.test.mjs tests/invitation-actions.test.mjs tests/admin-content.test.mjs tests/guestbook-delete-dialog.test.mjs",
+    "test:ui": "node --test tests/sesang-sticker-layout.test.mjs tests/wedding-content.test.mjs tests/text-alignment.test.mjs tests/mobile-zoom-guard.test.mjs tests/invitation-actions.test.mjs tests/admin-content.test.mjs tests/guestbook-delete-dialog.test.mjs tests/pastel-intro.test.mjs tests/pastel-intro-browser.test.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs tests/guestbook-worker.test.mjs tests/content-worker.test.mjs tests/post-deploy-render-canary.test.mjs tests/post-deploy-canary.test.mjs tests/d1-migrations.test.mjs tests/cloudflare-access.test.mjs tests/cloudflare-deployment-state.test.mjs tests/cloudflare-deployment-workflow.test.mjs"
   },
   "dependencies": {

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>인트로 재생 기능 검증</title>
+  <style>
+    body { margin: 0; background: #72acb4; min-height: 180vh; }
+    body.intro-lock { overflow: hidden; }
+    #underlying { position: fixed; inset: 0; display: grid; place-content: center; color: #123; font: 24px sans-serif; }
+  </style>
+  <div id="underlying">인트로 뒤의 검증 화면</div>
+  <div id="root"></div>
+  <script type="module">
+    import React from "react";
+    import { createRoot } from "react-dom/client";
+    import { PastelIntroCover } from "/src/intro/PastelIntroCover.jsx";
+    import { createRibbonFrameLoader } from "/src/intro/ribbon-player.mjs";
+
+    // Local development fixture; Vite's production input does not include tests/.
+    // These numbered canvases test scheduling and reveal, not ribbon appearance.
+    const query = new URLSearchParams(location.search);
+    const count = 12;
+    const manifest = {
+      schemaVersion: 1, fps: 30, width: 480, height: 320,
+      frames: Array.from({ length: count }, (_, index) => `frame-${index}.webp`),
+      holdMs: 600, releaseFrame: count - 2, panelDelayMs: 300, panelDurationMs: 1200,
+    };
+    const originalFetch = window.fetch;
+    const evidence = window.__introFixture = { finishes: 0, decoded: [], draws: [], panelEvents: [], cancelled: 0, finishedAt: null };
+    const originalDraw = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function(source, ...args) {
+      const result = originalDraw.call(this, source, ...args);
+      if (source.dataset?.frameIndex !== undefined) evidence.draws.push({ index: Number(source.dataset.frameIndex), at: performance.now() });
+      return result;
+    };
+    const observePanels = new MutationObserver(() => {
+      const cover = document.querySelector('.pastel-intro-cover');
+      if (cover?.classList.contains('pastel-intro-cover--opening-panels') && !evidence.panelEvents.length) {
+        evidence.panelEvents.push({ at: performance.now() });
+      }
+    });
+    observePanels.observe(document.getElementById('root'), { attributes: true, childList: true, subtree: true });
+    function numberedFrame(index) {
+      const frame = document.createElement('canvas');
+      frame.dataset.frameIndex = String(index);
+      frame.width = manifest.width;
+      frame.height = manifest.height;
+      const context = frame.getContext('2d');
+      if (index !== count - 1) {
+        context.fillStyle = '#a73043';
+        context.fillRect(0, 0, frame.width, frame.height);
+        context.fillStyle = '#fff';
+        context.font = '96px sans-serif';
+        context.fillText(String(index), 180, 200);
+      }
+      return frame;
+    }
+    window.fetch = async (url, options) => {
+      if (String(url).endsWith('/ribbon-sequence/manifest.json')) {
+        return new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/json' } });
+      }
+      const match = String(url).match(/\/ribbon-sequence\/frame-(\d+)\.webp$/);
+      if (query.has('realLoader') && match) {
+        const blob = await new Promise(resolve => numberedFrame(Number(match[1])).toBlob(resolve, 'image/webp'));
+        return new Response(blob, { headers: { 'Content-Type': 'image/webp' } });
+      }
+      return originalFetch(url, options);
+    };
+
+    function loaderFactory(checkedManifest, options) {
+      if (query.has('realLoader')) {
+        const loader = createRibbonFrameLoader(checkedManifest, options);
+        return {
+          ...loader,
+          async getFrame(index) {
+            const frame = await loader.getFrame(index);
+            frame.dataset = { frameIndex: String(index) };
+            evidence.decoded.push({ index, at: performance.now() });
+            return frame;
+          },
+          cancel() { evidence.cancelled += 1; loader.cancel(); },
+        };
+      }
+      let cancelled = false;
+      return {
+        async prefetch() {
+          if (query.has('prefetchDelay')) await new Promise(resolve => setTimeout(resolve, Number(query.get('prefetchDelay'))));
+          if (query.get('failure') === 'fetch') throw new Error('Synthetic asset failure');
+        },
+        async getFrame(index) {
+          const delay = Number((index === 3 ? query.get('stallDelay') : null) || query.get('decodeDelay') || 0);
+          if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+          if (cancelled) throw new DOMException('Cancelled', 'AbortError');
+          if (query.get('failure') === 'decode' && index === 4) throw new Error('Synthetic decode failure');
+          const frame = numberedFrame(index);
+          evidence.decoded.push({ index, at: performance.now() });
+          return frame;
+        },
+        cancel() { cancelled = true; evidence.cancelled += 1; },
+      };
+    }
+
+    const root = createRoot(document.getElementById('root'));
+    function finish() {
+      evidence.finishes += 1;
+      evidence.finishedAt = performance.now();
+      evidence.finalStyles = Array.from(document.querySelectorAll('.pastel-intro-cover, .pastel-intro-cover__panel')).map(element => ({
+        className: element.className,
+        opacity: getComputedStyle(element).opacity,
+        transform: getComputedStyle(element).transform,
+        backgroundColor: getComputedStyle(element).backgroundColor,
+      }));
+      root.render(null);
+    }
+    root.render(React.createElement(React.StrictMode, null,
+      React.createElement(PastelIntroCover, { onFinish: finish, loaderFactory })));
+    if (query.has('skipAt')) setTimeout(() => {
+      document.querySelector('.pastel-intro-cover')?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    }, Number(query.get('skipAt')));
+  </script>
+</html>
