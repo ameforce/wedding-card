@@ -144,7 +144,17 @@ function PastelIntroCover({ onFinish }) {
       <div className="intro-cover__seam-light" />
       <div className="intro-cover__ribbon">
         <div className="intro-cover__band" />
-        <img className="intro-cover__bow" src="/assets/design/intro-ribbon-bow.webp" alt="" />
+        <div className="intro-cover__bow">
+          <span className="intro-cover__bow-half intro-cover__bow-half--left">
+            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
+          </span>
+          <span className="intro-cover__bow-half intro-cover__bow-half--right">
+            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
+          </span>
+          <span className="intro-cover__bow-knot">
+            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
+          </span>
+        </div>
       </div>
     </div>
   );
