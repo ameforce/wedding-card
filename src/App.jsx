@@ -116,15 +116,18 @@ function InvitationLoadingShell({ captureMode }) {
   );
 }
 
-const PASTEL_INTRO_TOTAL_MS = 4000;
+const PASTEL_INTRO_TOTAL_MS = 4600;
 
-// 매듭 풀림 플립북 프레임: F0(묶임)이 항상 있고, F1~F3(풀려가는 중간 상태)는
-// imagegen으로 이어 생성한 순서대로 앞에 추가한다. 프레임이 하나면 정지 상태로 유지된다.
+// 매듭 풀림 플립북 프레임: F0(묶임)이 항상 있고, 이후는 imagegen으로 이어 생성한
+// 순서대로 나열한다 (끈 당김 -> 고리 무너짐 -> 리본 슬립). 프레임이 하나면 정지 상태로 유지된다.
 const PASTEL_INTRO_BOW_FRAMES = [
   "/assets/design/intro-ribbon-bow.webp",
   "/assets/design/intro-ribbon-bow-f1.webp",
+  "/assets/design/intro-ribbon-bow-f15.webp",
   "/assets/design/intro-ribbon-bow-f2.webp",
+  "/assets/design/intro-ribbon-bow-f25.webp",
   "/assets/design/intro-ribbon-bow-f3.webp",
+  "/assets/design/intro-ribbon-bow-f35.webp",
 ];
 
 function PastelIntroCover({ onFinish }) {

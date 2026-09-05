@@ -49,6 +49,27 @@ const JOBS = [
     alpha: true,
     targetWidth: 640,
   },
+  {
+    name: "bow-f15",
+    src: "C:/Users/enmso/Downloads/ChatGPT Image 2026년 9월 5일 오후 02_33_32.png",
+    out: "public/assets/design/intro-ribbon-bow-f15.webp",
+    alpha: true,
+    targetWidth: 640,
+  },
+  {
+    name: "bow-f25",
+    src: "C:/Users/enmso/Downloads/ChatGPT Image 2026년 9월 5일 오후 02_33_43.png",
+    out: "public/assets/design/intro-ribbon-bow-f25.webp",
+    alpha: true,
+    targetWidth: 640,
+  },
+  {
+    name: "bow-f35",
+    src: "C:/Users/enmso/Downloads/ChatGPT Image 2026년 9월 5일 오후 02_33_49.png",
+    out: "public/assets/design/intro-ribbon-bow-f35.webp",
+    alpha: true,
+    targetWidth: 640,
+  },
 ];
 
 async function alphaBoundingBox(src) {
