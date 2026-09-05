@@ -70,6 +70,11 @@ test("guestbook deletion requires an accessible in-app confirmation and keeps fa
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
     assert.equal(await page.locator("#root").getAttribute("inert"), null);
+    await page.waitForFunction(
+      (element) => document.activeElement === element,
+      await deleteButton.elementHandle(),
+      { timeout: 5_000 },
+    );
     assert.equal(await deleteButton.evaluate((element) => document.activeElement === element), true);
     assert.equal(deleteRequests, 0);
 

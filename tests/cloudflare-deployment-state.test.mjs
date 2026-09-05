@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertActiveVersionMatchesUpload,
   assertDeploymentMatchesCommit,
   productionVersionId,
+  uploadedWorkerVersionId,
 } from "../scripts/cloudflare-deployment-state.mjs";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -39,4 +41,26 @@ test("deployment verification rejects a different tag, message, or version", () 
     id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     annotations: { "workers/tag": SHA, "workers/message": `GitHub Actions ${SHA}` },
   }, SHA), /현재 운영 버전/);
+});
+
+test("upload identity is read only from Wrangler structured output", () => {
+  const output = JSON.stringify({
+    type: "version-upload",
+    version: 1,
+    worker_name: "wedding-card",
+    worker_tag: null,
+    version_id: VERSION,
+  });
+  assert.equal(uploadedWorkerVersionId(output), VERSION);
+  assert.throws(() => uploadedWorkerVersionId(""), /비어/);
+  assert.throws(() => uploadedWorkerVersionId("{not-json"), /JSON/);
+  assert.throws(() => uploadedWorkerVersionId(JSON.stringify({ ...JSON.parse(output), version_id: "not-a-version" })), /형식/);
+  assert.throws(() => uploadedWorkerVersionId(`${output}\n${output}`), /정확히 하나/);
+});
+
+test("active deployment must retain the exact uploaded ID", () => {
+  assert.equal(assertActiveVersionMatchesUpload(status(), VERSION), VERSION);
+  assert.throws(() => assertActiveVersionMatchesUpload({
+    versions: [{ version_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", percentage: 100 }],
+  }, VERSION), /이번 업로드 결과/);
 });
