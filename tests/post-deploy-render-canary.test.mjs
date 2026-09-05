@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   collectScenarioWithVersionConvergence,
+  createHttpRedirectProbeUrl,
   createRenderScenarioConfigs,
   formatRenderDiagnostic,
   resolveExpectedWorkerIdentity,
@@ -197,6 +198,11 @@ test("raw HTTP entry requires server 308 with the exact HTTPS path, query, and W
   ]);
 });
 
+test("HTTP redirect probe uses a dedicated non-root path and encoded query", () => {
+  const probe = createHttpRedirectProbeUrl(BASE);
+  assert.equal(probe.href, "https://wdcard.enmsoftware.com/__wedding-canary__/http-redirect?probe=path%2Fquery%20sentinel&encoding=%25");
+});
+
 test("raw HTTP entry rejects a browser-style upgrade result, bad Location, stale identity, and request failure", async () => {
   const entry = "https://wdcard.enmsoftware.com/invitation?source=canary";
   const redirect = (overrides = {}) => async () => new Response(null, {
@@ -323,10 +329,12 @@ test("standalone render canary verifies raw HTTP before exercising the HTTP brow
     fetchImpl: async (url, options) => {
       fetches.push({ url: url.href, method: options.method || "GET", redirect: options.redirect });
       if (url.protocol === "http:") {
+        const location = new URL(url);
+        location.protocol = "https:";
         return new Response(null, {
           status: 308,
           headers: {
-            location: BASE,
+            location: location.href,
             "x-wedding-worker-tag": TARGET_SHA,
             "x-wedding-worker-version": TARGET_VERSION,
           },
@@ -358,13 +366,90 @@ test("standalone render canary verifies raw HTTP before exercising the HTTP brow
   });
 
   assert.deepEqual(result.scenarios, ["http-entry", "warm-cache", "cold-400ms"]);
-  assert.deepEqual(fetches.filter(({ url }) => url.startsWith("http://")).map(({ method, redirect }) => ({ method, redirect })), [
+  const httpFetches = fetches.filter(({ url }) => url.startsWith("http://"));
+  assert.deepEqual(httpFetches.map(({ method, redirect }) => ({ method, redirect })), [
     { method: "GET", redirect: "manual" },
     { method: "HEAD", redirect: "manual" },
+  ]);
+  assert.deepEqual(httpFetches.map(({ url }) => url), [
+    "http://wdcard.enmsoftware.com/__wedding-canary__/http-redirect?probe=path%2Fquery%20sentinel&encoding=%25",
+    "http://wdcard.enmsoftware.com/__wedding-canary__/http-redirect?probe=path%2Fquery%20sentinel&encoding=%25",
   ]);
   assert.deepEqual(navigations, ["http://wdcard.enmsoftware.com/", BASE, BASE]);
   assert.deepEqual(launchOptions, [{ headless: true, args: ["--disable-features=HttpsUpgrades"] }]);
   assert.ok(logs.some((message) => message === `[production-render-canary] raw HTTP redirect 통과: GET=308 HEAD=308 tag=${TARGET_SHA} version=${TARGET_VERSION}`));
+});
+
+test("standalone render canary rejects a sentinel redirect that collapses to the root URL", async () => {
+  let browserLaunched = false;
+  await assert.rejects(runPostDeployRenderCanary({
+    baseUrl: BASE,
+    expectedTag: TARGET_SHA,
+    expectedVersion: TARGET_VERSION,
+    browserType: {
+      async launch() {
+        browserLaunched = true;
+        assert.fail("root-only HTTP redirect must fail before browser launch");
+      },
+    },
+    logger: { info() {} },
+    fetchImpl: async (url) => {
+      if (url.protocol === "http:") {
+        return new Response(null, {
+          status: 308,
+          headers: {
+            location: BASE,
+            "x-wedding-worker-tag": TARGET_SHA,
+            "x-wedding-worker-version": TARGET_VERSION,
+          },
+        });
+      }
+      return new Response(null, {
+        status: 200,
+        headers: {
+          "x-wedding-worker-tag": TARGET_SHA,
+          "x-wedding-worker-version": TARGET_VERSION,
+        },
+      });
+    },
+  }), /경로 또는 쿼리를 보존하지/);
+  assert.equal(browserLaunched, false);
+});
+
+test("standalone render canary rejects a sentinel redirect that preserves the path but drops the query", async () => {
+  let browserLaunched = false;
+  await assert.rejects(runPostDeployRenderCanary({
+    baseUrl: BASE,
+    expectedTag: TARGET_SHA,
+    expectedVersion: TARGET_VERSION,
+    browserType: {
+      async launch() {
+        browserLaunched = true;
+        assert.fail("query-dropping HTTP redirect must fail before browser launch");
+      },
+    },
+    logger: { info() {} },
+    fetchImpl: async (url) => {
+      if (url.protocol === "http:") {
+        return new Response(null, {
+          status: 308,
+          headers: {
+            location: "https://wdcard.enmsoftware.com/__wedding-canary__/http-redirect",
+            "x-wedding-worker-tag": TARGET_SHA,
+            "x-wedding-worker-version": TARGET_VERSION,
+          },
+        });
+      }
+      return new Response(null, {
+        status: 200,
+        headers: {
+          "x-wedding-worker-tag": TARGET_SHA,
+          "x-wedding-worker-version": TARGET_VERSION,
+        },
+      });
+    },
+  }), /경로 또는 쿼리를 보존하지/);
+  assert.equal(browserLaunched, false);
 });
 
 test("each browser scenario retries only Worker identity drift after bounded re-convergence", async () => {

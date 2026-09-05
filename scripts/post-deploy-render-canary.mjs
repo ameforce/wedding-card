@@ -13,6 +13,8 @@ const GIT_SHA = /^[a-f0-9]{40}$/u;
 const WORKER_VERSION_ID = /^[a-f0-9-]{36}$/u;
 const BUNDLED_PASTEL_HERO = /^\/assets\/photos\/pastel-hero-(?:480|960)\.webp$/u;
 const HTTP_ENTRY_CHROMIUM_ARGS = ["--disable-features=HttpsUpgrades"];
+const HTTP_REDIRECT_PROBE_PATH = "/__wedding-canary__/http-redirect";
+const HTTP_REDIRECT_PROBE_QUERY = "probe=path%2Fquery%20sentinel&encoding=%25";
 
 class WorkerIdentityMismatchError extends Error {
   constructor(message, options) {
@@ -124,6 +126,26 @@ function httpEntryUrls(baseUrl) {
   const httpUrl = new URL(httpsUrl);
   httpUrl.protocol = "http:";
   return { httpUrl, httpsUrl };
+}
+
+export function createHttpRedirectProbeUrl(baseUrl) {
+  const probeUrl = new URL(baseUrl);
+  invariant(probeUrl.protocol === "https:", "HTTP 리디렉션 probe의 기준 URL은 HTTPS여야 합니다.");
+  probeUrl.pathname = HTTP_REDIRECT_PROBE_PATH;
+  probeUrl.search = HTTP_REDIRECT_PROBE_QUERY;
+  probeUrl.hash = "";
+  return probeUrl;
+}
+
+function createVerifiedHttpEntry(baseUrl, redirectProbe) {
+  const entry = httpEntryUrls(baseUrl);
+  const verifiedOrigin = new URL(redirectProbe.httpsUrl).origin;
+  invariant(entry.httpsUrl.origin === verifiedOrigin, "HTTP 진입 render 시나리오의 HTTPS origin이 검증된 리디렉션 origin과 다릅니다.");
+  return {
+    httpUrl: entry.httpUrl.href,
+    httpsUrl: entry.httpsUrl.href,
+    redirectProbe,
+  };
 }
 
 export async function verifyHttpEntryRedirect({
@@ -531,13 +553,14 @@ export async function runPostDeployRenderCanary({
     fetchImpl,
     logger,
   });
-  const httpEntry = await verifyHttpEntryRedirect({
-    baseUrl: normalizedBaseUrl,
+  const redirectProbe = await verifyHttpEntryRedirect({
+    baseUrl: createHttpRedirectProbeUrl(normalizedBaseUrl),
     expectedTag: targetWorkerTag,
     expectedVersion: targetWorkerVersion,
     fetchImpl,
   });
   logger.info(`[production-render-canary] raw HTTP redirect 통과: GET=308 HEAD=308 tag=${targetWorkerTag} version=${targetWorkerVersion}`);
+  const httpEntry = createVerifiedHttpEntry(normalizedBaseUrl, redirectProbe);
   const expected = await expectedPublication(fetchImpl, normalizedBaseUrl);
   const browser = await browserType.launch({ headless: true, args: HTTP_ENTRY_CHROMIUM_ARGS });
   try {
