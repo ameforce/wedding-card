@@ -766,3 +766,5 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   .invitation-stage { width: 430px; }
   .section-pad { padding-inline: 42px; }
 }
+
+body.intro-lock { overflow: hidden; }

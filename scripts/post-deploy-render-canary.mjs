@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 import { chromium } from "playwright";
 import { activeDeploymentIdentity } from "./cloudflare-deployment-state.mjs";
 
@@ -15,6 +16,8 @@ const BUNDLED_PASTEL_HERO = /^\/assets\/photos\/pastel-hero-(?:480|960)\.webp$/u
 const HTTP_ENTRY_CHROMIUM_ARGS = ["--disable-features=HttpsUpgrades"];
 const HTTP_REDIRECT_PROBE_PATH = "/__wedding-canary__/http-redirect";
 const HTTP_REDIRECT_PROBE_QUERY = "probe=path%2Fquery%20sentinel&encoding=%25";
+const RIBBON_MANIFEST_PATH = "/assets/design/ribbon-sequence/manifest.json";
+const SHA256 = /^[a-f0-9]{64}$/u;
 
 class WorkerIdentityMismatchError extends Error {
   constructor(message, options) {
@@ -41,6 +44,62 @@ function normalizeBaseUrl(value) {
 function pathname(value, baseUrl) {
   if (!value) return "";
   return new URL(value, baseUrl).pathname;
+}
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+export function createRibbonExpectation(manifest, { manifestHash, frameHashes } = {}) {
+  invariant(manifest && manifest.schemaVersion === 1, "리본 manifest schemaVersion이 올바르지 않습니다.");
+  invariant(Number.isInteger(manifest.fps) && manifest.fps === 30, "리본 manifest는 30 fps여야 합니다.");
+  invariant(Number.isInteger(manifest.width) && Number.isInteger(manifest.height), "리본 manifest canvas 크기가 없습니다.");
+  invariant(Array.isArray(manifest.frames) && manifest.frames.length > 1, "리본 manifest frame 목록이 없습니다.");
+  invariant(typeof manifestHash === "string" && SHA256.test(manifestHash), "리본 manifest SHA-256이 올바르지 않습니다.");
+  invariant(frameHashes && typeof frameHashes === "object", "리본 frame SHA-256 목록이 없습니다.");
+  const frames = manifest.frames.map((frame) => {
+    invariant(typeof frame === "string" && /^[a-z0-9][a-z0-9_-]*\.webp$/iu.test(frame), "리본 frame 이름이 올바르지 않습니다.");
+    invariant(typeof frameHashes[frame] === "string" && SHA256.test(frameHashes[frame]), `리본 frame SHA-256이 없습니다: ${frame}`);
+    return frame;
+  });
+  return Object.freeze({
+    manifestPath: RIBBON_MANIFEST_PATH,
+    manifestHash,
+    frames: Object.freeze(frames),
+    frameHashes: Object.freeze({ ...frameHashes }),
+    panelDelayMs: manifest.panelDelayMs,
+    panelDurationMs: manifest.panelDurationMs,
+  });
+}
+
+export function validateRibbonPlaybackEvidence({ baseUrl, ribbonExpectation, intro, ribbonResponses }) {
+  invariant(ribbonExpectation, "배포 리본 자산 기대값이 없습니다.");
+  invariant(intro?.mounts === 1, `Pastel intro cover mount 수가 올바르지 않습니다: ${intro?.mounts ?? "missing"}`);
+  invariant(Array.isArray(intro?.draws), "Pastel intro frame draw 증거가 없습니다.");
+  invariant(intro.draws.length === ribbonExpectation.frames.length, `Pastel intro가 모든 frame을 재생하지 않았습니다: expected=${ribbonExpectation.frames.length} actual=${intro.draws.length}`);
+  invariant(intro.draws.every((draw, index) => draw.index === index), "Pastel intro frame 순서 또는 중복 draw가 올바르지 않습니다.");
+  const terminal = intro.draws.at(-1);
+  invariant(terminal?.alphaPixels === 0, "투명 terminal frame이 canvas에 그려지지 않았습니다.");
+  invariant(Number.isFinite(intro.panelsOpenedAt) && intro.panelsOpenedAt - terminal.at >= ribbonExpectation.panelDelayMs, "paper panel이 terminal frame 뒤 manifest delay 전에 열렸습니다.");
+  invariant(Number.isFinite(intro.removedAt) && intro.removedAt >= intro.panelsOpenedAt + ribbonExpectation.panelDurationMs - 5, "paper panel transition 완료 전에 intro cover가 제거되었습니다.");
+  invariant(intro.coverPresent === false && intro.bodyLocked === false, "최종 intro cover 또는 body scroll lock이 남아 있습니다.");
+  invariant(intro.finalHero?.sampledAfterCoverRemoved === true, "cover 제거 뒤 최종 hero computed-style sample이 없습니다.");
+  invariant(Number(intro.finalHero.opacity) > 0 && intro.finalHero.display !== "none" && intro.finalHero.visibility === "visible", "cover 제거 뒤 hero가 표시 상태가 아닙니다.");
+
+  const expectedAssets = new Map([
+    [ribbonExpectation.manifestPath, { hash: ribbonExpectation.manifestHash, contentType: "application/json" }],
+    ...ribbonExpectation.frames.map((frame) => [`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}${frame}`, { hash: ribbonExpectation.frameHashes[frame], contentType: "image/webp" }]),
+  ]);
+  for (const [assetPath, expected] of expectedAssets) {
+    const responses = (ribbonResponses || []).filter((response) => pathname(response.url, baseUrl) === assetPath);
+    invariant(responses.length > 0, `배포 리본 자산 응답이 없습니다: ${assetPath}`);
+    for (const response of responses) {
+      invariant(response.status === 200, `배포 리본 자산 HTTP 상태가 올바르지 않습니다: ${assetPath}=${response.status}`);
+      invariant(response.contentType.includes(expected.contentType), `배포 리본 자산 Content-Type이 올바르지 않습니다: ${assetPath}=${response.contentType || "missing"}`);
+      invariant(response.sha256 === expected.hash, `배포 리본 자산 SHA-256이 build 산출물과 다릅니다: ${assetPath}`);
+    }
+  }
+  return true;
 }
 
 function expectedWorkerTag(value) {
@@ -381,6 +440,8 @@ export function formatRenderDiagnostic({
   responseFailures = [],
   consoleErrors = [],
   pageErrors = [],
+  intro = null,
+  ribbonResponses = [],
 }) {
   return JSON.stringify({
     scenario: name,
@@ -392,12 +453,16 @@ export function formatRenderDiagnostic({
     responseFailures: responseFailures.slice(-10),
     consoleErrors: consoleErrors.slice(-10),
     pageErrors: pageErrors.slice(-10),
+    intro,
+    ribbonResponses: ribbonResponses.slice(-10),
   });
 }
 
 export function validateRenderScenario({ name, ...renderEvidence }) {
   try {
-    return validateRenderEvidence(renderEvidence);
+    validateRenderEvidence(renderEvidence);
+    if (renderEvidence.ribbonExpectation) validateRibbonPlaybackEvidence(renderEvidence);
+    return true;
   } catch (error) {
     const diagnostic = formatRenderDiagnostic({ name, ...renderEvidence });
     throw new Error(`[${name}] ${error.message}; diagnostics=${diagnostic}`, { cause: error });
@@ -453,10 +518,99 @@ async function installHeroObserver(page) {
   });
 }
 
+async function installIntroObserver(page) {
+  await page.addInitScript(() => {
+    const byteIndexes = new WeakMap();
+    const blobIndexes = new WeakMap();
+    const bitmapIndexes = new WeakMap();
+    const evidence = window.__weddingIntroEvidence = {
+      draws: [], mounts: 0, mountedAt: null, panelsOpenedAt: null, removedAt: null,
+    };
+    const originalArrayBuffer = Response.prototype.arrayBuffer;
+    Response.prototype.arrayBuffer = async function (...args) {
+      const bytes = await originalArrayBuffer.apply(this, args);
+      const match = this.url.match(/\/ribbon-sequence\/frame-(\d+)-[^/]+\.webp$/u);
+      if (match) byteIndexes.set(bytes, Number(match[1]));
+      return bytes;
+    };
+    const OriginalBlob = window.Blob;
+    window.Blob = class extends OriginalBlob {
+      constructor(parts, options) {
+        super(parts, options);
+        if (parts?.[0] && byteIndexes.has(parts[0])) blobIndexes.set(this, byteIndexes.get(parts[0]));
+      }
+    };
+    const originalCreateImageBitmap = window.createImageBitmap.bind(window);
+    window.createImageBitmap = async (blob, ...args) => {
+      const bitmap = await originalCreateImageBitmap(blob, ...args);
+      if (blobIndexes.has(blob)) bitmapIndexes.set(bitmap, blobIndexes.get(blob));
+      return bitmap;
+    };
+    const originalDrawImage = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function (source, ...args) {
+      const result = originalDrawImage.call(this, source, ...args);
+      if (this.canvas.matches(".pastel-intro-cover__ribbon")) {
+        const index = bitmapIndexes.get(source);
+        let alphaPixels = null;
+        if (index !== undefined) {
+          const pixels = this.getImageData(0, 0, this.canvas.width, this.canvas.height).data;
+          alphaPixels = 0;
+          for (let offset = 3; offset < pixels.length; offset += 4) if (pixels[offset]) alphaPixels += 1;
+        }
+        evidence.draws.push({ index, at: performance.now(), alphaPixels });
+      }
+      return result;
+    };
+    let mountedCover;
+    const observe = () => {
+      const cover = document.querySelector(".pastel-intro-cover");
+      if (cover && cover !== mountedCover) {
+        mountedCover = cover;
+        evidence.mounts += 1;
+        evidence.mountedAt = performance.now();
+      }
+      if (mountedCover && !cover && evidence.removedAt === null) evidence.removedAt = performance.now();
+      if (cover?.classList.contains("pastel-intro-cover--opening-panels") && evidence.panelsOpenedAt === null) {
+        evidence.panelsOpenedAt = performance.now();
+      }
+    };
+    new MutationObserver(observe).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+    document.addEventListener("load", observe, true);
+    observe();
+  });
+}
+
+function recordRibbonResponse(response, records, tasks, isCurrent = () => true) {
+  let responsePath = "";
+  try {
+    responsePath = new URL(response.url()).pathname;
+  } catch {
+    return;
+  }
+  if (responsePath !== RIBBON_MANIFEST_PATH && !responsePath.startsWith(`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}frame-`)) return;
+  tasks.push((async () => {
+    try {
+      const bytes = await response.body();
+      if (!isCurrent()) return;
+      records.push({
+        url: response.url(),
+        status: response.status(),
+        contentType: response.headers()["content-type"] || "",
+        sha256: sha256(bytes),
+      });
+    } catch (error) {
+      if (!isCurrent()) return;
+      records.push({ url: response.url(), status: response.status(), contentType: response.headers()["content-type"] || "", sha256: "", error: error.message });
+    }
+  })());
+}
+
 async function readRenderState(page) {
   return page.evaluate(() => {
     const root = document.querySelector("main[data-content-source]");
     const image = document.querySelector(".pastel-hero-photo img");
+    const coverPresent = Boolean(document.querySelector(".pastel-intro-cover"));
+    const heroStyle = image ? getComputedStyle(image) : null;
     return {
       dom: {
         source: root?.dataset.contentSource || "",
@@ -468,11 +622,22 @@ async function readRenderState(page) {
         ready: image?.closest(".photo-button")?.classList.contains("is-image-ready") === true,
       },
       observations: window.__weddingHeroObservations || [],
+      intro: {
+        ...(window.__weddingIntroEvidence || {}),
+        coverPresent,
+        bodyLocked: document.body.classList.contains("intro-lock"),
+        finalHero: {
+          sampledAfterCoverRemoved: !coverPresent,
+          opacity: heroStyle?.opacity || "",
+          display: heroStyle?.display || "",
+          visibility: heroStyle?.visibility || "",
+        },
+      },
     };
   });
 }
 
-async function collectScenario({
+export async function collectScenario({
   name,
   browser,
   baseUrl,
@@ -481,6 +646,7 @@ async function collectScenario({
   entryUrl,
   latencyMs = 0,
   warm = false,
+  ribbonExpectation,
 }) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   if (latencyMs > 0) {
@@ -495,16 +661,26 @@ async function collectScenario({
   const responseFailures = [];
   const consoleErrors = [];
   const pageErrors = [];
-  page.on("request", (request) => requests.push(request.url()));
+  const ribbonResponses = [];
+  const ribbonResponseTasks = [];
+  const requestEpochs = new WeakMap();
+  let ribbonResponseEpoch = 0;
+  page.on("request", (request) => {
+    requests.push(request.url());
+    requestEpochs.set(request, ribbonResponseEpoch);
+  });
   page.on("requestfailed", (request) => requestFailures.push(`${request.failure()?.errorText || "unknown"} ${request.url()}`));
   page.on("response", (response) => {
     if (response.status() >= 400) responseFailures.push(`${response.status()} ${response.url()}`);
+    const responseEpoch = requestEpochs.get(response.request()) ?? ribbonResponseEpoch;
+    recordRibbonResponse(response, ribbonResponses, ribbonResponseTasks, () => responseEpoch === ribbonResponseEpoch);
   });
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await installHeroObserver(page);
+  await installIntroObserver(page);
 
   let response;
   let evidence = { dom: null, observations: [] };
@@ -519,11 +695,27 @@ async function collectScenario({
     }
     invariant(page.url() === baseUrl.href, `공개 초대장 최종 URL이 HTTPS 기준 URL과 다릅니다: ${page.url()}`);
     if (warm) {
+      if (ribbonExpectation) {
+        // Warm-cache must first finish the same published cover that a visitor
+        // sees. Reloading at DOMContentLoaded aborts its frame fetches and
+        // would turn this scenario into another cold request set.
+        await page.waitForFunction((frameCount) => {
+          const intro = window.__weddingIntroEvidence;
+          return intro?.draws?.length === frameCount && intro.removedAt !== null
+            && !document.querySelector(".pastel-intro-cover") && !document.body.classList.contains("intro-lock");
+        }, ribbonExpectation.frames.length, { timeout: RENDER_TIMEOUT_MS });
+        await Promise.allSettled(ribbonResponseTasks);
+      }
       requests.length = 0;
       requestFailures.length = 0;
       responseFailures.length = 0;
       consoleErrors.length = 0;
       pageErrors.length = 0;
+      // A warm scenario is judged only from its reload.  A response body that
+      // completes after this reset belongs to the initial navigation too.
+      ribbonResponseEpoch += 1;
+      ribbonResponses.length = 0;
+      ribbonResponseTasks.length = 0;
       response = await page.reload({ waitUntil: "domcontentloaded", timeout: RENDER_TIMEOUT_MS });
     }
     invariant(response, "공개 초대장 document 응답을 받지 못했습니다.");
@@ -547,7 +739,15 @@ async function collectScenario({
       const image = document.querySelector(".pastel-hero-photo.is-image-ready img");
       return Boolean(root && image?.complete && image.naturalWidth > 0);
     }, null, { timeout: RENDER_TIMEOUT_MS });
-    await page.waitForTimeout(250);
+    if (ribbonExpectation) {
+      await page.waitForFunction((frameCount) => {
+        const intro = window.__weddingIntroEvidence;
+        return intro?.draws?.length === frameCount && intro.removedAt !== null
+          && !document.querySelector(".pastel-intro-cover") && !document.body.classList.contains("intro-lock");
+      }, ribbonExpectation.frames.length, { timeout: RENDER_TIMEOUT_MS });
+      await page.waitForTimeout(0);
+    } else await page.waitForTimeout(250);
+    await Promise.allSettled(ribbonResponseTasks);
     evidence = await readRenderState(page);
     return {
       responseHeaders,
@@ -557,8 +757,10 @@ async function collectScenario({
       responseFailures,
       consoleErrors,
       pageErrors,
+      ribbonResponses,
     };
   } catch (error) {
+    await Promise.allSettled(ribbonResponseTasks);
     try {
       evidence = await readRenderState(page);
     } catch {
@@ -572,6 +774,7 @@ async function collectScenario({
       responseFailures,
       consoleErrors,
       pageErrors,
+      ribbonResponses,
     });
     const WrappedError = error?.code === "WORKER_IDENTITY_MISMATCH" ? WorkerIdentityMismatchError : Error;
     throw new WrappedError(`[${name}] ${error.message}; diagnostics=${diagnostic}`, { cause: error });
@@ -635,6 +838,7 @@ export async function runPostDeployRenderCanary({
   fetchImpl = globalThis.fetch,
   logger = console,
   readActiveIdentity = activeDeploymentIdentity,
+  ribbonExpectation,
 } = {}) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   const {
@@ -664,7 +868,7 @@ export async function runPostDeployRenderCanary({
     const scenarios = [];
     for (const config of scenarioConfigs) {
       const evidence = await collectScenarioWithVersionConvergence({
-        scenario: config,
+        scenario: { ...config, ribbonExpectation },
         browser,
         baseUrl: normalizedBaseUrl,
         expectedWorkerTag: targetWorkerTag,
@@ -679,6 +883,7 @@ export async function runPostDeployRenderCanary({
         expectedWorkerVersion: targetWorkerVersion,
         expectedRevision: expected.revisionId,
         expectedPaths: expected.expectedPaths,
+        ribbonExpectation,
         ...evidence,
       });
       scenarios.push(config.name);
@@ -696,9 +901,21 @@ export async function runPostDeployRenderCanary({
   }
 }
 
+async function readBuiltRibbonExpectation() {
+  const { readFile } = await import("node:fs/promises");
+  const directory = new URL("../dist/client/assets/design/ribbon-sequence/", import.meta.url);
+  const manifestBytes = await readFile(new URL("manifest.json", directory));
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const frameHashes = Object.fromEntries(await Promise.all(manifest.frames.map(async (frame) => [
+    frame,
+    sha256(await readFile(new URL(frame, directory))),
+  ])));
+  return createRibbonExpectation(manifest, { manifestHash: sha256(manifestBytes), frameHashes });
+}
+
 const isCli = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
 if (isCli) {
-  runPostDeployRenderCanary().catch((error) => {
+  readBuiltRibbonExpectation().then((ribbonExpectation) => runPostDeployRenderCanary({ ribbonExpectation })).catch((error) => {
     console.error(`[production-render-canary] 실패: ${error.message}`);
     process.exitCode = 1;
   });

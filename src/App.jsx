@@ -27,6 +27,7 @@ import { getInvitationPhotos } from "./admin-content/content-document.js";
 import { usePublicInvitationContent } from "./admin-content/public-content.jsx";
 import { createGuestbookEntry, deleteGuestbookEntry, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
 import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
+import { PastelIntroCover } from "./intro/PastelIntroCover.jsx";
 
 const VARIANTS = {
   quiet: {
@@ -991,6 +992,7 @@ function WeddingApp() {
     pastel: getInvitationPhotos(runtime.content, "pastel"),
   }), [runtime.content]);
   const [toast, setToast] = useState({ message: "", tone: "success" });
+  const [introFinished, setIntroFinished] = useState(false);
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
   useEffect(() => {
     if (runtime.status !== "ready") return;
@@ -1021,6 +1023,9 @@ function WeddingApp() {
       <div className="invitation-stage">
         {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
       </div>
+      {variant === "pastel" && !captureMode && !introFinished && (
+        <PastelIntroCover onFinish={() => setIntroFinished(true)} />
+      )}
       {!captureMode && <MusicControl notify={notify} />}
       <div className={`toast is-${toast.tone} ${toast.message ? "is-visible" : ""}`} role="status" aria-live="polite">
         {toast.tone === "error" ? <WarningCircle aria-hidden="true" weight="bold" /> : <Check aria-hidden="true" weight="bold" />}

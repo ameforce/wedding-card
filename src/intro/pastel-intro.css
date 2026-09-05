@@ -1,0 +1,55 @@
+.pastel-intro-cover {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: transparent;
+  touch-action: none;
+  cursor: pointer;
+  transition: opacity 270ms ease;
+}
+
+.pastel-intro-cover--leaving {
+  opacity: 0;
+}
+
+.pastel-intro-cover__panel {
+  position: absolute;
+  z-index: 1;
+  inset-block: 0;
+  width: 50.2%;
+  background: #f7f0e4 url("/assets/design/intro-paper-ivory.webp") center / cover;
+  transition: transform var(--pastel-intro-panel-duration, 1200ms) cubic-bezier(.52, .02, .18, 1);
+  will-change: transform;
+}
+
+.pastel-intro-cover__panel--left { left: 0; transform-origin: left center; }
+.pastel-intro-cover__panel--right { right: 0; transform-origin: right center; }
+.pastel-intro-cover--opening-panels .pastel-intro-cover__panel--left { transform: translateX(-101%); }
+.pastel-intro-cover--opening-panels .pastel-intro-cover__panel--right { transform: translateX(101%); }
+
+.pastel-intro-cover__seam {
+  position: absolute;
+  z-index: 2;
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(163, 137, 109, .22);
+  transform: translateX(-.5px);
+  transition: opacity 260ms ease;
+}
+
+.pastel-intro-cover--opening-panels .pastel-intro-cover__seam { opacity: 0; }
+
+.pastel-intro-cover__ribbon {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  display: block;
+  width: 100vw;
+  height: auto;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}

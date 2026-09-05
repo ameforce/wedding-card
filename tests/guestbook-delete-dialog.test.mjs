@@ -10,7 +10,7 @@ test("guestbook deletion requires an accessible in-app confirmation and keeps fa
   const server = await createServer({
     root: projectRoot,
     logLevel: "silent",
-    server: { host: "127.0.0.1", port: 0 },
+    server: { host: "127.0.0.1", port: 0, strictPort: false },
   });
   await server.listen();
 
