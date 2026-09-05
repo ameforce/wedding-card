@@ -117,7 +117,7 @@ function InvitationLoadingShell({ captureMode }) {
 }
 
 const PASTEL_INTRO_STORAGE_KEY = "pastel-intro-played";
-const PASTEL_INTRO_TOTAL_MS = 3050;
+const PASTEL_INTRO_TOTAL_MS = 3400;
 
 function readPastelIntroEligibility() {
   try {
@@ -162,20 +162,22 @@ function PastelIntroCover({ onFinish }) {
     <div className={`intro-cover ${leaving ? "is-leaving" : ""}`} aria-hidden="true" onPointerDown={leave}>
       <div className="intro-cover__panel intro-cover__panel--left" />
       <div className="intro-cover__panel intro-cover__panel--right" />
+      <div className="intro-cover__seam-light" />
       <div className="intro-cover__ribbon">
         <svg className="intro-cover__band" viewBox="0 0 100 60" preserveAspectRatio="none">
           <defs>
             <linearGradient id="intro-band-satin" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0" stopColor="#fdf9f0" />
-              <stop offset=".24" stopColor="#ecdfc9" />
-              <stop offset=".5" stopColor="#faf5e9" />
-              <stop offset=".76" stopColor="#e6d9c3" />
+              <stop offset=".22" stopColor="#eadcC4" />
+              <stop offset=".5" stopColor="#fbf6ea" />
+              <stop offset=".78" stopColor="#e4d6be" />
               <stop offset="1" stopColor="#fbf7ee" />
             </linearGradient>
           </defs>
           <rect x="0" y="6" width="100" height="48" fill="url(#intro-band-satin)" />
-          <rect x="0" y="6" width="100" height="1.6" fill="rgba(122, 104, 78, .28)" />
-          <rect x="0" y="52.4" width="100" height="1.6" fill="rgba(122, 104, 78, .24)" />
+          <rect x="0" y="6" width="100" height="1.6" fill="rgba(122, 104, 78, .3)" />
+          <rect x="0" y="15" width="100" height="1.2" fill="rgba(255, 253, 246, .5)" />
+          <rect x="0" y="52.4" width="100" height="1.6" fill="rgba(122, 104, 78, .26)" />
         </svg>
         <svg className="intro-cover__bow" viewBox="0 0 120 92">
           <defs>
@@ -184,13 +186,29 @@ function PastelIntroCover({ onFinish }) {
               <stop offset=".55" stopColor="#efe4cf" />
               <stop offset="1" stopColor="#f7f1e3" />
             </linearGradient>
+            <linearGradient id="intro-bow-loop-shade" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stopColor="#f3ead7" />
+              <stop offset="1" stopColor="#e2d3b8" />
+            </linearGradient>
           </defs>
-          <path d="M60 46 C34 12 8 20 12 40 C15 56 40 58 60 46 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .22)" strokeWidth="1" />
-          <path d="M60 46 C86 12 112 20 108 40 C105 56 80 58 60 46 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .22)" strokeWidth="1" />
-          <path d="M53 52 C47 66 41 74 34 82 L47 82 C53 72 57 62 59 54 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .18)" strokeWidth="1" />
-          <path d="M67 52 C73 66 79 74 86 82 L73 82 C67 72 63 62 61 54 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .18)" strokeWidth="1" />
-          <ellipse cx="60" cy="46" rx="9.5" ry="8.5" fill="#e9dcc4" stroke="rgba(122, 104, 78, .3)" strokeWidth="1" />
-          <path d="M54 41 C57 43.5 63 43.5 66 41" stroke="rgba(255, 253, 246, .85)" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+          <g className="intro-bow-tail intro-bow-tail--left">
+            <path d="M53 52 C47 66 41 74 34 82 L47 82 C53 72 57 62 59 54 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .18)" strokeWidth="1" />
+          </g>
+          <g className="intro-bow-tail intro-bow-tail--right">
+            <path d="M67 52 C73 66 79 74 86 82 L73 82 C67 72 63 62 61 54 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .18)" strokeWidth="1" />
+          </g>
+          <g className="intro-bow-loop intro-bow-loop--left">
+            <path d="M60 46 C34 12 8 20 12 40 C15 56 40 58 60 46 Z" fill="url(#intro-bow-loop-shade)" stroke="rgba(122, 104, 78, .24)" strokeWidth="1" />
+            <path d="M56 45 C38 24 20 26 16 38" fill="none" stroke="rgba(255, 253, 246, .8)" strokeWidth="1.4" strokeLinecap="round" />
+          </g>
+          <g className="intro-bow-loop intro-bow-loop--right">
+            <path d="M60 46 C86 12 112 20 108 40 C105 56 80 58 60 46 Z" fill="url(#intro-bow-loop-shade)" stroke="rgba(122, 104, 78, .24)" strokeWidth="1" />
+            <path d="M64 45 C82 24 100 26 104 38" fill="none" stroke="rgba(255, 253, 246, .8)" strokeWidth="1.4" strokeLinecap="round" />
+          </g>
+          <g className="intro-bow-knot">
+            <ellipse cx="60" cy="46" rx="9.5" ry="8.5" fill="#e9dcc4" stroke="rgba(122, 104, 78, .3)" strokeWidth="1" />
+            <path d="M54 41 C57 43.5 63 43.5 66 41" stroke="rgba(255, 253, 246, .85)" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+          </g>
         </svg>
       </div>
     </div>
