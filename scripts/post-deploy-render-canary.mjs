@@ -12,6 +12,7 @@ const SCENARIO_CONVERGENCE_ATTEMPTS = 3;
 const GIT_SHA = /^[a-f0-9]{40}$/u;
 const WORKER_VERSION_ID = /^[a-f0-9-]{36}$/u;
 const BUNDLED_PASTEL_HERO = /^\/assets\/photos\/pastel-hero-(?:480|960)\.webp$/u;
+const HTTP_ENTRY_CHROMIUM_ARGS = ["--disable-features=HttpsUpgrades"];
 
 class WorkerIdentityMismatchError extends Error {
   constructor(message, options) {
@@ -113,6 +114,82 @@ export async function waitForWorkerVersion({
     if (attempt < attempts) await sleep(intervalMs);
   }
   throw new Error(`커스텀 도메인이 배포 Worker tag=${targetTag}, version=${targetVersion}로 수렴하지 않았습니다. observations=${JSON.stringify(observations)}`);
+}
+
+function httpEntryUrls(baseUrl) {
+  const httpsUrl = new URL(baseUrl);
+  invariant(httpsUrl.protocol === "https:", "HTTP 진입 검증의 기준 URL은 HTTPS여야 합니다.");
+  invariant(httpsUrl.username === "" && httpsUrl.password === "", "HTTP 진입 검증 URL에 자격 증명을 넣을 수 없습니다.");
+  httpsUrl.hash = "";
+  const httpUrl = new URL(httpsUrl);
+  httpUrl.protocol = "http:";
+  return { httpUrl, httpsUrl };
+}
+
+export async function verifyHttpEntryRedirect({
+  baseUrl,
+  expectedTag,
+  expectedVersion,
+  fetchImpl = globalThis.fetch,
+  timeoutMs = HTTP_TIMEOUT_MS,
+}) {
+  const targetTag = expectedWorkerTag(expectedTag);
+  const targetVersion = expectedWorkerVersion(expectedVersion);
+  const { httpUrl, httpsUrl } = httpEntryUrls(baseUrl);
+  const methods = ["GET", "HEAD"];
+  const observations = [];
+
+  for (const method of methods) {
+    let response;
+    try {
+      response = await fetchImpl(httpUrl, {
+        method,
+        redirect: "manual",
+        headers: {
+          accept: "text/html",
+          "cache-control": "no-cache",
+          pragma: "no-cache",
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      throw new Error(`원시 HTTP ${method} 진입 요청이 실패했습니다: ${error.message}`, { cause: error });
+    }
+
+    const observation = {
+      method,
+      status: response.status,
+      location: response.headers.get("location") || "",
+      workerTag: response.headers.get("x-wedding-worker-tag") || "missing",
+      workerVersion: response.headers.get("x-wedding-worker-version") || "missing",
+    };
+    observations.push(observation);
+    invariant(response.status === 308, `원시 HTTP ${method} 진입이 HTTPS 서버 리디렉션 대신 HTTP ${response.status}를 반환했습니다.`);
+    invariant(observation.location === httpsUrl.href, `원시 HTTP ${method} Location이 HTTPS 기준 URL의 경로 또는 쿼리를 보존하지 않았습니다: ${observation.location || "missing"}`);
+    invariant(observation.workerTag === targetTag, `원시 HTTP ${method} 리디렉션 Worker tag가 배포 SHA와 다릅니다: ${observation.workerTag}`);
+    invariant(observation.workerVersion === targetVersion, `원시 HTTP ${method} 리디렉션 Worker version ID가 활성 버전과 다릅니다: ${observation.workerVersion}`);
+  }
+
+  return { httpUrl: httpUrl.href, httpsUrl: httpsUrl.href, observations };
+}
+
+export function createRenderScenarioConfigs(httpEntry) {
+  invariant(httpEntry && typeof httpEntry.httpUrl === "string" && typeof httpEntry.httpsUrl === "string", "HTTP 진입 render 시나리오에 검증된 URL이 필요합니다.");
+  const httpUrl = new URL(httpEntry.httpUrl);
+  const httpsUrl = new URL(httpEntry.httpsUrl);
+  invariant(httpUrl.protocol === "http:" && httpsUrl.protocol === "https:", "HTTP 진입 render 시나리오 URL의 프로토콜이 올바르지 않습니다.");
+  invariant(
+    httpUrl.hostname === httpsUrl.hostname
+      && httpUrl.port === httpsUrl.port
+      && httpUrl.pathname === httpsUrl.pathname
+      && httpUrl.search === httpsUrl.search,
+    "HTTP 진입 render 시나리오 URL이 HTTPS 대상과 다릅니다.",
+  );
+  return [
+    { name: "http-entry", entryUrl: httpUrl.href },
+    { name: "warm-cache", warm: true },
+    { name: "cold-400ms", latencyMs: 400 },
+  ];
 }
 
 function expectedHeroPaths(document, baseUrl) {
@@ -284,6 +361,7 @@ async function collectScenario({
   baseUrl,
   expectedWorkerTag: targetWorkerTag,
   expectedWorkerVersion: targetWorkerVersion,
+  entryUrl,
   latencyMs = 0,
   warm = false,
 }) {
@@ -315,7 +393,14 @@ async function collectScenario({
   let evidence = { dom: null, observations: [] };
   let responseHeaders = null;
   try {
-    response = await page.goto(baseUrl.href, { waitUntil: "domcontentloaded", timeout: RENDER_TIMEOUT_MS });
+    response = await page.goto(entryUrl || baseUrl.href, { waitUntil: "domcontentloaded", timeout: RENDER_TIMEOUT_MS });
+    if (entryUrl) {
+      const redirectRequest = response?.request().redirectedFrom();
+      invariant(redirectRequest?.url() === entryUrl, "HTTP 진입 브라우저 탐색에서 원시 HTTP 요청을 관찰하지 못했습니다.");
+      const redirectResponse = await redirectRequest.response();
+      invariant(redirectResponse?.status() === 308, `HTTP 진입 브라우저 탐색의 서버 리디렉션이 HTTP ${redirectResponse?.status() || "missing"}입니다.`);
+    }
+    invariant(page.url() === baseUrl.href, `공개 초대장 최종 URL이 HTTPS 기준 URL과 다릅니다: ${page.url()}`);
     if (warm) {
       requests.length = 0;
       requestFailures.length = 0;
@@ -446,13 +531,17 @@ export async function runPostDeployRenderCanary({
     fetchImpl,
     logger,
   });
+  const httpEntry = await verifyHttpEntryRedirect({
+    baseUrl: normalizedBaseUrl,
+    expectedTag: targetWorkerTag,
+    expectedVersion: targetWorkerVersion,
+    fetchImpl,
+  });
+  logger.info(`[production-render-canary] raw HTTP redirect 통과: GET=308 HEAD=308 tag=${targetWorkerTag} version=${targetWorkerVersion}`);
   const expected = await expectedPublication(fetchImpl, normalizedBaseUrl);
-  const browser = await browserType.launch({ headless: true });
+  const browser = await browserType.launch({ headless: true, args: HTTP_ENTRY_CHROMIUM_ARGS });
   try {
-    const scenarioConfigs = [
-      { name: "warm-cache", warm: true },
-      { name: "cold-400ms", latencyMs: 400 },
-    ];
+    const scenarioConfigs = createRenderScenarioConfigs(httpEntry);
     const scenarios = [];
     for (const config of scenarioConfigs) {
       const evidence = await collectScenarioWithVersionConvergence({
@@ -480,6 +569,7 @@ export async function runPostDeployRenderCanary({
       revisionId: expected.revisionId,
       workerTag: targetWorkerTag,
       workerVersion: convergence.workerVersion,
+      httpEntry,
       scenarios,
     };
   } finally {

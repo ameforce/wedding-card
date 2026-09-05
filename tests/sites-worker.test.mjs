@@ -11,6 +11,57 @@ function assertSecurityHeaders(response) {
   assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
 }
 
+test("redirects production HTTP before reading bodies or accessing any bindings", async () => {
+  const metadata = { id: "b26a8010-ae43-49e9-9357-401e7ad518e8", tag: "a".repeat(40) };
+  for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+    for (const path of ["/", "/assets/app.js", "/api/guestbook/entries", "/api/admin/content", "/api/media/photo.webp", "/admin/content"]) {
+      const suffix = `${path}?source=kakao&value=%2F%2B+%26&value=second`;
+      const request = new Request(`http://wdcard.enmsoftware.com${suffix}`, {
+        method,
+        headers: { accept: "text/html" },
+        ...(["GET", "HEAD"].includes(method) ? {} : { body: "synthetic-body" }),
+      });
+      const env = new Proxy({ CF_VERSION_METADATA: metadata }, {
+        get(target, key) {
+          assert.equal(key, "CF_VERSION_METADATA", `redirect accessed binding ${String(key)}`);
+          return target[key];
+        },
+      });
+      const response = await worker.fetch(request, env);
+      assert.equal(response.status, 308, `${method} ${path}`);
+      assert.equal(response.headers.get("location"), `https://wdcard.enmsoftware.com${suffix}`);
+      assert.equal(request.bodyUsed, false);
+      assert.equal(await response.text(), "");
+      assert.equal(response.headers.get("x-wedding-worker-version"), metadata.id);
+      assert.equal(response.headers.get("x-wedding-worker-tag"), metadata.tag);
+      assertSecurityHeaders(response);
+    }
+  }
+});
+
+test("keeps HTTPS and other HTTP hosts on their existing asset path", async () => {
+  for (const origin of [
+    "https://wdcard.enmsoftware.com",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://example.test",
+    "http://wdcard.enmsoftware.com.example.test",
+  ]) {
+    const requestedUrl = `${origin}/assets/app.js?version=1`;
+    const calls = [];
+    const response = await worker.fetch(new Request(requestedUrl), {
+      ASSETS: { fetch: async (request) => {
+        calls.push(request.url);
+        return new Response("asset");
+      } },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("location"), null);
+    assert.equal(await response.text(), "asset");
+    assert.deepEqual(calls, [requestedUrl]);
+  }
+});
+
 test("serves existing static assets without a fallback", async () => {
   const calls = [];
   const response = await worker.fetch(new Request("https://example.test/assets/app.js"), {
