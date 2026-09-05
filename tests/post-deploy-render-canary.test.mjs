@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { chromium } from "playwright";
+import { createServer } from "vite";
+import { weddingContent } from "../src/content.js";
+import { createContentDocument } from "../src/admin-content/content-document.js";
 
 import {
+  collectScenario,
   collectScenarioWithVersionConvergence,
+  createRibbonExpectation,
   createHttpRedirectProbeUrl,
   createRenderScenarioConfigs,
   formatRenderDiagnostic,
   resolveExpectedWorkerIdentity,
   runPostDeployRenderCanary,
   validateRenderEvidence,
+  validateRibbonPlaybackEvidence,
   validateRenderScenario,
   verifyHttpEntryRedirect,
   waitForHttpEntryRedirect,
@@ -20,6 +30,44 @@ const TARGET_SHA = "a".repeat(40);
 const STALE_SHA = "b".repeat(40);
 const TARGET_VERSION = "11111111-2222-3333-4444-555555555555";
 const STALE_VERSION = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+const HASH_A = "a".repeat(64);
+const HASH_B = "b".repeat(64);
+const projectRoot = new URL("..", import.meta.url);
+const ribbonExpectation = createRibbonExpectation({
+  schemaVersion: 1,
+  fps: 30,
+  width: 960,
+  height: 640,
+  frames: ["frame-000-test.webp", "frame-001-test.webp"],
+  panelDelayMs: 300,
+  panelDurationMs: 1200,
+}, {
+  manifestHash: HASH_A,
+  frameHashes: { "frame-000-test.webp": HASH_B, "frame-001-test.webp": HASH_B },
+});
+
+function ribbonPlaybackEvidence(overrides = {}) {
+  const terminalAt = 1_000;
+  return {
+    baseUrl: BASE,
+    ribbonExpectation,
+    intro: {
+      mounts: 1,
+      draws: [{ index: 0, at: 900, alphaPixels: 1 }, { index: 1, at: terminalAt, alphaPixels: 0 }],
+      panelsOpenedAt: terminalAt + 300,
+      removedAt: terminalAt + 1_500,
+      coverPresent: false,
+      bodyLocked: false,
+      finalHero: { sampledAfterCoverRemoved: true, opacity: "1", display: "block", visibility: "visible" },
+    },
+    ribbonResponses: [
+      { url: `${BASE}assets/design/ribbon-sequence/manifest.json`, status: 200, contentType: "application/json", sha256: HASH_A },
+      { url: `${BASE}assets/design/ribbon-sequence/frame-000-test.webp`, status: 200, contentType: "image/webp", sha256: HASH_B },
+      { url: `${BASE}assets/design/ribbon-sequence/frame-001-test.webp`, status: 200, contentType: "image/webp", sha256: HASH_B },
+    ],
+    ...overrides,
+  };
+}
 
 function evidence(overrides = {}) {
   return {
@@ -58,8 +106,147 @@ function evidence(overrides = {}) {
   };
 }
 
+function hashBytes(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function localRibbonExpectation() {
+  const directory = new URL("../public/assets/design/ribbon-sequence/", import.meta.url);
+  const manifestBytes = await readFile(new URL("manifest.json", directory));
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const frameHashes = Object.fromEntries(await Promise.all(manifest.frames.map(async (frame) => [
+    frame,
+    hashBytes(await readFile(new URL(frame, directory))),
+  ])));
+  return createRibbonExpectation(manifest, { manifestHash: hashBytes(manifestBytes), frameHashes });
+}
+
+function localPublishedWorkerPlugin(document) {
+  const payload = Buffer.from(JSON.stringify({
+    schemaVersion: 1,
+    source: "cloudflare-published",
+    revisionId: "local-published-42",
+    publishedAt: "2026-09-05T00:00:00.000Z",
+    document,
+  })).toString("base64url");
+  const bootstrap = `<template id="wedding-public-bootstrap" data-schema-version="1">${payload}</template>`;
+  const heroPrefix = "/api/media/invitation/local-published/pastel-hero/";
+  return {
+    name: "local-published-render-canary",
+    transform(code, id) {
+      if (id.replaceAll("\\", "/").endsWith("/src/admin-content/content-client.js")) {
+        return code.replace("return import.meta.env?.DEV === true;", "return false;");
+      }
+      return null;
+    },
+    transformIndexHtml(html) {
+      return html.replace("<!-- WEDDING_PUBLIC_BOOTSTRAP -->", bootstrap);
+    },
+    configureServer(server) {
+      server.middlewares.use(async (request, response, next) => {
+        response.setHeader("x-wedding-content-source", "cloudflare-published");
+        response.setHeader("x-wedding-revision", "local-published-42");
+        response.setHeader("x-wedding-worker-tag", TARGET_SHA);
+        response.setHeader("x-wedding-worker-version", TARGET_VERSION);
+        const path = request.url?.split("?", 1)[0] || "";
+        if (!path.startsWith(heroPrefix)) return next();
+        const asset = path.endsWith("/960.webp") ? "pastel-hero-960.webp" : "pastel-hero-480.webp";
+        try {
+          const bytes = await readFile(new URL(`../public/assets/photos/${asset}`, import.meta.url));
+          response.statusCode = 200;
+          response.setHeader("content-type", "image/webp");
+          response.end(bytes);
+        } catch (error) {
+          next(error);
+        }
+      });
+    },
+  };
+}
+
+test("local published Worker canary proves every hash and excludes first-navigation ribbon records from warm evidence", { timeout: 60_000 }, async (t) => {
+  const document = createContentDocument(weddingContent);
+  document.photos.pastel.hero = {
+    ...document.photos.pastel.hero,
+    src: "/api/media/invitation/local-published/pastel-hero/480.webp",
+    srcSet: "/api/media/invitation/local-published/pastel-hero/480.webp 480w, /api/media/invitation/local-published/pastel-hero/960.webp 960w",
+  };
+  const ribbon = await localRibbonExpectation();
+  const server = await createServer({
+    root: fileURLToPath(projectRoot),
+    logLevel: "silent",
+    plugins: [localPublishedWorkerPlugin(document)],
+    server: { host: "127.0.0.1", port: 0, strictPort: false },
+  });
+  let browser;
+  t.after(async () => {
+    await browser?.close();
+    await server.close();
+  });
+  await server.listen();
+  const address = server.httpServer.address();
+  assert.equal(typeof address, "object");
+  const baseUrl = new URL(`http://127.0.0.1:${address.port}/`);
+  browser = await chromium.launch({ headless: true });
+
+  const result = await collectScenario({
+    name: "local-warm-ribbon",
+    browser,
+    baseUrl,
+    expectedWorkerTag: TARGET_SHA,
+    expectedWorkerVersion: TARGET_VERSION,
+    warm: true,
+    ribbonExpectation: ribbon,
+  });
+
+  assert.equal(result.ribbonResponses.length, ribbon.frames.length + 1, "Warm scenario must discard initial-navigation ribbon responses.");
+  assert.ok(result.ribbonResponses.every((response) => response.status === 200));
+  assert.equal(validateRenderScenario({
+    name: "local-warm-ribbon",
+    baseUrl,
+    expectedWorkerTag: TARGET_SHA,
+    expectedWorkerVersion: TARGET_VERSION,
+    expectedRevision: "local-published-42",
+    expectedPaths: [
+      "/api/media/invitation/local-published/pastel-hero/480.webp",
+      "/api/media/invitation/local-published/pastel-hero/960.webp",
+    ],
+    ribbonExpectation: ribbon,
+    ...result,
+  }), true);
+});
+
 test("render canary accepts only the published revision and its decoded hero", () => {
   assert.equal(validateRenderEvidence(evidence()), true);
+});
+
+test("render canary rejects intro fail-open, stale assets, and incorrect production asset responses", () => {
+  assert.equal(validateRibbonPlaybackEvidence(ribbonPlaybackEvidence()), true);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonPlaybackEvidence({
+    intro: { ...ribbonPlaybackEvidence().intro, draws: [], panelsOpenedAt: null, removedAt: 1000 },
+  })), /모든 frame을 재생하지/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonPlaybackEvidence({
+    ribbonResponses: ribbonPlaybackEvidence().ribbonResponses.map((entry) => (
+      entry.url.endsWith("manifest.json") ? { ...entry, sha256: HASH_B } : entry
+    )),
+  })), /SHA-256/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonPlaybackEvidence({
+    ribbonResponses: ribbonPlaybackEvidence().ribbonResponses.map((entry) => (
+      entry.url.endsWith("frame-001-test.webp") ? { ...entry, status: 503, contentType: "text/html" } : entry
+    )),
+  })), /HTTP 상태/);
+  assert.throws(() => validateRenderScenario({
+    name: "cold-400ms",
+    ...evidence(),
+    ...ribbonPlaybackEvidence({
+      intro: { ...ribbonPlaybackEvidence().intro, draws: [], panelsOpenedAt: null, removedAt: 1000 },
+    }),
+  }), /\[cold-400ms\].*모든 frame을 재생하지/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonPlaybackEvidence({
+    ribbonResponses: ribbonPlaybackEvidence().ribbonResponses.map((entry) => (
+      entry.url.endsWith("frame-001-test.webp") ? { ...entry, contentType: "text/html" } : entry
+    )),
+  })), /Content-Type/);
 });
 
 test("render canary samples final computed visibility after CSS-only transitions", () => {
