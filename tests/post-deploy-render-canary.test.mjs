@@ -11,6 +11,7 @@ import {
   validateRenderEvidence,
   validateRenderScenario,
   verifyHttpEntryRedirect,
+  waitForHttpEntryRedirect,
   waitForWorkerVersion,
 } from "../scripts/post-deploy-render-canary.mjs";
 
@@ -192,10 +193,225 @@ test("raw HTTP entry requires server 308 with the exact HTTPS path, query, and W
     { url: result.httpUrl, method: "GET", redirect: "manual" },
     { url: result.httpUrl, method: "HEAD", redirect: "manual" },
   ]);
-  assert.deepEqual(result.observations.map(({ method, status, location, workerTag, workerVersion }) => ({ method, status, location, workerTag, workerVersion })), [
-    { method: "GET", status: 308, location: entry, workerTag: TARGET_SHA, workerVersion: TARGET_VERSION },
-    { method: "HEAD", status: 308, location: entry, workerTag: TARGET_SHA, workerVersion: TARGET_VERSION },
+  assert.deepEqual(result.observations.map(({ attempt, method, status, location, workerTag, workerVersion }) => ({ attempt, method, status, location, workerTag, workerVersion })), [
+    { attempt: 1, method: "GET", status: 308, location: entry, workerTag: TARGET_SHA, workerVersion: TARGET_VERSION },
+    { attempt: 1, method: "HEAD", status: 308, location: entry, workerTag: TARGET_SHA, workerVersion: TARGET_VERSION },
   ]);
+});
+
+test("raw HTTP convergence retries stale identity until GET and HEAD both expose the deployed Worker", async () => {
+  const entry = "https://wdcard.enmsoftware.com/invitation?source=canary";
+  const delays = [];
+  let requestCount = 0;
+  const result = await waitForHttpEntryRedirect({
+    baseUrl: entry,
+    expectedTag: TARGET_SHA,
+    expectedVersion: TARGET_VERSION,
+    attempts: 2,
+    intervalMs: 25,
+    sleep: async (duration) => delays.push(duration),
+    logger: { info() {} },
+    fetchImpl: async (url) => {
+      requestCount += 1;
+      const stale = requestCount <= 2;
+      const location = new URL(url);
+      location.protocol = "https:";
+      return new Response(null, {
+        status: 308,
+        headers: {
+          location: location.href,
+          "x-wedding-worker-tag": stale ? STALE_SHA : TARGET_SHA,
+          "x-wedding-worker-version": stale ? STALE_VERSION : TARGET_VERSION,
+        },
+      });
+    },
+  });
+  assert.deepEqual(delays, [25]);
+  assert.equal(result.httpUrl, "http://wdcard.enmsoftware.com/invitation?source=canary");
+  assert.equal(result.httpsUrl, entry);
+  assert.deepEqual(result.observations.map(({ attempt, method, status, location, workerTag, workerVersion }) => ({ attempt, method, status, location, workerTag, workerVersion })), [
+    { attempt: 1, method: "GET", status: 308, location: entry, workerTag: STALE_SHA, workerVersion: STALE_VERSION },
+    { attempt: 1, method: "HEAD", status: 308, location: entry, workerTag: STALE_SHA, workerVersion: STALE_VERSION },
+    { attempt: 2, method: "GET", status: 308, location: entry, workerTag: TARGET_SHA, workerVersion: TARGET_VERSION },
+    { attempt: 2, method: "HEAD", status: 308, location: entry, workerTag: TARGET_SHA, workerVersion: TARGET_VERSION },
+  ]);
+});
+
+test("raw HTTP convergence retries mixed GET and HEAD identities until both are current", async () => {
+  const entry = "https://wdcard.enmsoftware.com/";
+  const delays = [];
+  let attempt = 0;
+  const result = await waitForHttpEntryRedirect({
+    baseUrl: entry,
+    expectedTag: TARGET_SHA,
+    expectedVersion: TARGET_VERSION,
+    attempts: 2,
+    intervalMs: 25,
+    sleep: async (duration) => delays.push(duration),
+    logger: { info() {} },
+    fetchImpl: async (_url, options) => {
+      if (options.method === "GET") attempt += 1;
+      const current = attempt === 2 || options.method === "GET";
+      return new Response(null, {
+        status: 308,
+        headers: {
+          location: entry,
+          "x-wedding-worker-tag": current ? TARGET_SHA : STALE_SHA,
+          "x-wedding-worker-version": current ? TARGET_VERSION : STALE_VERSION,
+        },
+      });
+    },
+  });
+  assert.deepEqual(delays, [25]);
+  assert.deepEqual(result.observations.map(({ attempt: observedAttempt, method, workerTag }) => ({ attempt: observedAttempt, method, workerTag })), [
+    { attempt: 1, method: "GET", workerTag: TARGET_SHA },
+    { attempt: 1, method: "HEAD", workerTag: STALE_SHA },
+    { attempt: 2, method: "GET", workerTag: TARGET_SHA },
+    { attempt: 2, method: "HEAD", workerTag: TARGET_SHA },
+  ]);
+});
+
+test("raw HTTP convergence rejects a current GET 200 even when HEAD is still stale", async () => {
+  const delays = [];
+  const methods = [];
+  await assert.rejects(waitForHttpEntryRedirect({
+    baseUrl: BASE,
+    expectedTag: TARGET_SHA,
+    expectedVersion: TARGET_VERSION,
+    attempts: 2,
+    sleep: async (duration) => delays.push(duration),
+    logger: { info() {} },
+    fetchImpl: async (_url, options) => {
+      methods.push(options.method);
+      const currentGet = options.method === "GET";
+      return new Response(null, {
+        status: currentGet ? 200 : 308,
+        headers: {
+          location: BASE,
+          "x-wedding-worker-tag": currentGet ? TARGET_SHA : STALE_SHA,
+          "x-wedding-worker-version": currentGet ? TARGET_VERSION : STALE_VERSION,
+        },
+      });
+    },
+  }), (error) => {
+    assert.match(error.message, /HTTP 200/);
+    assert.match(error.message, new RegExp(TARGET_SHA));
+    assert.match(error.message, new RegExp(STALE_SHA));
+    return true;
+  });
+  assert.deepEqual(methods, ["GET", "HEAD"]);
+  assert.deepEqual(delays, []);
+});
+
+test("raw HTTP convergence fails immediately for a bad redirect from the exact deployed Worker", async () => {
+  const delays = [];
+  const methods = [];
+  await assert.rejects(waitForHttpEntryRedirect({
+    baseUrl: BASE,
+    expectedTag: TARGET_SHA,
+    expectedVersion: TARGET_VERSION,
+    attempts: 2,
+    sleep: async (duration) => delays.push(duration),
+    logger: { info() {} },
+    fetchImpl: async (_url, options) => {
+      methods.push(options.method);
+      return new Response(null, {
+        status: 200,
+        headers: {
+          "x-wedding-worker-tag": TARGET_SHA,
+          "x-wedding-worker-version": TARGET_VERSION,
+        },
+      });
+    },
+  }), (error) => {
+    assert.match(error.message, /HTTP 200/);
+    assert.match(error.message, new RegExp(TARGET_SHA));
+    assert.match(error.message, new RegExp(TARGET_VERSION));
+    return true;
+  });
+  assert.deepEqual(methods, ["GET", "HEAD"]);
+  assert.deepEqual(delays, []);
+});
+
+test("raw HTTP convergence fails immediately for a bad Location from the exact deployed Worker", async () => {
+  const entry = "https://wdcard.enmsoftware.com/invitation?source=canary";
+  const delays = [];
+  const methods = [];
+  await assert.rejects(waitForHttpEntryRedirect({
+    baseUrl: entry,
+    expectedTag: TARGET_SHA,
+    expectedVersion: TARGET_VERSION,
+    attempts: 2,
+    sleep: async (duration) => delays.push(duration),
+    logger: { info() {} },
+    fetchImpl: async (_url, options) => {
+      methods.push(options.method);
+      return new Response(null, {
+        status: 308,
+        headers: {
+          location: "https://wdcard.enmsoftware.com/invitation?source=other",
+          "x-wedding-worker-tag": TARGET_SHA,
+          "x-wedding-worker-version": TARGET_VERSION,
+        },
+      });
+    },
+  }), /경로 또는 쿼리를 보존하지/);
+  assert.deepEqual(methods, ["GET", "HEAD"]);
+  assert.deepEqual(delays, []);
+});
+
+test("raw HTTP convergence exhausts missing or stale identity with complete observations", async () => {
+  const delays = [];
+  await assert.rejects(waitForHttpEntryRedirect({
+    baseUrl: BASE,
+    expectedTag: TARGET_SHA,
+    expectedVersion: TARGET_VERSION,
+    attempts: 2,
+    intervalMs: 25,
+    sleep: async (duration) => delays.push(duration),
+    logger: { info() {} },
+    fetchImpl: async () => new Response(null, {
+      status: 200,
+      headers: { "x-wedding-worker-tag": STALE_SHA, "x-wedding-worker-version": STALE_VERSION },
+    }),
+  }), (error) => {
+    assert.match(error.message, /수렴하지 않았습니다/);
+    assert.match(error.message, new RegExp(STALE_SHA));
+    assert.match(error.message, new RegExp(STALE_VERSION));
+    assert.match(error.message, /"attempt":2/);
+    assert.match(error.message, /"method":"HEAD"/);
+    return true;
+  });
+  assert.deepEqual(delays, [25]);
+});
+
+test("raw HTTP convergence preserves prior observations when a later network request fails", async () => {
+  let getCount = 0;
+  const delays = [];
+  await assert.rejects(waitForHttpEntryRedirect({
+    baseUrl: BASE,
+    expectedTag: TARGET_SHA,
+    expectedVersion: TARGET_VERSION,
+    attempts: 2,
+    intervalMs: 25,
+    sleep: async (duration) => delays.push(duration),
+    logger: { info() {} },
+    fetchImpl: async (_url, options) => {
+      if (options.method === "GET") getCount += 1;
+      if (getCount === 2 && options.method === "GET") throw new Error("network timeout");
+      return new Response(null, {
+        status: 200,
+        headers: { "x-wedding-worker-tag": STALE_SHA, "x-wedding-worker-version": STALE_VERSION },
+      });
+    },
+  }), (error) => {
+    assert.match(error.message, /network timeout/);
+    assert.match(error.message, new RegExp(STALE_SHA));
+    assert.match(error.message, new RegExp(STALE_VERSION));
+    assert.match(error.message, /"attempt":2,"method":"GET"/);
+    return true;
+  });
+  assert.deepEqual(delays, [25]);
 });
 
 test("HTTP redirect probe uses a dedicated non-root path and encoded query", () => {
