@@ -851,11 +851,11 @@ body.intro-lock { overflow: hidden; }
   transform: translate(-50%, -54%);
   filter: drop-shadow(0 3px 5px rgba(84, 72, 54, .22));
 }
-.intro-cover__bow-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; will-change: opacity; }
+.intro-cover__bow-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; will-change: opacity, transform; }
 .intro-cover__bow-frame--0 { opacity: 1; animation: intro-bow-frame-0-out .3s ease 1s both; }
-.intro-cover__bow-frame--1 { animation: intro-bow-frame-1 .8s linear 1s both; }
-.intro-cover__bow-frame--2 { animation: intro-bow-frame-2 .85s linear 1.5s both; }
-.intro-cover__bow-frame--3 { animation: intro-bow-frame-3-in .3s ease 2.05s both; }
+.intro-cover__bow-frame--1 { transform: translate(2%, -3.3%); animation: intro-bow-frame-1 .8s linear 1s both; }
+.intro-cover__bow-frame--2 { transform: translate(5%, .8%); animation: intro-bow-frame-2 .85s linear 1.5s both; }
+.intro-cover__bow-frame--3 { transform: translate(5%, 18%); animation: intro-bow-frame-3-in .3s ease 2.05s both; }
 @keyframes intro-bow-frame-0-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes intro-bow-frame-1 {
   0% { opacity: 0; }

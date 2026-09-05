@@ -122,9 +122,9 @@ const PASTEL_INTRO_TOTAL_MS = 4000;
 // imagegen으로 이어 생성한 순서대로 앞에 추가한다. 프레임이 하나면 정지 상태로 유지된다.
 const PASTEL_INTRO_BOW_FRAMES = [
   "/assets/design/intro-ribbon-bow.webp",
-  // "/assets/design/intro-ribbon-bow-f1.webp",
-  // "/assets/design/intro-ribbon-bow-f2.webp",
-  // "/assets/design/intro-ribbon-bow-f3.webp",
+  "/assets/design/intro-ribbon-bow-f1.webp",
+  "/assets/design/intro-ribbon-bow-f2.webp",
+  "/assets/design/intro-ribbon-bow-f3.webp",
 ];
 
 function PastelIntroCover({ onFinish }) {
