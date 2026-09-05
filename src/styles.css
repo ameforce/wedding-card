@@ -791,8 +791,8 @@ body.intro-lock { overflow: hidden; }
   will-change: transform;
   backface-visibility: hidden;
 }
-.intro-cover__panel--left { left: 0; transform-origin: left center; box-shadow: inset -24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-left 1.2s cubic-bezier(.86, 0, .33, 1) 1.68s both; }
-.intro-cover__panel--right { right: 0; transform-origin: right center; box-shadow: inset 24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-right 1.2s cubic-bezier(.86, 0, .33, 1) 1.68s both; }
+.intro-cover__panel--left { left: 0; transform-origin: left center; box-shadow: inset -24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-left 1.2s cubic-bezier(.86, 0, .33, 1) 2.15s both; }
+.intro-cover__panel--right { right: 0; transform-origin: right center; box-shadow: inset 24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-right 1.2s cubic-bezier(.86, 0, .33, 1) 2.15s both; }
 @keyframes intro-panel-left {
   0% { transform: translateX(0) rotateY(0); }
   32% { transform: translateX(-2%) rotateY(8deg); }
@@ -815,7 +815,7 @@ body.intro-lock { overflow: hidden; }
   filter: blur(1px);
   opacity: 0;
   pointer-events: none;
-  animation: intro-seam-light .72s ease 1.66s both;
+  animation: intro-seam-light .75s ease 2.12s both;
 }
 @keyframes intro-seam-light {
   0% { opacity: 0; }
@@ -828,31 +828,38 @@ body.intro-lock { overflow: hidden; }
   left: 0;
   right: 0;
   top: 42%;
-  height: clamp(46px, 13vw, 64px);
-  margin-top: calc(clamp(46px, 13vw, 64px) / -2);
+  height: clamp(58px, 16vw, 92px);
+  margin-top: calc(clamp(58px, 16vw, 92px) / -2);
   pointer-events: none;
   will-change: transform, opacity;
-  animation: intro-ribbon-fall .85s cubic-bezier(.6, 0, .8, .5) 1.05s both;
+  animation: intro-ribbon-fall .95s cubic-bezier(.55, 0, .8, .45) 1.5s both;
 }
 @keyframes intro-ribbon-fall {
   0% { transform: translateY(0) rotate(0); opacity: 1; }
-  26% { transform: translateY(8vh) rotate(-2.4deg); opacity: 1; }
-  62% { transform: translateY(32vh) rotate(2.8deg); opacity: .95; }
-  100% { transform: translateY(68vh) rotate(1.2deg); opacity: 0; }
+  30% { transform: translateY(10vh) rotate(-3.4deg); opacity: 1; }
+  64% { transform: translateY(34vh) rotate(4.2deg); opacity: .96; }
+  100% { transform: translateY(70vh) rotate(1.6deg); opacity: 0; }
 }
 .intro-cover__band { display: block; width: 100%; height: 100%; background: url("/assets/design/intro-ribbon-band.webp") center / 100% 100% no-repeat; }
 .intro-cover__bow {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: clamp(150px, 40vw, 200px);
+  width: clamp(220px, 58vw, 330px);
   height: auto;
   transform: translate(-50%, -54%);
   filter: drop-shadow(0 3px 5px rgba(84, 72, 54, .22));
-  animation: intro-bow-tug .55s ease .5s both;
+  animation:
+    intro-bow-cinch .32s ease .55s both,
+    intro-bow-loosen .45s cubic-bezier(.34, 1.3, .64, 1) .95s both;
 }
-@keyframes intro-bow-tug {
-  0% { transform: translate(-50%, -54%) rotate(0) scale(1); }
-  45% { transform: translate(-50%, -53%) rotate(-3.2deg) scale(1.05); }
-  100% { transform: translate(-50%, -54.5%) rotate(1.4deg) scale(.985); }
+@keyframes intro-bow-cinch {
+  0% { transform: translate(-50%, -54%) scale(1); }
+  55% { transform: translate(-50%, -53.5%) scale(.94); }
+  100% { transform: translate(-50%, -54%) scale(1.01); }
+}
+@keyframes intro-bow-loosen {
+  0% { transform: translate(-50%, -54%) scaleX(1.01) scaleY(1) rotate(0); }
+  45% { transform: translate(-50%, -52%) scaleX(1.26) scaleY(.88) rotate(-2.2deg); }
+  100% { transform: translate(-50%, -51%) scaleX(1.18) scaleY(.91) rotate(1.6deg); }
 }

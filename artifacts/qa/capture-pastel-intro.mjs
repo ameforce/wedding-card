@@ -20,17 +20,17 @@ await page.goto(`${BASE}/`);
 await page.waitForSelector(".intro-cover", { timeout: 5000 });
 await page.waitForTimeout(600);
 await page.screenshot({ path: `${OUT}/intro-1-ribbon.png` });
-await page.waitForTimeout(650);
-await page.screenshot({ path: `${OUT}/intro-2-ribbon-fall.png` });
 await page.waitForTimeout(700);
+await page.screenshot({ path: `${OUT}/intro-2-ribbon-fall.png` });
+await page.waitForTimeout(1300);
 const midPanelTransform = await page.evaluate(() => {
   const el = document.querySelector(".intro-cover__panel--left");
   return el ? getComputedStyle(el).transform : null;
 });
 await page.screenshot({ path: `${OUT}/intro-3-panels-open.png` });
-await page.waitForTimeout(800);
+await page.waitForTimeout(1100);
 await page.screenshot({ path: `${OUT}/intro-4-reveal.png` });
-await page.waitForTimeout(700);
+await page.waitForTimeout(900);
 const afterPlay = await page.evaluate(() => ({
   cover: Boolean(document.querySelector(".intro-cover")),
   bodyLocked: document.body.classList.contains("intro-lock"),

@@ -116,24 +116,7 @@ function InvitationLoadingShell({ captureMode }) {
   );
 }
 
-const PASTEL_INTRO_STORAGE_KEY = "pastel-intro-played";
-const PASTEL_INTRO_TOTAL_MS = 3400;
-
-function readPastelIntroEligibility() {
-  try {
-    return window.sessionStorage.getItem(PASTEL_INTRO_STORAGE_KEY) !== "1";
-  } catch {
-    return true;
-  }
-}
-
-function markPastelIntroPlayed() {
-  try {
-    window.sessionStorage.setItem(PASTEL_INTRO_STORAGE_KEY, "1");
-  } catch {
-    // 사생활 보호 모드에서는 재생 기록을 저장할 수 없으므로 무시한다.
-  }
-}
+const PASTEL_INTRO_TOTAL_MS = 3800;
 
 function PastelIntroCover({ onFinish }) {
   const [leaving, setLeaving] = useState(false);
@@ -143,10 +126,7 @@ function PastelIntroCover({ onFinish }) {
   }, [onFinish]);
   useEffect(() => {
     document.body.classList.add("intro-lock");
-    const timer = window.setTimeout(() => {
-      markPastelIntroPlayed();
-      finishRef.current?.();
-    }, PASTEL_INTRO_TOTAL_MS);
+    const timer = window.setTimeout(() => finishRef.current?.(), PASTEL_INTRO_TOTAL_MS);
     return () => {
       window.clearTimeout(timer);
       document.body.classList.remove("intro-lock");
@@ -155,7 +135,6 @@ function PastelIntroCover({ onFinish }) {
   const leave = () => {
     if (leaving) return;
     setLeaving(true);
-    markPastelIntroPlayed();
     window.setTimeout(() => finishRef.current?.(), 270);
   };
   return (
@@ -1048,7 +1027,6 @@ function WeddingApp() {
   const [toast, setToast] = useState({ message: "", tone: "success" });
   const [introFinished, setIntroFinished] = useState(false);
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
-  const introEligible = useMemo(() => !captureMode && readPastelIntroEligibility(), [captureMode]);
   useEffect(() => {
     if (runtime.status !== "ready") return;
     document.documentElement.dataset.variant = variant;
@@ -1078,7 +1056,7 @@ function WeddingApp() {
       <div className="invitation-stage">
         {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
       </div>
-      {variant === "pastel" && introEligible && !introFinished && (
+      {variant === "pastel" && !captureMode && !introFinished && (
         <PastelIntroCover onFinish={() => setIntroFinished(true)} />
       )}
       {!captureMode && <MusicControl notify={notify} />}
