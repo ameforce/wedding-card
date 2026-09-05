@@ -1,7 +1,7 @@
 // Pastel 게이트폴드 인트로 로컬 QA 캡처 (프리뷰 서버 http://localhost:4173 필요)
 import { chromium } from "playwright";
 
-const BASE = "http://localhost:4173";
+const BASE = process.env.INTRO_QA_BASE || "http://localhost:4173";
 const OUT = "artifacts/qa";
 
 const browser = await chromium.launch();

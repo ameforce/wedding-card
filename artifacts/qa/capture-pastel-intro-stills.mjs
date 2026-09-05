@@ -1,7 +1,7 @@
 // 인트로 전용 클린 영화 + 360/1440px 반응형 스틸 캡처
 import { chromium } from "playwright";
 
-const BASE = "http://localhost:4173";
+const BASE = process.env.INTRO_QA_BASE || "http://localhost:4173";
 const browser = await chromium.launch();
 
 // 1) 390x844 인트로 전용 녹화

@@ -116,7 +116,7 @@ function InvitationLoadingShell({ captureMode }) {
   );
 }
 
-const PASTEL_INTRO_TOTAL_MS = 3800;
+const PASTEL_INTRO_TOTAL_MS = 3900;
 
 function PastelIntroCover({ onFinish }) {
   const [leaving, setLeaving] = useState(false);
@@ -145,10 +145,16 @@ function PastelIntroCover({ onFinish }) {
       <div className="intro-cover__ribbon">
         <div className="intro-cover__band" />
         <div className="intro-cover__bow">
-          <span className="intro-cover__bow-half intro-cover__bow-half--left">
+          <span className="intro-cover__bow-tail intro-cover__bow-tail--left">
             <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
           </span>
-          <span className="intro-cover__bow-half intro-cover__bow-half--right">
+          <span className="intro-cover__bow-tail intro-cover__bow-tail--right">
+            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
+          </span>
+          <span className="intro-cover__bow-loop intro-cover__bow-loop--left">
+            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
+          </span>
+          <span className="intro-cover__bow-loop intro-cover__bow-loop--right">
             <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
           </span>
           <span className="intro-cover__bow-knot">
