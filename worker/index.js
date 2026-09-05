@@ -4,6 +4,7 @@ const ADMIN_API_PREFIX = "/api/admin";
 const MEDIA_API_PREFIX = "/api/media";
 const ADMIN_CONTENT_PAGE = "/admin";
 const LEGACY_ADMIN_CONTENT_PAGE = "/admin/content";
+const PRODUCTION_HOSTNAME = "wdcard.enmsoftware.com";
 // workerd rejects PBKDF2 requests above 100,000 iterations. Keep the value in
 // the encoded verifier and reject unsupported verifier metadata before asking
 // Web Crypto to derive any bits.
@@ -1330,6 +1331,13 @@ async function handleGuestbook(request, env, url) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // Upgrade the document itself before CSP upgrades its module requests.
+    // Otherwise HTTP documents fetch HTTPS modules across origins and fail CORS.
+    if (url.protocol === "http:" && url.hostname === PRODUCTION_HOSTNAME) {
+      url.protocol = "https:";
+      url.port = "";
+      return withSearchPrivacy(Response.redirect(url.toString(), 308), env);
+    }
     if (url.pathname.startsWith(API_PREFIX)) {
       return withSearchPrivacy(await handleGuestbook(request, env, url), env);
     }
