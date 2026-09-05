@@ -204,6 +204,20 @@ test("real invitation ribbon preserves every frame and restores access across lo
     });
   }
 
+  await t.test("cold 400ms ribbon assets still complete every real frame before the cover opens", async () => {
+    const page = await newPage();
+    await page.route("**/ribbon-sequence/**", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await route.continue();
+    });
+    try {
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+      const state = await finalState(page);
+      assertAccessible(state);
+      assertCompletePlayback(state);
+    } finally { await page.close(); }
+  });
+
   for (const scenario of ["skip-loading", "fetch-failure", "fetch-timeout"]) {
     await t.test(scenario, async () => {
       const page = await newPage();

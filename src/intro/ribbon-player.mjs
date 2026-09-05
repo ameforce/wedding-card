@@ -232,7 +232,7 @@ export function createRibbonFrameLoader(manifest, {
     return response.arrayBuffer();
   },
   decodeFrame = browserDecode,
-  concurrency = 4,
+  concurrency = 8,
   maxPrefetchBytes = MAX_PREFETCH_BYTES,
   maxDecodedFrames = MAX_DECODED_FRAMES,
   maxInFlightDecodes = MAX_INFLIGHT_DECODES,

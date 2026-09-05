@@ -172,6 +172,28 @@ test("frame loader bounds decoded frames and releases evicted bitmap resources",
   assert.equal(closed.length, 3);
 });
 
+test("frame prefetch uses eight bounded network requests while decode and bitmap limits stay separate", async () => {
+  const manifest = validateRibbonManifest({
+    ...rawManifest,
+    frames: Array.from({ length: 16 }, (_value, index) => `frame-${String(index).padStart(3, "0")}.webp`),
+    releaseFrame: 8,
+  }, manifestOptions);
+  let active = 0;
+  let peak = 0;
+  const loader = createRibbonFrameLoader(manifest, {
+    fetchFrame: async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+      return new ArrayBuffer(8);
+    },
+  });
+  await loader.prefetch();
+  assert.equal(peak, 8);
+  loader.cancel();
+});
+
 test("cancelling a frame loader prevents late network work from producing a drawable", async () => {
   const manifest = validateRibbonManifest(rawManifest, manifestOptions);
   const loader = createRibbonFrameLoader(manifest, {
