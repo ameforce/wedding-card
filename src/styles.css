@@ -766,3 +766,63 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   .invitation-stage { width: 430px; }
   .section-pad { padding-inline: 42px; }
 }
+
+body.intro-lock { overflow: hidden; }
+
+.intro-cover {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.intro-cover.is-leaving { opacity: 0; pointer-events: none; transition: opacity .26s ease; }
+
+.intro-cover__panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: calc(50% + 2px);
+  background: #fbfaf3 url("/assets/design/pastel-paper-fibers.webp") 0 0 / 234px 234px repeat;
+  will-change: transform;
+}
+.intro-cover__panel--left { left: 0; box-shadow: inset -24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-left 1.15s cubic-bezier(.76, 0, .24, 1) 1.62s both; }
+.intro-cover__panel--right { right: 0; box-shadow: inset 24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-right 1.15s cubic-bezier(.76, 0, .24, 1) 1.62s both; }
+@keyframes intro-panel-left { to { transform: translateX(-106%); } }
+@keyframes intro-panel-right { to { transform: translateX(106%); } }
+
+.intro-cover__ribbon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 42%;
+  height: clamp(46px, 13vw, 64px);
+  margin-top: calc(clamp(46px, 13vw, 64px) / -2);
+  pointer-events: none;
+  will-change: transform, opacity;
+  animation: intro-ribbon-fall .72s cubic-bezier(.55, 0, .8, .45) .9s both;
+}
+@keyframes intro-ribbon-fall {
+  0% { transform: translateY(0) rotate(0); opacity: 1; }
+  62% { opacity: 1; }
+  100% { transform: translateY(64vh) rotate(5deg); opacity: 0; }
+}
+.intro-cover__band { display: block; width: 100%; height: 100%; }
+.intro-cover__bow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(104px, 30vw, 138px);
+  height: auto;
+  transform: translate(-50%, -54%);
+  filter: drop-shadow(0 2px 4px rgba(84, 72, 54, .2));
+  animation: intro-bow-loosen .46s ease .44s both;
+}
+@keyframes intro-bow-loosen {
+  0% { transform: translate(-50%, -54%) scale(1) rotate(0); }
+  55% { transform: translate(-50%, -52%) scale(1.06) rotate(-2.4deg); }
+  100% { transform: translate(-50%, -50%) scale(.97) rotate(1.6deg); }
+}

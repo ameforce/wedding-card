@@ -116,6 +116,87 @@ function InvitationLoadingShell({ captureMode }) {
   );
 }
 
+const PASTEL_INTRO_STORAGE_KEY = "pastel-intro-played";
+const PASTEL_INTRO_TOTAL_MS = 3050;
+
+function readPastelIntroEligibility() {
+  try {
+    return window.sessionStorage.getItem(PASTEL_INTRO_STORAGE_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
+
+function markPastelIntroPlayed() {
+  try {
+    window.sessionStorage.setItem(PASTEL_INTRO_STORAGE_KEY, "1");
+  } catch {
+    // 사생활 보호 모드에서는 재생 기록을 저장할 수 없으므로 무시한다.
+  }
+}
+
+function PastelIntroCover({ onFinish }) {
+  const [leaving, setLeaving] = useState(false);
+  const finishRef = useRef(onFinish);
+  useEffect(() => {
+    finishRef.current = onFinish;
+  }, [onFinish]);
+  useEffect(() => {
+    document.body.classList.add("intro-lock");
+    const timer = window.setTimeout(() => {
+      markPastelIntroPlayed();
+      finishRef.current?.();
+    }, PASTEL_INTRO_TOTAL_MS);
+    return () => {
+      window.clearTimeout(timer);
+      document.body.classList.remove("intro-lock");
+    };
+  }, []);
+  const leave = () => {
+    if (leaving) return;
+    setLeaving(true);
+    markPastelIntroPlayed();
+    window.setTimeout(() => finishRef.current?.(), 270);
+  };
+  return (
+    <div className={`intro-cover ${leaving ? "is-leaving" : ""}`} aria-hidden="true" onPointerDown={leave}>
+      <div className="intro-cover__panel intro-cover__panel--left" />
+      <div className="intro-cover__panel intro-cover__panel--right" />
+      <div className="intro-cover__ribbon">
+        <svg className="intro-cover__band" viewBox="0 0 100 60" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="intro-band-satin" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor="#fdf9f0" />
+              <stop offset=".24" stopColor="#ecdfc9" />
+              <stop offset=".5" stopColor="#faf5e9" />
+              <stop offset=".76" stopColor="#e6d9c3" />
+              <stop offset="1" stopColor="#fbf7ee" />
+            </linearGradient>
+          </defs>
+          <rect x="0" y="6" width="100" height="48" fill="url(#intro-band-satin)" />
+          <rect x="0" y="6" width="100" height="1.6" fill="rgba(122, 104, 78, .28)" />
+          <rect x="0" y="52.4" width="100" height="1.6" fill="rgba(122, 104, 78, .24)" />
+        </svg>
+        <svg className="intro-cover__bow" viewBox="0 0 120 92">
+          <defs>
+            <linearGradient id="intro-bow-satin" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#fffdf6" />
+              <stop offset=".55" stopColor="#efe4cf" />
+              <stop offset="1" stopColor="#f7f1e3" />
+            </linearGradient>
+          </defs>
+          <path d="M60 46 C34 12 8 20 12 40 C15 56 40 58 60 46 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .22)" strokeWidth="1" />
+          <path d="M60 46 C86 12 112 20 108 40 C105 56 80 58 60 46 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .22)" strokeWidth="1" />
+          <path d="M53 52 C47 66 41 74 34 82 L47 82 C53 72 57 62 59 54 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .18)" strokeWidth="1" />
+          <path d="M67 52 C73 66 79 74 86 82 L73 82 C67 72 63 62 61 54 Z" fill="url(#intro-bow-satin)" stroke="rgba(122, 104, 78, .18)" strokeWidth="1" />
+          <ellipse cx="60" cy="46" rx="9.5" ry="8.5" fill="#e9dcc4" stroke="rgba(122, 104, 78, .3)" strokeWidth="1" />
+          <path d="M54 41 C57 43.5 63 43.5 66 41" stroke="rgba(255, 253, 246, .85)" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function usePhotoGallery() {
   const [activeIndex, setActiveIndex] = useState(null);
   const triggerRefs = useRef([]);
@@ -991,7 +1072,9 @@ function WeddingApp() {
     pastel: getInvitationPhotos(runtime.content, "pastel"),
   }), [runtime.content]);
   const [toast, setToast] = useState({ message: "", tone: "success" });
+  const [introFinished, setIntroFinished] = useState(false);
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
+  const introEligible = useMemo(() => !captureMode && readPastelIntroEligibility(), [captureMode]);
   useEffect(() => {
     if (runtime.status !== "ready") return;
     document.documentElement.dataset.variant = variant;
@@ -1021,6 +1104,9 @@ function WeddingApp() {
       <div className="invitation-stage">
         {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
       </div>
+      {variant === "pastel" && introEligible && !introFinished && (
+        <PastelIntroCover onFinish={() => setIntroFinished(true)} />
+      )}
       {!captureMode && <MusicControl notify={notify} />}
       <div className={`toast is-${toast.tone} ${toast.message ? "is-visible" : ""}`} role="status" aria-live="polite">
         {toast.tone === "error" ? <WarningCircle aria-hidden="true" weight="bold" /> : <Check aria-hidden="true" weight="bold" />}
