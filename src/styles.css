@@ -791,8 +791,8 @@ body.intro-lock { overflow: hidden; }
   will-change: transform;
   backface-visibility: hidden;
 }
-.intro-cover__panel--left { left: 0; transform-origin: left center; box-shadow: inset -24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-left 1.2s cubic-bezier(.86, 0, .33, 1) 2.35s both; }
-.intro-cover__panel--right { right: 0; transform-origin: right center; box-shadow: inset 24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-right 1.2s cubic-bezier(.86, 0, .33, 1) 2.35s both; }
+.intro-cover__panel--left { left: 0; transform-origin: left center; box-shadow: inset -24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-left 1.2s cubic-bezier(.86, 0, .33, 1) 2.5s both; }
+.intro-cover__panel--right { right: 0; transform-origin: right center; box-shadow: inset 24px 0 38px -30px rgba(63, 56, 46, .42); animation: intro-panel-right 1.2s cubic-bezier(.86, 0, .33, 1) 2.5s both; }
 @keyframes intro-panel-left {
   0% { transform: translateX(0) rotateY(0); }
   32% { transform: translateX(-2%) rotateY(8deg); }
@@ -815,7 +815,7 @@ body.intro-lock { overflow: hidden; }
   filter: blur(1px);
   opacity: 0;
   pointer-events: none;
-  animation: intro-seam-light .75s ease 2.32s both;
+  animation: intro-seam-light .75s ease 2.47s both;
 }
 @keyframes intro-seam-light {
   0% { opacity: 0; }
@@ -832,7 +832,7 @@ body.intro-lock { overflow: hidden; }
   margin-top: calc(clamp(58px, 16vw, 92px) / -2);
   pointer-events: none;
   will-change: transform, opacity;
-  animation: intro-ribbon-fall .95s cubic-bezier(.55, 0, .8, .45) 1.7s both;
+  animation: intro-ribbon-fall .95s cubic-bezier(.55, 0, .8, .45) 2s both;
 }
 @keyframes intro-ribbon-fall {
   0% { transform: translateY(0) rotate(0); opacity: 1; }
@@ -850,39 +850,23 @@ body.intro-lock { overflow: hidden; }
   aspect-ratio: 640 / 520;
   transform: translate(-50%, -54%);
   filter: drop-shadow(0 3px 5px rgba(84, 72, 54, .22));
-  animation: intro-bow-cinch .32s ease .55s both;
 }
-@keyframes intro-bow-cinch {
-  0% { transform: translate(-50%, -54%) scale(1); }
-  55% { transform: translate(-50%, -53.5%) scale(.94); }
-  100% { transform: translate(-50%, -54%) scale(1); }
+.intro-cover__bow-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; will-change: opacity; }
+.intro-cover__bow-frame--0 { opacity: 1; animation: intro-bow-frame-0-out .3s ease 1s both; }
+.intro-cover__bow-frame--1 { animation: intro-bow-frame-1 .8s linear 1s both; }
+.intro-cover__bow-frame--2 { animation: intro-bow-frame-2 .85s linear 1.5s both; }
+.intro-cover__bow-frame--3 { animation: intro-bow-frame-3-in .3s ease 2.05s both; }
+@keyframes intro-bow-frame-0-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes intro-bow-frame-1 {
+  0% { opacity: 0; }
+  37% { opacity: 1; }
+  63% { opacity: 1; }
+  100% { opacity: 0; }
 }
-.intro-cover__bow-tail, .intro-cover__bow-loop, .intro-cover__bow-knot { position: absolute; inset: 0; will-change: transform; }
-.intro-cover__bow-tail img, .intro-cover__bow-loop img, .intro-cover__bow-knot img { display: block; width: 100%; height: auto; }
-.intro-cover__bow-tail--left { clip-path: inset(44% 50% 0 0); transform-origin: 88% 6%; animation: intro-bow-tail-left .55s cubic-bezier(.3, .7, .4, 1) .9s both; }
-.intro-cover__bow-tail--right { clip-path: inset(44% 0 0 50%); transform-origin: 12% 6%; animation: intro-bow-tail-right .55s cubic-bezier(.3, .7, .4, 1) .9s both; }
-@keyframes intro-bow-tail-left {
-  0% { transform: translate(0, 0) scaleX(1); }
-  100% { transform: translate(-13%, 7%) scaleX(1.22); }
+@keyframes intro-bow-frame-2 {
+  0% { opacity: 0; }
+  35% { opacity: 1; }
+  65% { opacity: 1; }
+  100% { opacity: 0; }
 }
-@keyframes intro-bow-tail-right {
-  0% { transform: translate(0, 0) scaleX(1); }
-  100% { transform: translate(13%, 7%) scaleX(1.22); }
-}
-.intro-cover__bow-loop--left { clip-path: inset(0 50% 56% 0); transform-origin: 96% 92%; animation: intro-bow-loop-left .7s cubic-bezier(.4, .8, .5, 1) .95s both; }
-.intro-cover__bow-loop--right { clip-path: inset(0 0 56% 50%); transform-origin: 4% 92%; animation: intro-bow-loop-right .7s cubic-bezier(.4, .8, .5, 1) .95s both; }
-@keyframes intro-bow-loop-left {
-  0% { transform: rotate(0) translateY(0) scaleY(1); }
-  45% { transform: rotate(-11deg) translateY(2%) scaleY(.94); }
-  100% { transform: rotate(-24deg) translateY(7%) scaleY(.82); }
-}
-@keyframes intro-bow-loop-right {
-  0% { transform: rotate(0) translateY(0) scaleY(1); }
-  45% { transform: rotate(11deg) translateY(2%) scaleY(.94); }
-  100% { transform: rotate(24deg) translateY(7%) scaleY(.82); }
-}
-.intro-cover__bow-knot { clip-path: inset(26% 40% 52% 40%); animation: intro-bow-knot-slip .5s ease 1.35s both; }
-@keyframes intro-bow-knot-slip {
-  0% { transform: translateY(0); }
-  100% { transform: translateY(3.5%); }
-}
+@keyframes intro-bow-frame-3-in { from { opacity: 0; } to { opacity: 1; } }

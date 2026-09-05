@@ -116,7 +116,16 @@ function InvitationLoadingShell({ captureMode }) {
   );
 }
 
-const PASTEL_INTRO_TOTAL_MS = 3900;
+const PASTEL_INTRO_TOTAL_MS = 4000;
+
+// 매듭 풀림 플립북 프레임: F0(묶임)이 항상 있고, F1~F3(풀려가는 중간 상태)는
+// imagegen으로 이어 생성한 순서대로 앞에 추가한다. 프레임이 하나면 정지 상태로 유지된다.
+const PASTEL_INTRO_BOW_FRAMES = [
+  "/assets/design/intro-ribbon-bow.webp",
+  // "/assets/design/intro-ribbon-bow-f1.webp",
+  // "/assets/design/intro-ribbon-bow-f2.webp",
+  // "/assets/design/intro-ribbon-bow-f3.webp",
+];
 
 function PastelIntroCover({ onFinish }) {
   const [leaving, setLeaving] = useState(false);
@@ -145,21 +154,14 @@ function PastelIntroCover({ onFinish }) {
       <div className="intro-cover__ribbon">
         <div className="intro-cover__band" />
         <div className="intro-cover__bow">
-          <span className="intro-cover__bow-tail intro-cover__bow-tail--left">
-            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
-          </span>
-          <span className="intro-cover__bow-tail intro-cover__bow-tail--right">
-            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
-          </span>
-          <span className="intro-cover__bow-loop intro-cover__bow-loop--left">
-            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
-          </span>
-          <span className="intro-cover__bow-loop intro-cover__bow-loop--right">
-            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
-          </span>
-          <span className="intro-cover__bow-knot">
-            <img src="/assets/design/intro-ribbon-bow.webp" alt="" />
-          </span>
+          {PASTEL_INTRO_BOW_FRAMES.map((src, index) => (
+            <img
+              key={src}
+              className={`intro-cover__bow-frame intro-cover__bow-frame--${index}`}
+              src={src}
+              alt=""
+            />
+          ))}
         </div>
       </div>
     </div>
