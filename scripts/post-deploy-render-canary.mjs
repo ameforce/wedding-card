@@ -148,15 +148,12 @@ function createVerifiedHttpEntry(baseUrl, redirectProbe) {
   };
 }
 
-export async function verifyHttpEntryRedirect({
+async function observeHttpEntryRedirect({
   baseUrl,
-  expectedTag,
-  expectedVersion,
   fetchImpl = globalThis.fetch,
   timeoutMs = HTTP_TIMEOUT_MS,
+  attempt = 1,
 }) {
-  const targetTag = expectedWorkerTag(expectedTag);
-  const targetVersion = expectedWorkerVersion(expectedVersion);
   const { httpUrl, httpsUrl } = httpEntryUrls(baseUrl);
   const methods = ["GET", "HEAD"];
   const observations = [];
@@ -175,24 +172,122 @@ export async function verifyHttpEntryRedirect({
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
-      throw new Error(`원시 HTTP ${method} 진입 요청이 실패했습니다: ${error.message}`, { cause: error });
+      observations.push({ attempt, method, error: error.message });
+      const failure = new Error(`원시 HTTP ${method} 진입 요청이 실패했습니다: ${error.message}; observations=${formatHttpRedirectObservations(observations)}`, { cause: error });
+      failure.httpRedirectObservations = observations;
+      throw failure;
     }
 
     const observation = {
+      attempt,
       method,
       status: response.status,
       location: response.headers.get("location") || "",
       workerTag: response.headers.get("x-wedding-worker-tag") || "missing",
       workerVersion: response.headers.get("x-wedding-worker-version") || "missing",
     };
+    await response.body?.cancel().catch(() => {});
     observations.push(observation);
-    invariant(response.status === 308, `원시 HTTP ${method} 진입이 HTTPS 서버 리디렉션 대신 HTTP ${response.status}를 반환했습니다.`);
-    invariant(observation.location === httpsUrl.href, `원시 HTTP ${method} Location이 HTTPS 기준 URL의 경로 또는 쿼리를 보존하지 않았습니다: ${observation.location || "missing"}`);
-    invariant(observation.workerTag === targetTag, `원시 HTTP ${method} 리디렉션 Worker tag가 배포 SHA와 다릅니다: ${observation.workerTag}`);
-    invariant(observation.workerVersion === targetVersion, `원시 HTTP ${method} 리디렉션 Worker version ID가 활성 버전과 다릅니다: ${observation.workerVersion}`);
   }
 
   return { httpUrl: httpUrl.href, httpsUrl: httpsUrl.href, observations };
+}
+
+function assertHttpEntryRedirectBehavior({ observations, httpsUrl }) {
+  for (const observation of observations) {
+    invariant(observation.status === 308, `원시 HTTP ${observation.method} 진입이 HTTPS 서버 리디렉션 대신 HTTP ${observation.status}를 반환했습니다.`);
+    invariant(observation.location === httpsUrl, `원시 HTTP ${observation.method} Location이 HTTPS 기준 URL의 경로 또는 쿼리를 보존하지 않았습니다: ${observation.location || "missing"}`);
+  }
+}
+
+function assertHttpEntryRedirect({ observations, httpsUrl, targetTag, targetVersion }) {
+  assertHttpEntryRedirectBehavior({ observations, httpsUrl });
+  for (const observation of observations) {
+    invariant(observation.workerTag === targetTag, `원시 HTTP ${observation.method} 리디렉션 Worker tag가 배포 SHA와 다릅니다: ${observation.workerTag}`);
+    invariant(observation.workerVersion === targetVersion, `원시 HTTP ${observation.method} 리디렉션 Worker version ID가 활성 버전과 다릅니다: ${observation.workerVersion}`);
+  }
+}
+
+function formatHttpRedirectObservations(observations) {
+  return JSON.stringify(observations.map(({ attempt, method, status, location, workerTag, workerVersion, error }) => ({
+    attempt,
+    method,
+    status,
+    location,
+    workerTag,
+    workerVersion,
+    error,
+  })));
+}
+
+export async function verifyHttpEntryRedirect({
+  baseUrl,
+  expectedTag,
+  expectedVersion,
+  fetchImpl = globalThis.fetch,
+  timeoutMs = HTTP_TIMEOUT_MS,
+}) {
+  const targetTag = expectedWorkerTag(expectedTag);
+  const targetVersion = expectedWorkerVersion(expectedVersion);
+  const result = await observeHttpEntryRedirect({ baseUrl, fetchImpl, timeoutMs });
+  try {
+    assertHttpEntryRedirect({ ...result, targetTag, targetVersion });
+  } catch (error) {
+    throw new Error(`${error.message}; observations=${formatHttpRedirectObservations(result.observations)}`, { cause: error });
+  }
+  return result;
+}
+
+export async function waitForHttpEntryRedirect({
+  baseUrl,
+  expectedTag,
+  expectedVersion,
+  fetchImpl = globalThis.fetch,
+  logger = console,
+  sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
+  attempts = VERSION_CONVERGENCE_ATTEMPTS,
+  intervalMs = VERSION_CONVERGENCE_INTERVAL_MS,
+  timeoutMs = HTTP_TIMEOUT_MS,
+}) {
+  const targetTag = expectedWorkerTag(expectedTag);
+  const targetVersion = expectedWorkerVersion(expectedVersion);
+  invariant(Number.isInteger(attempts) && attempts > 0, "HTTP 리디렉션 probe 횟수가 올바르지 않습니다.");
+  const observations = [];
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let result;
+    try {
+      result = await observeHttpEntryRedirect({ baseUrl, fetchImpl, timeoutMs, attempt });
+    } catch (error) {
+      observations.push(...(error.httpRedirectObservations || []));
+      throw new Error(`${error.message}; allObservations=${formatHttpRedirectObservations(observations)}`, { cause: error });
+    }
+    observations.push(...result.observations);
+    for (const observation of result.observations) {
+      if (observation.workerTag !== targetTag || observation.workerVersion !== targetVersion) continue;
+      try {
+        assertHttpEntryRedirectBehavior({ observations: [observation], httpsUrl: result.httpsUrl });
+      } catch (error) {
+        throw new Error(`${error.message}; observations=${formatHttpRedirectObservations(observations)}`, { cause: error });
+      }
+    }
+    const identityMatches = result.observations.every((observation) => (
+      observation.workerTag === targetTag && observation.workerVersion === targetVersion
+    ));
+    if (identityMatches) {
+      try {
+        assertHttpEntryRedirect({ ...result, targetTag, targetVersion });
+      } catch (error) {
+        throw new Error(`${error.message}; observations=${formatHttpRedirectObservations(observations)}`, { cause: error });
+      }
+      return { ...result, observations };
+    }
+    if (attempt < attempts) {
+      logger.info(`[production-render-canary] raw HTTP Worker identity 재수렴 대기: attempt=${attempt}`);
+      await sleep(intervalMs);
+    }
+  }
+  throw new Error(`원시 HTTP edge가 배포 Worker tag=${targetTag}, version=${targetVersion}로 수렴하지 않았습니다. observations=${formatHttpRedirectObservations(observations)}`);
 }
 
 export function createRenderScenarioConfigs(httpEntry) {
@@ -553,11 +648,12 @@ export async function runPostDeployRenderCanary({
     fetchImpl,
     logger,
   });
-  const redirectProbe = await verifyHttpEntryRedirect({
+  const redirectProbe = await waitForHttpEntryRedirect({
     baseUrl: createHttpRedirectProbeUrl(normalizedBaseUrl),
     expectedTag: targetWorkerTag,
     expectedVersion: targetWorkerVersion,
     fetchImpl,
+    logger,
   });
   logger.info(`[production-render-canary] raw HTTP redirect 통과: GET=308 HEAD=308 tag=${targetWorkerTag} version=${targetWorkerVersion}`);
   const httpEntry = createVerifiedHttpEntry(normalizedBaseUrl, redirectProbe);

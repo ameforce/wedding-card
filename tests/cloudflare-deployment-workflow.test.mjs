@@ -23,8 +23,13 @@ test("production CI deploys a Worker version without mutating Custom Domain rout
   assert.match(workflow, /node scripts\/cloudflare-artifact\.mjs create/);
   assert.equal((deployJob.match(/sha256sum --strict --check dist\/cloudflare-artifact\.sha256/g) || []).length, 2);
   assert.match(workflow, /npm run upload:cloudflare:version/);
+  assert.match(deployJob, /WRANGLER_OUTPUT_FILE_PATH: \$\{\{ runner\.temp \}\}\/wrangler-upload-/);
+  assert.match(deployJob, /cloudflare-deployment-state\.mjs record-upload/);
   assert.match(workflow, /--no-bundle/);
   assert.match(workflow, /npm run deploy:cloudflare:version/);
+  assert.match(deployJob, /--version-id "\$UPLOADED_WORKER_VERSION"/);
+  assert.doesNotMatch(deployJob, /--version-tag/);
+  assert.match(deployJob, /cloudflare-deployment-state\.mjs verify "\$GITHUB_SHA" "\$\{\{ steps\.upload-identity\.outputs\.uploaded_worker_version \}\}"/);
   assert.doesNotMatch(workflow, /npm run deploy:cloudflare:built/);
   assert.doesNotMatch(deployJob, /npm run build/);
   assert.doesNotMatch(deployJob, /^ {4}env:\s*\n\s+CLOUDFLARE_API_TOKEN:/m);
