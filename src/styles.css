@@ -832,13 +832,14 @@ body.intro-lock { overflow: hidden; }
   margin-top: calc(clamp(58px, 16vw, 92px) / -2);
   pointer-events: none;
   will-change: transform, opacity;
-  animation: intro-ribbon-fall .95s cubic-bezier(.55, 0, .8, .45) 2s both;
+  animation: intro-ribbon-motion 2.1s cubic-bezier(.4, .08, .55, .92) .9s both;
 }
-@keyframes intro-ribbon-fall {
+@keyframes intro-ribbon-motion {
   0% { transform: translateY(0) rotate(0); opacity: 1; }
-  30% { transform: translateY(10vh) rotate(-3.4deg); opacity: 1; }
-  64% { transform: translateY(34vh) rotate(4.2deg); opacity: .96; }
-  100% { transform: translateY(70vh) rotate(1.6deg); opacity: 0; }
+  26% { transform: translateY(9px) rotate(-.7deg); opacity: 1; }
+  58% { transform: translateY(20px) rotate(.5deg); opacity: 1; }
+  82% { transform: translateY(9vh) rotate(1.6deg); opacity: .96; }
+  100% { transform: translateY(70vh) rotate(2deg); opacity: 0; }
 }
 .intro-cover__band { display: block; width: 100%; height: 100%; background: url("/assets/design/intro-ribbon-band.webp") center / 100% 100% no-repeat; }
 .intro-cover__bow {
@@ -852,21 +853,21 @@ body.intro-lock { overflow: hidden; }
   filter: drop-shadow(0 3px 5px rgba(84, 72, 54, .22));
 }
 .intro-cover__bow-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; will-change: opacity, transform; }
-.intro-cover__bow-frame--0 { opacity: 1; animation: intro-bow-frame-0-out .3s ease 1s both; }
-.intro-cover__bow-frame--1 { transform: translate(2%, -3.3%); animation: intro-bow-frame-1 .8s linear 1s both; }
-.intro-cover__bow-frame--2 { transform: translate(5%, .8%); animation: intro-bow-frame-2 .85s linear 1.5s both; }
-.intro-cover__bow-frame--3 { transform: translate(5%, 18%); animation: intro-bow-frame-3-in .3s ease 2.05s both; }
+.intro-cover__bow-frame--0 { opacity: 1; animation: intro-bow-frame-0-out .15s ease 1.05s both; }
+.intro-cover__bow-frame--1 { transform: translate(2%, -2.6%); animation: intro-bow-frame-1 .5s linear 1.05s both; }
+.intro-cover__bow-frame--2 { transform: translate(5%, 1.4%); animation: intro-bow-frame-2 .55s linear 1.5s both; }
+.intro-cover__bow-frame--3 { transform: translate(5%, 14%); animation: intro-bow-frame-3-in .15s ease 2s both; }
 @keyframes intro-bow-frame-0-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes intro-bow-frame-1 {
   0% { opacity: 0; }
-  37% { opacity: 1; }
-  63% { opacity: 1; }
+  30% { opacity: 1; }
+  70% { opacity: 1; }
   100% { opacity: 0; }
 }
 @keyframes intro-bow-frame-2 {
   0% { opacity: 0; }
-  35% { opacity: 1; }
-  65% { opacity: 1; }
+  27% { opacity: 1; }
+  73% { opacity: 1; }
   100% { opacity: 0; }
 }
 @keyframes intro-bow-frame-3-in { from { opacity: 0; } to { opacity: 1; } }
