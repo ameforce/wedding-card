@@ -12,6 +12,24 @@ const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const sequenceManifest = JSON.parse(await readFile(join(projectRoot, "public/assets/design/ribbon-sequence/manifest.json"), "utf8"));
 const expectedF0Hash = createHash("sha256").update(await readFile(join(projectRoot, "public/assets/design/ribbon-sequence", sequenceManifest.frames[0]))).digest("hex");
 
+test("blocked early boot still permits runtime skip and restores invitation access", { timeout: 20_000 }, async (t) => {
+  const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); await server.close(); });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/src/intro/early-cover-boot.js*", (route) => route.abort());
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`, { waitUntil: "domcontentloaded" });
+  await page.locator(".pastel-intro-cover").waitFor({ state: "visible" });
+  assert.equal(await page.evaluate(() => window.__pastelIntroEarly), undefined);
+  await page.locator(".pastel-intro-cover").click({ position: { x: 30, y: 30 } });
+  await page.waitForFunction(() => !document.querySelector(".pastel-intro-cover") && !document.body.classList.contains("intro-lock"), null, { timeout: 3000 });
+  assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).overflow), "hidden");
+  assert.deepEqual(errors, []);
+});
+
 test("loading runtime cover CSS cannot recolor the still-visible initial paper", { timeout: 90_000 }, async (t) => {
   const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
   await server.listen();

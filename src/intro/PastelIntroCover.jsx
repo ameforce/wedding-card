@@ -169,7 +169,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
         if (!active) return;
         active = false;
         cancelRuntime();
-        if (reason !== "early" && early?.status !== "consumed") early.consume?.(reason);
+        if (reason !== "early" && early?.status !== "consumed") early?.consume?.(reason);
         document.body.classList.remove("intro-lock");
         finishRef.current?.();
       };
