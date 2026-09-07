@@ -145,7 +145,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
       let assetDeadline = performance.now() + ASSET_WAIT_MS;
       let playbackDeadline = 0;
       let preparationComplete = false;
-      let hiddenAt = null;
+      let hiddenAt = document.hidden ? performance.now() : null;
       let panelElapsed = 0;
       let panelLastPaint = 0;
       let panelDelayRemaining = 0;
@@ -382,7 +382,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
       document.addEventListener("pastel-intro-early-finish", onEarlyFinish);
       document.addEventListener("visibilitychange", onVisibilityChange);
       window.addEventListener("resize", onResize);
-      armAssetWatchdog();
+      if (!document.hidden) armAssetWatchdog();
       void start();
     }
     window.clearTimeout(session.disposeTimer);

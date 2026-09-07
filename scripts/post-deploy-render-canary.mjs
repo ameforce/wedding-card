@@ -107,24 +107,20 @@ export function createRibbonExpectation(manifest, { manifestHash, frameHashes } 
   });
 }
 
-function validateV2RibbonPlaybackEvidence(ribbonExpectation, intro) {
-  invariant(intro?.earlyPoster?.present === true && intro.earlyPoster.observedBeforeMain === true, "v2 first HTML tied poster 증거가 없습니다.");
-  invariant(intro.earlyPoster.sha256 === ribbonExpectation.poster.sha256, "v2 first HTML poster SHA-256이 build F0와 다릅니다.");
-  invariant(JSON.stringify(intro.panelConfig?.panelCurve) === JSON.stringify(ribbonExpectation.panelCurve), "v2 measured per-side panel curve config가 runtime에 로드되지 않았습니다.");
-  invariant(Number.isFinite(intro.handoff?.claimedAt) && Number.isFinite(intro.handoff?.firstCanvasDrawAt) && intro.handoff.claimedAt <= intro.handoff.firstCanvasDrawAt && intro.handoff.lateMounts === 0, "v2 early cover hand-off 또는 late mount 증거가 올바르지 않습니다.");
-  const lastVisible = intro.draws.at(-2);
-  invariant(lastVisible?.alphaPixels > 0, "v2 transparent terminal 전 previous visible frame이 없습니다.");
-  invariant(Number.isFinite(lastVisible.alphaViewportTop) && Number.isFinite(lastVisible.viewportHeight) && lastVisible.alphaViewportTop >= lastVisible.viewportHeight + 16, "v2 ribbon root가 transparent terminal 전에 viewport 밖 16px로 나가지 않았습니다.");
+function validateCoverPlaybackEvidence(ribbonExpectation, intro) {
+  invariant(intro?.earlyPoster?.present === true && intro.earlyPoster.observedBeforeMain === true, "first HTML tied poster 증거가 없습니다.");
+  invariant(intro.earlyPoster.sha256 === ribbonExpectation.frameHashes[ribbonExpectation.frames[0]], "first HTML poster SHA-256이 build F0와 다릅니다.");
+  invariant(Number.isFinite(intro.handoff?.claimedAt) && Number.isFinite(intro.handoff?.firstCanvasDrawAt) && intro.handoff.firstCanvasDrawAt <= intro.handoff.claimedAt && intro.handoff.lateMounts === 0, "early cover hand-off 또는 late mount 증거가 올바르지 않습니다.");
   const panelSample = intro.panelSamples?.find((sample) => (
     Number(sample.leftProgress) >= 0.2 && Number(sample.leftProgress) <= 0.8
       && Number(sample.rightProgress) >= 0.2 && Number(sample.rightProgress) <= 0.8
   ));
-  invariant(panelSample && panelSample.leftProgress !== panelSample.rightProgress, "v2 measured per-side panel curve 또는 안정적인 mid-open 표본이 없습니다.");
+  invariant(panelSample, "안정적인 mid-open paper 표본이 없습니다.");
   const matrix3d = (transform, side) => {
     const match = typeof transform === "string" && transform.match(/^matrix3d\((.+)\)$/u);
-    invariant(match, `v2 ${side} paper가 rotateY computed transform을 내놓지 않았습니다.`);
+    invariant(match, `${side} paper가 rotateY computed transform을 내놓지 않았습니다.`);
     const values = match[1].split(",").map((value) => Number(value.trim()));
-    invariant(values.length === 16 && values.every(Number.isFinite) && Math.abs(values[2]) > 0.05 && Math.abs(values[8]) > 0.05, `v2 ${side} paper가 out-of-plane hinge가 아닙니다.`);
+    invariant(values.length === 16 && values.every(Number.isFinite) && Math.abs(values[2]) > 0.05 && Math.abs(values[8]) > 0.05, `${side} paper가 out-of-plane hinge가 아닙니다.`);
   };
   matrix3d(panelSample.leftTransform, "left");
   matrix3d(panelSample.rightTransform, "right");
@@ -132,13 +128,25 @@ function validateV2RibbonPlaybackEvidence(ribbonExpectation, intro) {
     Number.isFinite(panelSample.leftInnerEdge) && Number.isFinite(panelSample.rightInnerEdge)
       && Number.isFinite(panelSample.leftOuterEdge) && Number.isFinite(panelSample.rightOuterEdge)
       && Number.isFinite(panelSample.leftWidth) && Number.isFinite(panelSample.rightWidth),
-    "v2 mid-open paper edge 측정값이 없습니다.",
+    "mid-open paper edge 측정값이 없습니다.",
   );
   const expectedLeftInnerEdge = panelSample.leftOuterEdge + panelSample.leftWidth * (1 - panelSample.leftProgress);
   const expectedRightInnerEdge = panelSample.rightOuterEdge - panelSample.rightWidth * (1 - panelSample.rightProgress);
-  invariant(Math.abs(panelSample.leftInnerEdge - expectedLeftInnerEdge) <= 1 && Math.abs(panelSample.rightInnerEdge - expectedRightInnerEdge) <= 1, "v2 hinged paper inner edge가 measured curve에서 1px를 넘게 벗어났습니다.");
-  invariant(intro.progressiveHero?.some((sample) => sample.coverPresent === true && sample.rootTransparent === true && Number(sample.opacity) > 0), "v2 transparent root cover 아래 hero가 progressively revealed되었다는 증거가 없습니다.");
-  invariant(intro.visibility?.hiddenPause === true && intro.visibility.noProgressWhileHidden === true && intro.visibility.resumed === true, "v2 숨김/재개 presentation clock 증거가 없습니다.");
+  invariant(Math.abs(panelSample.leftInnerEdge - expectedLeftInnerEdge) <= 1 && Math.abs(panelSample.rightInnerEdge - expectedRightInnerEdge) <= 1, "hinged paper inner edge가 진행률에서 1px를 넘게 벗어났습니다.");
+  invariant(intro.progressiveHero?.some((sample) => sample.coverPresent === true && sample.rootTransparent === true && Number(sample.opacity) > 0), "transparent root cover 아래 hero가 progressively revealed되었다는 증거가 없습니다.");
+  invariant(intro.visibility?.hiddenPause === true && intro.visibility.noProgressWhileHidden === true && intro.visibility.resumed === true, "숨김/재개 presentation clock 증거가 없습니다.");
+}
+
+function validateV2RibbonPlaybackEvidence(ribbonExpectation, intro) {
+  invariant(JSON.stringify(intro.panelConfig?.panelCurve) === JSON.stringify(ribbonExpectation.panelCurve), "v2 measured per-side panel curve config가 runtime에 로드되지 않았습니다.");
+  const lastVisible = intro.draws.at(-2);
+  invariant(lastVisible?.alphaPixels > 0, "v2 transparent terminal 전 previous visible frame이 없습니다.");
+  invariant(Number.isFinite(lastVisible.alphaViewportTop) && Number.isFinite(lastVisible.viewportHeight) && lastVisible.alphaViewportTop >= lastVisible.viewportHeight + 16, "v2 ribbon root가 transparent terminal 전에 viewport 밖 16px로 나가지 않았습니다.");
+  invariant(intro.panelSamples?.some((sample) => (
+    Number(sample.leftProgress) >= 0.2 && Number(sample.leftProgress) <= 0.8
+      && Number(sample.rightProgress) >= 0.2 && Number(sample.rightProgress) <= 0.8
+      && sample.leftProgress !== sample.rightProgress
+  )), "v2 measured per-side panel curve 또는 안정적인 mid-open 표본이 없습니다.");
 }
 
 export function validateRibbonPlaybackEvidence({ baseUrl, ribbonExpectation, intro, ribbonResponses }) {
@@ -154,6 +162,7 @@ export function validateRibbonPlaybackEvidence({ baseUrl, ribbonExpectation, int
   invariant(intro.coverPresent === false && intro.bodyLocked === false, "최종 intro cover 또는 body scroll lock이 남아 있습니다.");
   invariant(intro.finalHero?.sampledAfterCoverRemoved === true, "cover 제거 뒤 최종 hero computed-style sample이 없습니다.");
   invariant(Number(intro.finalHero.opacity) > 0 && intro.finalHero.display !== "none" && intro.finalHero.visibility === "visible", "cover 제거 뒤 hero가 표시 상태가 아닙니다.");
+  validateCoverPlaybackEvidence(ribbonExpectation, intro);
   if (ribbonExpectation.schemaVersion === 2) validateV2RibbonPlaybackEvidence(ribbonExpectation, intro);
 
   const expectedAssets = new Map([
@@ -911,7 +920,7 @@ export async function collectScenario({
       const image = document.querySelector(".pastel-hero-photo.is-image-ready img");
       return Boolean(root && image?.complete && image.naturalWidth > 0);
     }, null, { timeout: RENDER_TIMEOUT_MS });
-    if (ribbonExpectation?.schemaVersion === 2) {
+    if (ribbonExpectation) {
       await page.waitForFunction((frameCount) => {
         const intro = window.__weddingIntroEvidence;
         return intro?.draws?.length >= Math.min(3, frameCount - 2) && intro.draws.length < frameCount - 1;

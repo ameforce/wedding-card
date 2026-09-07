@@ -15,7 +15,7 @@
 
   document.documentElement.classList.add("early-intro-enabled");
   var timeoutId = 0;
-  var hiddenAt = null;
+  var hiddenAt = document.hidden ? performance.now() : null;
   function armDeadline() {
     window.clearTimeout(timeoutId);
     timeoutId = window.setTimeout(function () { consume("timeout"); }, Math.max(0, state.deadlineAt - performance.now()));
@@ -58,7 +58,7 @@
     }
     armDeadline();
   });
-  armDeadline();
+  if (!document.hidden) armDeadline();
   document.addEventListener("pointerdown", function (event) {
     if (event.target?.closest?.("#pastel-intro-early-poster")) consume("skip");
   }, { capture: true });
