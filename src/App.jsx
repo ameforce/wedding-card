@@ -992,7 +992,7 @@ function WeddingApp() {
     pastel: getInvitationPhotos(runtime.content, "pastel"),
   }), [runtime.content]);
   const [toast, setToast] = useState({ message: "", tone: "success" });
-  const [introFinished, setIntroFinished] = useState(false);
+  const [introFinished, setIntroFinished] = useState(() => window.__pastelIntroEarly?.status === "consumed");
   const captureMode = useMemo(() => new URLSearchParams(window.location.search).get("capture") === "1", []);
   useEffect(() => {
     if (runtime.status !== "ready") return;
@@ -1004,6 +1004,12 @@ function WeddingApp() {
     const query = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
   }, [runtime.content.couple.bride, runtime.content.couple.groom, runtime.status, variant]);
+
+  useEffect(() => {
+    const finishEarlyIntro = () => setIntroFinished(true);
+    document.addEventListener("pastel-intro-early-finish", finishEarlyIntro);
+    return () => document.removeEventListener("pastel-intro-early-finish", finishEarlyIntro);
+  }, []);
 
   const notify = (message, tone = "success") => {
     setToast({ message, tone });
@@ -1023,7 +1029,7 @@ function WeddingApp() {
       <div className="invitation-stage">
         {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
       </div>
-      {variant === "pastel" && !captureMode && !introFinished && (
+      {variant === "pastel" && !captureMode && !introFinished && window.__pastelIntroEarly?.status !== "consumed" && (
         <PastelIntroCover onFinish={() => setIntroFinished(true)} />
       )}
       {!captureMode && <MusicControl notify={notify} />}

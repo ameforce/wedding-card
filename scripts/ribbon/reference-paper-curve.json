@@ -1,0 +1,1027 @@
+{
+  "schemaVersion": 1,
+  "kind": "reference-paper-measurement",
+  "sourceSize": [
+    1080,
+    1350
+  ],
+  "measurementSize": [
+    540,
+    675
+  ],
+  "sourceFps": 30,
+  "startSeconds": 2.4,
+  "endSeconds": 3.8,
+  "panelDurationMs": 1400,
+  "method": "median vertical RGB edge, bounded monotonic tracking; initial seam excluded",
+  "observations": [
+    {
+      "sourceFrame": 72,
+      "timeSeconds": 2.4,
+      "leftX": 267,
+      "rightX": 272,
+      "edgeStrength": [
+        163.398,
+        157.617
+      ],
+      "imageSha256": "89c413a9d95512bccd74a784500013502ebcf26979d7531419bdd0a62e23a267"
+    },
+    {
+      "sourceFrame": 73,
+      "timeSeconds": 2.433333,
+      "leftX": 266,
+      "rightX": 273,
+      "edgeStrength": [
+        153.577,
+        203.806
+      ],
+      "imageSha256": "95366acd8a58eaba40e7a561a13a2e0a4a79d896e199321c2fb81afc8c9fe099"
+    },
+    {
+      "sourceFrame": 74,
+      "timeSeconds": 2.466667,
+      "leftX": 266,
+      "rightX": 273,
+      "edgeStrength": [
+        153.0,
+        203.806
+      ],
+      "imageSha256": "4505553c73b6b190f126c9b4f99117189ab7b0c8639acd3f27d98acb3db52cf9"
+    },
+    {
+      "sourceFrame": 75,
+      "timeSeconds": 2.5,
+      "leftX": 265,
+      "rightX": 274,
+      "edgeStrength": [
+        171.473,
+        161.081
+      ],
+      "imageSha256": "5abf8800edae3a1bc08a79d2a0e41d5f7d5b59ae3e4df758562613f668a81e2d"
+    },
+    {
+      "sourceFrame": 76,
+      "timeSeconds": 2.533333,
+      "leftX": 263,
+      "rightX": 276,
+      "edgeStrength": [
+        143.781,
+        138.564
+      ],
+      "imageSha256": "b78751d5b91f13554c728e1ad5b63217c215ebfe6ffe3986cb0d12329d30b278"
+    },
+    {
+      "sourceFrame": 77,
+      "timeSeconds": 2.566667,
+      "leftX": 263,
+      "rightX": 276,
+      "edgeStrength": [
+        144.779,
+        138.564
+      ],
+      "imageSha256": "55df522e4817d17fd5dca017fcfee07936eed5f910f2028e408f35cd07fb563b"
+    },
+    {
+      "sourceFrame": 78,
+      "timeSeconds": 2.6,
+      "leftX": 259,
+      "rightX": 278,
+      "edgeStrength": [
+        137.441,
+        171.473
+      ],
+      "imageSha256": "083fe2fa2a6e712ed011ef9fd066d8a8b6176d4f755e1a2b6b90578e259030eb"
+    },
+    {
+      "sourceFrame": 79,
+      "timeSeconds": 2.633333,
+      "leftX": 256,
+      "rightX": 281,
+      "edgeStrength": [
+        135.1,
+        189.436
+      ],
+      "imageSha256": "837165b46fc5f0cc963657d7d68c7f2310bd4066ad4124f9985dea7f01a48ec4"
+    },
+    {
+      "sourceFrame": 80,
+      "timeSeconds": 2.666667,
+      "leftX": 256,
+      "rightX": 281,
+      "edgeStrength": [
+        135.1,
+        189.436
+      ],
+      "imageSha256": "d9d3da804e7c70fc0061f51613f78534472facb5b05366522e35d05c858913f6"
+    },
+    {
+      "sourceFrame": 81,
+      "timeSeconds": 2.7,
+      "leftX": 249,
+      "rightX": 286,
+      "edgeStrength": [
+        136.832,
+        161.081
+      ],
+      "imageSha256": "68c8b57f83144268cf787ce762c6e5c6dbb9a8bc07d7ff324747a7ced4d8bac0"
+    },
+    {
+      "sourceFrame": 82,
+      "timeSeconds": 2.733333,
+      "leftX": 249,
+      "rightX": 286,
+      "edgeStrength": [
+        136.832,
+        161.081
+      ],
+      "imageSha256": "a8164e99db534142234060a27dd29d31aef551ad4851fb15450167b37cafd684"
+    },
+    {
+      "sourceFrame": 83,
+      "timeSeconds": 2.766667,
+      "leftX": 249,
+      "rightX": 286,
+      "edgeStrength": [
+        136.832,
+        161.081
+      ],
+      "imageSha256": "03c3710f229054a50881f1749b4fdbc7d87667492879a3826a902bdb116a2025"
+    },
+    {
+      "sourceFrame": 84,
+      "timeSeconds": 2.8,
+      "leftX": 237,
+      "rightX": 296,
+      "edgeStrength": [
+        124.708,
+        125.288
+      ],
+      "imageSha256": "ad7c4d2ce673ee914d4ce732037f49a75d9c80c09e1ca8255a3bfa8240c788f4"
+    },
+    {
+      "sourceFrame": 85,
+      "timeSeconds": 2.833333,
+      "leftX": 231,
+      "rightX": 300,
+      "edgeStrength": [
+        110.914,
+        135.1
+      ],
+      "imageSha256": "bd4677269828f07b56d2bf009b909a501b140e9342c07e8d5c569b0c62c10f78"
+    },
+    {
+      "sourceFrame": 86,
+      "timeSeconds": 2.866667,
+      "leftX": 231,
+      "rightX": 300,
+      "edgeStrength": [
+        110.968,
+        135.1
+      ],
+      "imageSha256": "ab11b7223e90cb9a61e40235cf74b3de3182ee68501e23ae6e58a3e53f46b86b"
+    },
+    {
+      "sourceFrame": 87,
+      "timeSeconds": 2.9,
+      "leftX": 213,
+      "rightX": 317,
+      "edgeStrength": [
+        121.252,
+        99.925
+      ],
+      "imageSha256": "bb8d75c537f38ed4490bf9af72c4d3e3c73888ec7527debccbb8ef0f372750dd"
+    },
+    {
+      "sourceFrame": 88,
+      "timeSeconds": 2.933333,
+      "leftX": 207,
+      "rightX": 322,
+      "edgeStrength": [
+        115.525,
+        114.896
+      ],
+      "imageSha256": "5ce2abc985637c18d2bcb6219506a2608d016d5cc9ff4d3a8d20fef6619150d8"
+    },
+    {
+      "sourceFrame": 89,
+      "timeSeconds": 2.966667,
+      "leftX": 207,
+      "rightX": 322,
+      "edgeStrength": [
+        115.49,
+        114.896
+      ],
+      "imageSha256": "e39d3a07515140f1460bcb800b5a433e35a9525fda3e0edf125b60a682fba6e0"
+    },
+    {
+      "sourceFrame": 90,
+      "timeSeconds": 3.0,
+      "leftX": 182,
+      "rightX": 343,
+      "edgeStrength": [
+        112.583,
+        114.429
+      ],
+      "imageSha256": "8d31810f34061520e52d98ad0e26beeb855c35b6174eb06b6ce5feb2711d4b0e"
+    },
+    {
+      "sourceFrame": 91,
+      "timeSeconds": 3.033333,
+      "leftX": 182,
+      "rightX": 343,
+      "edgeStrength": [
+        110.851,
+        114.896
+      ],
+      "imageSha256": "79f4cfd33a9369d37899a861a6b1be146dc0ee7ebf4725c88e61acef2a47977a"
+    },
+    {
+      "sourceFrame": 92,
+      "timeSeconds": 3.066667,
+      "leftX": 182,
+      "rightX": 343,
+      "edgeStrength": [
+        109.119,
+        114.896
+      ],
+      "imageSha256": "de6a10fefc063c06350e046126b23287dc0ee34280ee44f7b1c7a89cf96d0e49"
+    },
+    {
+      "sourceFrame": 93,
+      "timeSeconds": 3.1,
+      "leftX": 166,
+      "rightX": 359,
+      "edgeStrength": [
+        105.081,
+        86.052
+      ],
+      "imageSha256": "58e26ee589b82d04fa3e69e747cf58ce00d806721d77300f16ddea1c143ad800"
+    },
+    {
+      "sourceFrame": 94,
+      "timeSeconds": 3.133333,
+      "leftX": 158,
+      "rightX": 367,
+      "edgeStrength": [
+        106.813,
+        83.15
+      ],
+      "imageSha256": "d8d27074a7c478f27ddd2450992b5f99fa129a465d36f3a193aea2deaa69e5ab"
+    },
+    {
+      "sourceFrame": 95,
+      "timeSeconds": 3.166667,
+      "leftX": 158,
+      "rightX": 367,
+      "edgeStrength": [
+        106.813,
+        82.577
+      ],
+      "imageSha256": "9798943e2520aa7b4709399b19e2b86bc8731fc7e78bfe4a8d104033b9e901d4"
+    },
+    {
+      "sourceFrame": 96,
+      "timeSeconds": 3.2,
+      "leftX": 122,
+      "rightX": 397,
+      "edgeStrength": [
+        84.87,
+        84.888
+      ],
+      "imageSha256": "b13ec16718c50dff296c802c6c4f0217cfb827b8b124fb009c4369cbdcf465a9"
+    },
+    {
+      "sourceFrame": 97,
+      "timeSeconds": 3.233333,
+      "leftX": 113,
+      "rightX": 406,
+      "edgeStrength": [
+        83.654,
+        91.225
+      ],
+      "imageSha256": "8af23a4cf702443695e6b7ffa4e2f8acc5efce3f2fe7af2e0279fb1868c3f065"
+    },
+    {
+      "sourceFrame": 98,
+      "timeSeconds": 3.266667,
+      "leftX": 113,
+      "rightX": 406,
+      "edgeStrength": [
+        83.654,
+        91.225
+      ],
+      "imageSha256": "4d4eb475de0bc1b6b4ae78939073c32ae7593d63507f6b7926edfde5f53d3960"
+    },
+    {
+      "sourceFrame": 99,
+      "timeSeconds": 3.3,
+      "leftX": 83,
+      "rightX": 432,
+      "edgeStrength": [
+        90.41,
+        84.87
+      ],
+      "imageSha256": "1614e395e12fab7757669e5c5c07cde037fa941235ad214e2ebb7eeb6e07efa4"
+    },
+    {
+      "sourceFrame": 100,
+      "timeSeconds": 3.333333,
+      "leftX": 73,
+      "rightX": 443,
+      "edgeStrength": [
+        93.574,
+        95.336
+      ],
+      "imageSha256": "0dec7948930e56505d73c867d6fe4304ae2690cde32eeb1f604440b8a4ae9c00"
+    },
+    {
+      "sourceFrame": 101,
+      "timeSeconds": 3.366667,
+      "leftX": 73,
+      "rightX": 443,
+      "edgeStrength": [
+        91.897,
+        94.71
+      ],
+      "imageSha256": "232c3a3bb30a20124634ee2544aae0171066afd2d3e26d3087855ea2405edd65"
+    },
+    {
+      "sourceFrame": 102,
+      "timeSeconds": 3.4,
+      "leftX": 32,
+      "rightX": 481,
+      "edgeStrength": [
+        93.531,
+        88.916
+      ],
+      "imageSha256": "72fa042eebddd2733aac643dfe21e32bbc63b33c5f8ce5c2c560460cbfd665b5"
+    },
+    {
+      "sourceFrame": 103,
+      "timeSeconds": 3.433333,
+      "leftX": 22,
+      "rightX": 490,
+      "edgeStrength": [
+        87.184,
+        86.603
+      ],
+      "imageSha256": "8f9d6d4de14b00f10956c504c444b61d98109f40fc2e42b3d08c50e3a2ada68c"
+    },
+    {
+      "sourceFrame": 104,
+      "timeSeconds": 3.466667,
+      "leftX": 22,
+      "rightX": 490,
+      "edgeStrength": [
+        86.603,
+        86.603
+      ],
+      "imageSha256": "173048d9a9885dc20cf57534b07302acd829d91a4320fc499d07cb7983f08ca3"
+    },
+    {
+      "sourceFrame": 105,
+      "timeSeconds": 3.5,
+      "leftX": 0,
+      "rightX": 518,
+      "edgeStrength": [
+        10.392,
+        84.87
+      ],
+      "imageSha256": "d1db6baf8a295eeb49dab033178a1a754e5ab1d6a0ed87ed493cb81ee5857b6a"
+    },
+    {
+      "sourceFrame": 106,
+      "timeSeconds": 3.533333,
+      "leftX": 0,
+      "rightX": 536,
+      "edgeStrength": [
+        null,
+        80.256
+      ],
+      "imageSha256": "4ceeb4cbe525a03f7d01322c17dd1cfa2e94d843bf8bfd283c7e707719ac1006"
+    },
+    {
+      "sourceFrame": 107,
+      "timeSeconds": 3.566667,
+      "leftX": 0,
+      "rightX": 536,
+      "edgeStrength": [
+        null,
+        80.256
+      ],
+      "imageSha256": "09338a5e9159cc89c270b5bc1e6ad3f7347cd857b9e97779a4df9cbf19b7175b"
+    },
+    {
+      "sourceFrame": 108,
+      "timeSeconds": 3.6,
+      "leftX": 0,
+      "rightX": 540,
+      "edgeStrength": [
+        null,
+        9.22
+      ],
+      "imageSha256": "bb91ec99d7600245e203c2c61883055ef184ebe7d3ac7702ac92c9437bf9bd9c"
+    },
+    {
+      "sourceFrame": 109,
+      "timeSeconds": 3.633333,
+      "leftX": 0,
+      "rightX": 540,
+      "edgeStrength": [
+        null,
+        null
+      ],
+      "imageSha256": "33dcc7910003ab5a3d1deb66bee00381439efc4ef84443560c4f11dab906810a"
+    },
+    {
+      "sourceFrame": 110,
+      "timeSeconds": 3.666667,
+      "leftX": 0,
+      "rightX": 540,
+      "edgeStrength": [
+        null,
+        null
+      ],
+      "imageSha256": "1c1b044f6de5651c0fdfe41ee7b4fa013462238e236470fecc7503000a5a0060"
+    },
+    {
+      "sourceFrame": 111,
+      "timeSeconds": 3.7,
+      "leftX": 0,
+      "rightX": 540,
+      "edgeStrength": [
+        null,
+        null
+      ],
+      "imageSha256": "6028aecd841f779ade7c8807494c7ce47159d3c81d67eb56e36d7125f1bfe56e"
+    },
+    {
+      "sourceFrame": 112,
+      "timeSeconds": 3.733333,
+      "leftX": 0,
+      "rightX": 540,
+      "edgeStrength": [
+        null,
+        null
+      ],
+      "imageSha256": "da733b2d89102a78a0da07d1b458ca4811342a1cd89a001ecb198a1030def316"
+    },
+    {
+      "sourceFrame": 113,
+      "timeSeconds": 3.766667,
+      "leftX": 0,
+      "rightX": 540,
+      "edgeStrength": [
+        null,
+        null
+      ],
+      "imageSha256": "b9456a3858edc5b9328132f4739fd2ed39864e3ddacf8ea0de3d45fcfa389b2e"
+    },
+    {
+      "sourceFrame": 114,
+      "timeSeconds": 3.8,
+      "leftX": 0,
+      "rightX": 540,
+      "edgeStrength": [
+        null,
+        null
+      ],
+      "imageSha256": "42703fb5a08c517dd8109340d95ff04a77d5d620a101fe60a15bb129040915d1"
+    }
+  ],
+  "observedPanelCurve": [
+    {
+      "offset": 0.0,
+      "progress": 0.0,
+      "leftProgress": 0.0,
+      "rightProgress": 0.0
+    },
+    {
+      "offset": 0.02380952,
+      "progress": 0.00373833,
+      "leftProgress": 0.00374532,
+      "rightProgress": 0.00373134
+    },
+    {
+      "offset": 0.04761905,
+      "progress": 0.00373833,
+      "leftProgress": 0.00374532,
+      "rightProgress": 0.00373134
+    },
+    {
+      "offset": 0.07142857,
+      "progress": 0.00747666,
+      "leftProgress": 0.00749064,
+      "rightProgress": 0.00746269
+    },
+    {
+      "offset": 0.0952381,
+      "progress": 0.01495332,
+      "leftProgress": 0.01498127,
+      "rightProgress": 0.01492537
+    },
+    {
+      "offset": 0.11904762,
+      "progress": 0.01495332,
+      "leftProgress": 0.01498127,
+      "rightProgress": 0.01492537
+    },
+    {
+      "offset": 0.14285714,
+      "progress": 0.0261753,
+      "leftProgress": 0.02996255,
+      "rightProgress": 0.02238806
+    },
+    {
+      "offset": 0.16666667,
+      "progress": 0.0373903,
+      "leftProgress": 0.0411985,
+      "rightProgress": 0.03358209
+    },
+    {
+      "offset": 0.19047619,
+      "progress": 0.0373903,
+      "leftProgress": 0.0411985,
+      "rightProgress": 0.03358209
+    },
+    {
+      "offset": 0.21428571,
+      "progress": 0.05982727,
+      "leftProgress": 0.06741573,
+      "rightProgress": 0.05223881
+    },
+    {
+      "offset": 0.23809524,
+      "progress": 0.05982727,
+      "leftProgress": 0.06741573,
+      "rightProgress": 0.05223881
+    },
+    {
+      "offset": 0.26190476,
+      "progress": 0.05982727,
+      "leftProgress": 0.06741573,
+      "rightProgress": 0.05223881
+    },
+    {
+      "offset": 0.28571429,
+      "progress": 0.10095589,
+      "leftProgress": 0.11235955,
+      "rightProgress": 0.08955224
+    },
+    {
+      "offset": 0.30952381,
+      "progress": 0.11965454,
+      "leftProgress": 0.13483146,
+      "rightProgress": 0.10447761
+    },
+    {
+      "offset": 0.33333333,
+      "progress": 0.11965454,
+      "leftProgress": 0.13483146,
+      "rightProgress": 0.10447761
+    },
+    {
+      "offset": 0.35714286,
+      "progress": 0.18507882,
+      "leftProgress": 0.20224719,
+      "rightProgress": 0.16791045
+    },
+    {
+      "offset": 0.38095238,
+      "progress": 0.20564313,
+      "leftProgress": 0.2247191,
+      "rightProgress": 0.18656716
+    },
+    {
+      "offset": 0.4047619,
+      "progress": 0.20564313,
+      "leftProgress": 0.2247191,
+      "rightProgress": 0.18656716
+    },
+    {
+      "offset": 0.42857143,
+      "progress": 0.29163872,
+      "leftProgress": 0.31835206,
+      "rightProgress": 0.26492537
+    },
+    {
+      "offset": 0.45238095,
+      "progress": 0.29163872,
+      "leftProgress": 0.31835206,
+      "rightProgress": 0.26492537
+    },
+    {
+      "offset": 0.47619048,
+      "progress": 0.29163872,
+      "leftProgress": 0.31835206,
+      "rightProgress": 0.26492537
+    },
+    {
+      "offset": 0.5,
+      "progress": 0.35145201,
+      "leftProgress": 0.37827715,
+      "rightProgress": 0.32462687
+    },
+    {
+      "offset": 0.52380952,
+      "progress": 0.38135866,
+      "leftProgress": 0.4082397,
+      "rightProgress": 0.35447761
+    },
+    {
+      "offset": 0.54761905,
+      "progress": 0.38135866,
+      "leftProgress": 0.4082397,
+      "rightProgress": 0.35447761
+    },
+    {
+      "offset": 0.57142857,
+      "progress": 0.50474454,
+      "leftProgress": 0.54307116,
+      "rightProgress": 0.46641791
+    },
+    {
+      "offset": 0.5952381,
+      "progress": 0.53838951,
+      "leftProgress": 0.57677903,
+      "rightProgress": 0.5
+    },
+    {
+      "offset": 0.61904762,
+      "progress": 0.53838951,
+      "leftProgress": 0.57677903,
+      "rightProgress": 0.5
+    },
+    {
+      "offset": 0.64285714,
+      "progress": 0.64307675,
+      "leftProgress": 0.68913858,
+      "rightProgress": 0.59701493
+    },
+    {
+      "offset": 0.66666667,
+      "progress": 0.68232573,
+      "leftProgress": 0.72659176,
+      "rightProgress": 0.6380597
+    },
+    {
+      "offset": 0.69047619,
+      "progress": 0.68232573,
+      "leftProgress": 0.72659176,
+      "rightProgress": 0.6380597
+    },
+    {
+      "offset": 0.71428571,
+      "progress": 0.83000028,
+      "leftProgress": 0.88014981,
+      "rightProgress": 0.77985075
+    },
+    {
+      "offset": 0.73809524,
+      "progress": 0.86551792,
+      "leftProgress": 0.917603,
+      "rightProgress": 0.81343284
+    },
+    {
+      "offset": 0.76190476,
+      "progress": 0.86551792,
+      "leftProgress": 0.917603,
+      "rightProgress": 0.81343284
+    },
+    {
+      "offset": 0.78571429,
+      "progress": 0.95895522,
+      "leftProgress": 1.0,
+      "rightProgress": 0.91791045
+    },
+    {
+      "offset": 0.80952381,
+      "progress": 0.99253731,
+      "leftProgress": 1.0,
+      "rightProgress": 0.98507463
+    },
+    {
+      "offset": 0.83333333,
+      "progress": 0.99253731,
+      "leftProgress": 1.0,
+      "rightProgress": 0.98507463
+    },
+    {
+      "offset": 0.85714286,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.88095238,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.9047619,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.92857143,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.95238095,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.97619048,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 1.0,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    }
+  ],
+  "fit": {
+    "leftProgress": {
+      "durationSeconds": 1.086,
+      "quadraticWeight": 0.7561043684,
+      "rmsErrorMeasurementPx": 5.6346,
+      "maxErrorMeasurementPx": 14.6855
+    },
+    "rightProgress": {
+      "durationSeconds": 1.14,
+      "quadraticWeight": 0.621894939,
+      "rmsErrorMeasurementPx": 4.972,
+      "maxErrorMeasurementPx": 12.4504
+    }
+  },
+  "panelCurve": [
+    {
+      "offset": 0.0,
+      "progress": 0.0,
+      "leftProgress": 0.0,
+      "rightProgress": 0.0
+    },
+    {
+      "offset": 0.02380952,
+      "progress": 0.00063027,
+      "leftProgress": 0.00071938,
+      "rightProgress": 0.00054115
+    },
+    {
+      "offset": 0.04761905,
+      "progress": 0.00255407,
+      "leftProgress": 0.00290573,
+      "rightProgress": 0.00220241
+    },
+    {
+      "offset": 0.07142857,
+      "progress": 0.00582093,
+      "leftProgress": 0.00660137,
+      "rightProgress": 0.00504049
+    },
+    {
+      "offset": 0.0952381,
+      "progress": 0.01048036,
+      "leftProgress": 0.0118486,
+      "rightProgress": 0.00911211
+    },
+    {
+      "offset": 0.11904762,
+      "progress": 0.01658187,
+      "leftProgress": 0.01868976,
+      "rightProgress": 0.01447397
+    },
+    {
+      "offset": 0.14285714,
+      "progress": 0.02417498,
+      "leftProgress": 0.02716715,
+      "rightProgress": 0.0211828
+    },
+    {
+      "offset": 0.16666667,
+      "progress": 0.03330919,
+      "leftProgress": 0.03732309,
+      "rightProgress": 0.0292953
+    },
+    {
+      "offset": 0.19047619,
+      "progress": 0.04403405,
+      "leftProgress": 0.04919989,
+      "rightProgress": 0.0388682
+    },
+    {
+      "offset": 0.21428571,
+      "progress": 0.05639903,
+      "leftProgress": 0.06283987,
+      "rightProgress": 0.04995819
+    },
+    {
+      "offset": 0.23809524,
+      "progress": 0.07045367,
+      "leftProgress": 0.07828535,
+      "rightProgress": 0.062622
+    },
+    {
+      "offset": 0.26190476,
+      "progress": 0.0862475,
+      "leftProgress": 0.09557865,
+      "rightProgress": 0.07691634
+    },
+    {
+      "offset": 0.28571429,
+      "progress": 0.10382999,
+      "leftProgress": 0.11476207,
+      "rightProgress": 0.09289792
+    },
+    {
+      "offset": 0.30952381,
+      "progress": 0.1232507,
+      "leftProgress": 0.13587793,
+      "rightProgress": 0.11062346
+    },
+    {
+      "offset": 0.33333333,
+      "progress": 0.14455911,
+      "leftProgress": 0.15896855,
+      "rightProgress": 0.13014967
+    },
+    {
+      "offset": 0.35714286,
+      "progress": 0.16780475,
+      "leftProgress": 0.18407625,
+      "rightProgress": 0.15153326
+    },
+    {
+      "offset": 0.38095238,
+      "progress": 0.19303714,
+      "leftProgress": 0.21124334,
+      "rightProgress": 0.17483094
+    },
+    {
+      "offset": 0.4047619,
+      "progress": 0.22030578,
+      "leftProgress": 0.24051213,
+      "rightProgress": 0.20009944
+    },
+    {
+      "offset": 0.42857143,
+      "progress": 0.2496602,
+      "leftProgress": 0.27192495,
+      "rightProgress": 0.22739546
+    },
+    {
+      "offset": 0.45238095,
+      "progress": 0.28114991,
+      "leftProgress": 0.30552411,
+      "rightProgress": 0.25677571
+    },
+    {
+      "offset": 0.47619048,
+      "progress": 0.31482442,
+      "leftProgress": 0.34135192,
+      "rightProgress": 0.28829692
+    },
+    {
+      "offset": 0.5,
+      "progress": 0.35073324,
+      "leftProgress": 0.3794507,
+      "rightProgress": 0.32201578
+    },
+    {
+      "offset": 0.52380952,
+      "progress": 0.38892589,
+      "leftProgress": 0.41986276,
+      "rightProgress": 0.35798902
+    },
+    {
+      "offset": 0.54761905,
+      "progress": 0.4294519,
+      "leftProgress": 0.46263043,
+      "rightProgress": 0.39627336
+    },
+    {
+      "offset": 0.57142857,
+      "progress": 0.47236075,
+      "leftProgress": 0.50779601,
+      "rightProgress": 0.43692549
+    },
+    {
+      "offset": 0.5952381,
+      "progress": 0.51770198,
+      "leftProgress": 0.55540182,
+      "rightProgress": 0.48000214
+    },
+    {
+      "offset": 0.61904762,
+      "progress": 0.56552511,
+      "leftProgress": 0.60549019,
+      "rightProgress": 0.52556002
+    },
+    {
+      "offset": 0.64285714,
+      "progress": 0.61587963,
+      "leftProgress": 0.65810341,
+      "rightProgress": 0.57365585
+    },
+    {
+      "offset": 0.66666667,
+      "progress": 0.66881507,
+      "leftProgress": 0.71328382,
+      "rightProgress": 0.62434633
+    },
+    {
+      "offset": 0.69047619,
+      "progress": 0.72438095,
+      "leftProgress": 0.77107372,
+      "rightProgress": 0.67768818
+    },
+    {
+      "offset": 0.71428571,
+      "progress": 0.78262677,
+      "leftProgress": 0.83151544,
+      "rightProgress": 0.73373811
+    },
+    {
+      "offset": 0.73809524,
+      "progress": 0.84360206,
+      "leftProgress": 0.89465128,
+      "rightProgress": 0.79255284
+    },
+    {
+      "offset": 0.76190476,
+      "progress": 0.90735632,
+      "leftProgress": 0.96052356,
+      "rightProgress": 0.85418908
+    },
+    {
+      "offset": 0.78571429,
+      "progress": 0.95935177,
+      "leftProgress": 1.0,
+      "rightProgress": 0.91870354
+    },
+    {
+      "offset": 0.80952381,
+      "progress": 0.99307647,
+      "leftProgress": 1.0,
+      "rightProgress": 0.98615294
+    },
+    {
+      "offset": 0.83333333,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.85714286,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.88095238,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.9047619,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.92857143,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.95238095,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 0.97619048,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    },
+    {
+      "offset": 1.0,
+      "progress": 1.0,
+      "leftProgress": 1.0,
+      "rightProgress": 1.0
+    }
+  ],
+  "sourceSha256": "72854645e51ddb35efd536ba1b70f01a3a593da77d850c0eaa9429d2b1cb79f2"
+}
