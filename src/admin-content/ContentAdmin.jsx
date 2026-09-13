@@ -391,14 +391,14 @@ export function ContentAdmin() {
     commitEdit(next, previewSelectorForPath(path));
   };
 
-  const addAccount = () => {
+  const addAccount = (side) => {
     const current = documentRef.current.content.accounts;
     if (Object.keys(current).length >= MAX_ACCOUNT_ENTRIES) return;
     let index = 1;
     let key = `extra-${index}`;
     while (current[key]) key = `extra-${index += 1}`;
     const next = cloneContentDocument(documentRef.current);
-    next.content.accounts[key] = { key, label: "", emoji: "", bank: "", number: "", holder: "" };
+    next.content.accounts[key] = { key, side, label: "", emoji: current[side]?.emoji ?? "", bank: "", number: "", holder: "" };
     commitEdit(next, ".account-groups");
   };
 
@@ -617,48 +617,61 @@ export function ContentAdmin() {
             </div>
           </CollapsibleSection>
 
-          <CollapsibleSection title="계좌 정보" busy={busy} attention={Object.keys(validationErrors).some((key) => key.includes("계좌") || key.includes("은행") || key.includes("예금주") || key.includes("이모지"))}>
+          <CollapsibleSection title="계좌 정보" busy={busy} attention={Object.keys(validationErrors).some((key) => key.includes("계좌") || key.includes("은행") || key.includes("예금주") || key.includes("이모지") || key.includes("소속"))}>
             <div className="content-admin-account-groups">
               {ACCOUNT_SIDES.map((side) => {
                 const account = accounts[side];
                 const sideLabel = ACCOUNT_SIDE_LABELS[side];
+                const sideExtras = Object.entries(accounts).filter(([key, entry]) =>
+                  !ACCOUNT_SIDES.includes(key) && (ACCOUNT_SIDES.includes(entry?.side) ? entry.side : "groom") === side);
                 return (
-                  <section className="content-admin-account-group" key={side}>
-                    <strong>{sideLabel} 계좌</strong>
-                    <div className="content-admin-grid">
-                      <Field label="은행" value={account.bank} maxLength={80} error={validationErrors[`${sideLabel} 은행`]} onChange={(value) => update(["content", "accounts", side, "bank"], value)} />
-                      <Field label="예금주" value={account.holder} maxLength={50} error={validationErrors[`${sideLabel} 예금주`]} onChange={(value) => update(["content", "accounts", side, "holder"], value)} />
-                      <Field label="계좌번호" wide inputMode="numeric" value={account.number} maxLength={60} error={validationErrors[`${sideLabel} 계좌번호`]} onChange={(value) => update(["content", "accounts", side, "number"], value)} hint="숫자와 하이픈(-)만 입력해 주세요. 예: 123-45-67890" />
-                    </div>
+                  <section className="content-admin-account-side" key={side}>
+                    <strong className="content-admin-account-side-title">{sideLabel} 계좌</strong>
+                    <section className="content-admin-account-group">
+                      <div className="content-admin-account-heading">
+                        <strong>기본 계좌</strong>
+                        <span className="content-admin-account-fixed">고정</span>
+                      </div>
+                      <div className="content-admin-grid">
+                        <Field label="은행" value={account.bank} maxLength={80} error={validationErrors[`${sideLabel} 은행`]} onChange={(value) => update(["content", "accounts", side, "bank"], value)} />
+                        <Field label="예금주" value={account.holder} maxLength={50} error={validationErrors[`${sideLabel} 예금주`]} onChange={(value) => update(["content", "accounts", side, "holder"], value)} />
+                        <Field label="계좌번호" wide inputMode="numeric" value={account.number} maxLength={60} error={validationErrors[`${sideLabel} 계좌번호`]} onChange={(value) => update(["content", "accounts", side, "number"], value)} hint="숫자와 하이픈(-)만 입력해 주세요. 예: 123-45-67890" />
+                      </div>
+                    </section>
+                    {sideExtras.map(([key, extra], index) => {
+                      const label = `${sideLabel} 추가 계좌 ${index + 1}`;
+                      return (
+                        <section className="content-admin-account-group" key={key}>
+                          <div className="content-admin-account-heading">
+                            <strong>추가 계좌 {index + 1}</strong>
+                            <button type="button" className="content-admin-account-remove" onClick={() => removeAccount(key)} aria-label={`${label} 삭제`}>
+                              <Trash aria-hidden="true" weight="light" /> 삭제
+                            </button>
+                          </div>
+                          <div className="content-admin-grid">
+                            <label className="content-admin-field">
+                              <span>소속</span>
+                              <select value={ACCOUNT_SIDES.includes(extra.side) ? extra.side : side} onChange={(event) => update(["content", "accounts", key, "side"], event.target.value)} aria-invalid={validationErrors[`${label} 소속`] ? "true" : undefined}>
+                                {ACCOUNT_SIDES.map((option) => <option key={option} value={option}>{ACCOUNT_SIDE_LABELS[option]}</option>)}
+                              </select>
+                              {validationErrors[`${label} 소속`] && <small className="is-error" role="alert">{validationErrors[`${label} 소속`]}</small>}
+                            </label>
+                            <Field label="표시 이름" value={extra.label} maxLength={80} error={validationErrors[`${label} 표시 이름`]} onChange={(value) => update(["content", "accounts", key, "label"], value)} hint={`공개 화면의 ${sideLabel} 영역에서 \`표시 이름 계좌\`로 표시됩니다. 예: 아버지`} />
+                            <Field label="이모지" required={false} value={extra.emoji} maxLength={16} error={validationErrors[`${label} 이모지`]} onChange={(value) => update(["content", "accounts", key, "emoji"], value)} hint={`선택 입력. 기본값은 ${sideLabel} 이모지입니다.`} />
+                            <Field label="은행" value={extra.bank} maxLength={80} error={validationErrors[`${label} 은행`]} onChange={(value) => update(["content", "accounts", key, "bank"], value)} />
+                            <Field label="예금주" value={extra.holder} maxLength={50} error={validationErrors[`${label} 예금주`]} onChange={(value) => update(["content", "accounts", key, "holder"], value)} />
+                            <Field label="계좌번호" wide inputMode="numeric" value={extra.number} maxLength={60} error={validationErrors[`${label} 계좌번호`]} onChange={(value) => update(["content", "accounts", key, "number"], value)} hint="숫자와 하이픈(-)만 입력해 주세요. 예: 123-45-67890" />
+                          </div>
+                        </section>
+                      );
+                    })}
+                    <button type="button" className="content-admin-account-add" onClick={() => addAccount(side)} disabled={Object.keys(accounts).length >= MAX_ACCOUNT_ENTRIES}>
+                      <Plus aria-hidden="true" weight="light" /> {sideLabel} 계좌 추가
+                    </button>
                   </section>
                 );
               })}
-              {Object.entries(accounts)
-                .filter(([key]) => !ACCOUNT_SIDES.includes(key))
-                .map(([key, account], index) => {
-                  const label = `추가 계좌 ${index + 1}`;
-                  return (
-                    <section className="content-admin-account-group" key={key}>
-                      <div className="content-admin-account-heading">
-                        <strong>{label}</strong>
-                        <button type="button" className="content-admin-account-remove" onClick={() => removeAccount(key)} aria-label={`${label} 삭제`}>
-                          <Trash aria-hidden="true" weight="light" /> 삭제
-                        </button>
-                      </div>
-                      <div className="content-admin-grid">
-                        <Field label="표시 이름" value={account.label} maxLength={80} error={validationErrors[`${label} 표시 이름`]} onChange={(value) => update(["content", "accounts", key, "label"], value)} hint="공개 화면에서 `표시 이름 계좌`로 표시됩니다. 예: 신랑 아버지" />
-                        <Field label="이모지" required={false} value={account.emoji} maxLength={16} error={validationErrors[`${label} 이모지`]} onChange={(value) => update(["content", "accounts", key, "emoji"], value)} hint="선택 입력. 예: 🤵" />
-                        <Field label="은행" value={account.bank} maxLength={80} error={validationErrors[`${label} 은행`]} onChange={(value) => update(["content", "accounts", key, "bank"], value)} />
-                        <Field label="예금주" value={account.holder} maxLength={50} error={validationErrors[`${label} 예금주`]} onChange={(value) => update(["content", "accounts", key, "holder"], value)} />
-                        <Field label="계좌번호" wide inputMode="numeric" value={account.number} maxLength={60} error={validationErrors[`${label} 계좌번호`]} onChange={(value) => update(["content", "accounts", key, "number"], value)} hint="숫자와 하이픈(-)만 입력해 주세요. 예: 123-45-67890" />
-                      </div>
-                    </section>
-                  );
-                })}
             </div>
-            <button type="button" className="content-admin-account-add" onClick={addAccount} disabled={Object.keys(accounts).length >= MAX_ACCOUNT_ENTRIES}>
-              <Plus aria-hidden="true" weight="light" /> 계좌 추가
-            </button>
           </CollapsibleSection>
 
           <CollapsibleSection title="배경 음악" busy={busy}>

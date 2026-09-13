@@ -448,6 +448,10 @@ function digitsOnly(phone) {
   return phone.replace(/\D/g, "");
 }
 
+function accountSide(account) {
+  return (account?.side ?? account?.key) === "bride" ? "bride" : "groom";
+}
+
 function AccountGroups({ notify }) {
   const { content } = useWeddingRuntime();
   const copyAccount = async (account) => {
@@ -464,8 +468,10 @@ function AccountGroups({ notify }) {
       <div className="account-section-heading">
         <h3 id="account-title">마음 전하실 곳</h3>
       </div>
-      {Object.values(content.accounts).map((account) => (
-        <details className={`contact-group account-group is-${account.key}`} key={account.key}>
+      {["groom", "bride"].flatMap((side) =>
+        Object.values(content.accounts).filter((account) => accountSide(account) === side)
+      ).map((account) => (
+        <details className={`contact-group account-group is-${accountSide(account)}`} key={account.key}>
           <summary>
             <span className="group-summary-label">
               <span className="side-emoji" aria-hidden="true">{account.emoji}</span>
