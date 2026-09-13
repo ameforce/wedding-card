@@ -151,16 +151,15 @@ test("publish review summarizes account edits with bank, number, and holder", ()
   assert.doesNotMatch(change.current, /\[object Object\]/);
 });
 
-test("extra account entries round-trip with their own side and label", () => {
+test("extra account entries round-trip with their own side", () => {
   const document = createContentDocument(weddingContent);
   document.content.accounts["extra-1"] = { key: "extra-1", side: "groom", label: "아버지", emoji: "🤵", bank: "추가은행", number: "111-222", holder: "추가 예금주" };
-  document.content.accounts["extra-2"] = { key: "extra-2", side: "bride", label: "어머니", bank: "추가은행2", number: "333-444", holder: "추가 예금주2" };
+  document.content.accounts["extra-2"] = { key: "extra-2", side: "bride", bank: "추가은행2", number: "333-444", holder: "추가 예금주2" };
   const normalized = normalizeContentDocument(document, weddingContent);
   assert.deepEqual(Object.keys(normalized.content.accounts).slice(0, 2), ["groom", "bride"]);
   assert.deepEqual(normalized.content.accounts["extra-1"], {
     key: "extra-1",
     side: "groom",
-    label: "아버지",
     bank: "추가은행",
     number: "111-222",
     holder: "추가 예금주",
@@ -171,8 +170,8 @@ test("extra account entries round-trip with their own side and label", () => {
 
 test("extra accounts fall back to the groom side when the side is missing or invalid", () => {
   const document = createContentDocument(weddingContent);
-  document.content.accounts["extra-1"] = { key: "extra-1", side: "elsewhere", label: "아버지", bank: "은행", number: "1-2", holder: "예금주" };
-  document.content.accounts["extra-2"] = { key: "extra-2", label: "어머니", bank: "은행", number: "3-4", holder: "예금주" };
+  document.content.accounts["extra-1"] = { key: "extra-1", side: "elsewhere", bank: "은행", number: "1-2", holder: "예금주" };
+  document.content.accounts["extra-2"] = { key: "extra-2", bank: "은행", number: "3-4", holder: "예금주" };
   const normalized = normalizeContentDocument(document, weddingContent);
   assert.equal(normalized.content.accounts["extra-1"].side, "groom");
   assert.equal(normalized.content.accounts["extra-2"].side, "groom");
@@ -183,7 +182,7 @@ test("extra accounts fall back to the groom side when the side is missing or inv
 
 test("extra accounts drop unsafe keys and require complete fields", () => {
   const document = createContentDocument(weddingContent);
-  const crafted = JSON.parse('{"bad_key":{"key":"bad_key","side":"groom","label":"x","bank":"은행","number":"1-2","holder":"예금주"},"__proto__":{"key":"__proto__","side":"bride","label":"x","bank":"은행","number":"1","holder":"예금주"}}');
+  const crafted = JSON.parse('{"bad_key":{"key":"bad_key","side":"groom","bank":"은행","number":"1-2","holder":"예금주"},"__proto__":{"key":"__proto__","side":"bride","bank":"은행","number":"1","holder":"예금주"}}');
   document.content.accounts = { ...document.content.accounts, ...crafted };
   const normalized = normalizeContentDocument(document, weddingContent);
   assert.equal(Object.hasOwn(normalized.content.accounts, "bad_key"), false);
@@ -194,9 +193,8 @@ test("extra accounts drop unsafe keys and require complete fields", () => {
   assert.equal(typeof keyErrors["신부 측 추가 계좌 1 항목"], "string");
 
   document.content.accounts = { groom: document.content.accounts.groom, bride: document.content.accounts.bride };
-  document.content.accounts["extra-1"] = { key: "extra-1", side: "bride", label: "", bank: "", number: "abc", holder: "" };
+  document.content.accounts["extra-1"] = { key: "extra-1", side: "bride", bank: "", number: "abc", holder: "" };
   const errors = validateEditableContentDocument(document);
-  assert.equal(typeof errors["신부 측 추가 계좌 1 표시 이름"], "string");
   assert.equal(typeof errors["신부 측 추가 계좌 1 은행"], "string");
   assert.equal(typeof errors["신부 측 추가 계좌 1 예금주"], "string");
   assert.equal(typeof errors["신부 측 추가 계좌 1 계좌번호"], "string");
@@ -205,19 +203,19 @@ test("extra accounts drop unsafe keys and require complete fields", () => {
 test("account entries are capped and publish review labels added and removed rows", () => {
   const overflow = createContentDocument(weddingContent);
   for (let index = 1; index <= 7; index += 1) {
-    overflow.content.accounts[`extra-${index}`] = { key: `extra-${index}`, side: "groom", label: `추가${index}`, bank: "은행", number: "1", holder: "예금주" };
+    overflow.content.accounts[`extra-${index}`] = { key: `extra-${index}`, side: "groom", bank: "은행", number: "1", holder: "예금주" };
   }
   assert.equal(typeof validateEditableContentDocument(overflow)["계좌 정보"], "string");
 
   const published = createContentDocument(weddingContent);
   const current = cloneContentDocument(published);
-  current.content.accounts["extra-1"] = { key: "extra-1", side: "groom", label: "아버지", bank: "추가은행", number: "111-222", holder: "추가 예금주" };
+  current.content.accounts["extra-1"] = { key: "extra-1", side: "groom", bank: "추가은행", number: "111-222", holder: "추가 예금주" };
   delete current.content.accounts.bride;
   const diff = buildPublishDiff(current, published);
   assert.deepEqual(diff.sections, ["계좌 정보"]);
   const added = diff.changes.find((change) => change.label.endsWith("추가"));
   const removed = diff.changes.find((change) => change.label.endsWith("삭제"));
-  assert.match(added.label, /신랑 측 아버지 계좌/);
+  assert.match(added.label, /신랑 측 추가 예금주 계좌/);
   assert.match(added.current, /추가은행/);
   assert.match(added.current, /111-222/);
   assert.match(removed.label, /신부 측 계좌/);
@@ -234,8 +232,8 @@ test("the admin editor groups accounts by side with per-side add and reassignmen
   assert.match(source, /계좌 추가/);
   assert.match(source, /<select/);
   assert.match(source, /\["content", "accounts", key, "side"\]/);
-  assert.match(source, /label="표시 이름"/);
-  assert.match(source, /\["content", "accounts", key, "label"\]/);
+  assert.doesNotMatch(source, /표시 이름/);
+  assert.doesNotMatch(source, /\["content", "accounts", key, "label"\]/);
   assert.match(styles, /\.content-admin-account-add/);
   assert.match(styles, /\.content-admin-account-remove/);
   assert.match(styles, /\.content-admin-account-side/);
@@ -243,7 +241,8 @@ test("the admin editor groups accounts by side with per-side add and reassignmen
   assert.match(app, /accountSide\(account\)/);
   assert.match(app, /account-group is-\$\{side\}/);
   assert.match(app, /list\.map\(\(account\) =>/);
-  assert.match(app, /account\.key !== side && <small className="account-relation">/);
+  assert.doesNotMatch(app, /account-relation/);
+  assert.match(app, /account\.label \|\| account\.holder/);
 });
 
 test("the admin editor exposes account fields for both sides with a preview anchor", async () => {
@@ -771,6 +770,10 @@ test("authentication, refresh, dialog focus, and rollback guards protect privile
   assert.doesNotMatch(source, /versionHistory\.length - index/);
   assert.match(source, /revision\.id\.startsWith\("local-"\) \? revision\.id\.slice\(-8\) : revision\.id\.slice\(0, 8\)/);
   assert.match(source, /content-admin-validation-summary/);
+  assert.match(source, /showValidationSummary && workflow\.errorCount > 0/);
+  assert.match(source, /setShowValidationSummary\(true\)/);
+  assert.match(source, /canApply: !busy && dirty/);
+  assert.match(source, /canReview: !busy,/);
   assert.match(shell, /inert=\{sidebarHidden \? true : undefined\}/);
   assert.match(shell, /event\.key === "Escape"/);
   assert.match(shell, /event\.key !== "Tab"/);

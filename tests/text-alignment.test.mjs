@@ -52,7 +52,7 @@ test("Pastel account disclosures keep compact copy controls alongside readable a
   assert.match(rule(".account-details strong"), /font-size:\s*15px/);
   assert.match(app, /function AccountGroups/);
   assert.match(app, /copyText\(account\.number\)/);
-  assert.match(app, /aria-label=\{`\$\{account\.label\} 계좌번호 복사`\}/);
+  assert.match(app, /aria-label=\{`\$\{account\.label \|\| account\.holder\} 계좌번호 복사`\}/);
   assert.match(app, /<ContactSection pastel notify=\{notify\} \/>/);
 });
 

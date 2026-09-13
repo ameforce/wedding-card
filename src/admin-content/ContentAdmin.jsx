@@ -193,8 +193,8 @@ export function deriveAdminWorkflowState({ dirty, draftRevisionId, busy, validat
   const errorCount = Object.keys(validationErrors || {}).length;
   return {
     label: dirty ? "미적용 변경" : draftRevisionId ? "초안" : "공개본",
-    canApply: !busy && dirty && errorCount === 0,
-    canReview: !busy && errorCount === 0,
+    canApply: !busy && dirty,
+    canReview: !busy,
     errorCount,
   };
 }
@@ -275,6 +275,7 @@ export function ContentAdmin() {
   const [authRequired, setAuthRequired] = useState(false);
   const [publishReviewOpen, setPublishReviewOpen] = useState(false);
   const [republishTarget, setRepublishTarget] = useState(null);
+  const [showValidationSummary, setShowValidationSummary] = useState(false);
   const [previewFocus, setPreviewFocus] = useState(".pastel-hero");
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const dirty = useMemo(
@@ -307,6 +308,7 @@ export function ContentAdmin() {
       setLastUpdated(formatAdminTimestamp(state.draft?.createdAt || state.published?.publishedAt || new Date().toISOString()));
       setMediaUsage(usage);
       setAuthRequired(false);
+      setShowValidationSummary(false);
       setStatus({
         tone: localReview ? "review" : "success",
         message: localReview
@@ -398,7 +400,7 @@ export function ContentAdmin() {
     let key = `extra-${index}`;
     while (current[key]) key = `extra-${index += 1}`;
     const next = cloneContentDocument(documentRef.current);
-    next.content.accounts[key] = { key, side, label: "", bank: "", number: "", holder: "" };
+    next.content.accounts[key] = { key, side, bank: "", number: "", holder: "" };
     commitEdit(next, ".account-groups");
   };
 
@@ -411,6 +413,7 @@ export function ContentAdmin() {
   const saveDraft = async ({ quiet = false, keepBusy = false } = {}) => {
     const documentErrors = validateEditableContentDocument(editingDocument, { allowLocalPreview: localReview });
     if (Object.keys(documentErrors).length > 0) {
+      setShowValidationSummary(true);
       setStatus({ tone: "error", message: Object.values(documentErrors)[0] });
       return null;
     }
@@ -422,6 +425,7 @@ export function ContentAdmin() {
       const applied = normalizeContentDocument(state.draft || editingDocument, weddingContent, { allowLocalPreview: localReview });
       setEditingDocument(applied);
       setAppliedDocument(applied);
+      setShowValidationSummary(false);
       if (!quiet) setStatus({ tone: "success", message: "임시 적용했습니다. 미리보기와 변경사항을 확인한 뒤 게시해 주세요." });
       setHistory((current) => [{
         id: state.draftRevisionId,
@@ -558,19 +562,26 @@ export function ContentAdmin() {
           <div className="content-admin-badges" aria-label="편집 상태">
             <span className="is-draft"><i />{workflow.label}</span>
             <span><PencilSimple aria-hidden="true" />미적용 변경 {unappliedDiff.changes.length}개</span>
-            {workflow.errorCount > 0 && <span className="is-error"><Warning aria-hidden="true" />입력 오류 {workflow.errorCount}개</span>}
+            {showValidationSummary && workflow.errorCount > 0 && <span className="is-error"><Warning aria-hidden="true" />입력 오류 {workflow.errorCount}개</span>}
           </div>
         </div>
         {!authRequired && <div className="content-admin-top-actions">
           <button type="button" onClick={() => void saveDraft()} disabled={!workflow.canApply || Boolean(uploadingSlot)}>임시 적용</button>
-          <button type="button" className="is-primary" onClick={() => setPublishReviewOpen(true)} disabled={!workflow.canReview || Boolean(uploadingSlot) || publishDiff.changes.length === 0}>게시</button>
+          <button type="button" className="is-primary" onClick={() => {
+            if (workflow.errorCount > 0) {
+              setShowValidationSummary(true);
+              setStatus({ tone: "error", message: Object.values(validationErrors)[0] });
+              return;
+            }
+            setPublishReviewOpen(true);
+          }} disabled={!workflow.canReview || Boolean(uploadingSlot) || publishDiff.changes.length === 0}>게시</button>
         </div>}
       </header>
 
       {authRequired ? <AdminReauthentication /> : <div className="content-admin-layout">
         <section className="content-admin-editor" aria-label="초대장 콘텐츠 편집">
           <p className={`content-admin-status is-${status.tone}`} role="status">{status.message}</p>
-          {workflow.errorCount > 0 && (
+          {showValidationSummary && workflow.errorCount > 0 && (
             <section className="content-admin-validation-summary" role="alert" aria-label="입력 오류 요약">
               <strong>입력 오류 {workflow.errorCount}개를 확인해 주세요.</strong>
               <ul>{Object.entries(validationErrors).map(([field, message]) => <li key={field}><b>{field}</b><span>{message}</span></li>)}</ul>
@@ -617,7 +628,7 @@ export function ContentAdmin() {
             </div>
           </CollapsibleSection>
 
-          <CollapsibleSection title="계좌 정보" busy={busy} attention={Object.keys(validationErrors).some((key) => key.includes("계좌") || key.includes("은행") || key.includes("예금주") || key.includes("이모지") || key.includes("소속"))}>
+          <CollapsibleSection title="계좌 정보" busy={busy} attention={Object.keys(validationErrors).some((key) => key.includes("계좌") || key.includes("은행") || key.includes("예금주") || key.includes("소속"))}>
             <div className="content-admin-account-groups">
               {ACCOUNT_SIDES.map((side) => {
                 const account = accounts[side];
@@ -656,7 +667,6 @@ export function ContentAdmin() {
                               </select>
                               {validationErrors[`${label} 소속`] && <small className="is-error" role="alert">{validationErrors[`${label} 소속`]}</small>}
                             </label>
-                            <Field label="표시 이름" value={extra.label} maxLength={80} error={validationErrors[`${label} 표시 이름`]} onChange={(value) => update(["content", "accounts", key, "label"], value)} hint={`공개 화면의 ${sideLabel} 계좌 목록에서 이 계좌를 구분하는 이름입니다. 예: 아버지`} />
                             <Field label="은행" value={extra.bank} maxLength={80} error={validationErrors[`${label} 은행`]} onChange={(value) => update(["content", "accounts", key, "bank"], value)} />
                             <Field label="예금주" value={extra.holder} maxLength={50} error={validationErrors[`${label} 예금주`]} onChange={(value) => update(["content", "accounts", key, "holder"], value)} />
                             <Field label="계좌번호" wide inputMode="numeric" value={extra.number} maxLength={60} error={validationErrors[`${label} 계좌번호`]} onChange={(value) => update(["content", "accounts", key, "number"], value)} hint="숫자와 하이픈(-)만 입력해 주세요. 예: 123-45-67890" />

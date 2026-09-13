@@ -136,7 +136,7 @@ function displayDiffValue(value, counterpart, current) {
 function accountDiffLabel(key, entry) {
   if (ACCOUNT_SIDE_LABELS[key]) return `${ACCOUNT_SIDE_LABELS[key]} 계좌`;
   const side = ACCOUNT_SIDE_LABELS[entry?.side] ?? "";
-  return `${side ? `${side} ` : ""}${entry?.label || key} 계좌`;
+  return `${side ? `${side} ` : ""}${entry?.label || entry?.holder || key} 계좌`;
 }
 
 export function buildPublishDiff(currentDocument, publishedDocument) {
@@ -222,7 +222,6 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
     if (!ACCOUNT_KEY_PATTERN.test(key) || account?.key !== key) {
       errors[`${label} 항목`] = `${label} 항목 키가 올바르지 않습니다.`;
     }
-    required(account?.label, `${label} 표시 이름`, MAX_LENGTH.short);
     required(account?.bank, `${label} 은행`, MAX_LENGTH.short);
     required(account?.holder, `${label} 예금주`, MAX_LENGTH.name);
     if (normalizeAccountNumber(account?.number) === null) errors[`${label} 계좌번호`] = accountNumberError(label);
@@ -285,7 +284,6 @@ function normalizeExtraAccount(key, value) {
   return {
     key,
     side: ACCOUNT_SIDES.includes(source.side) ? source.side : "groom",
-    label: text(source.label, "", MAX_LENGTH.short),
     bank: text(source.bank, "", MAX_LENGTH.short),
     number: normalizeAccountNumber(source.number) ?? "",
     holder: text(source.holder, "", MAX_LENGTH.name),

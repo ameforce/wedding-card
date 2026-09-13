@@ -457,7 +457,7 @@ function AccountGroups({ notify }) {
   const copyAccount = async (account) => {
     try {
       await copyText(account.number);
-      notify(`${account.label} 계좌번호를 복사했습니다.`);
+      notify(`${account.label || account.holder} 계좌번호를 복사했습니다.`);
     } catch {
       notify("계좌번호를 복사하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
     }
@@ -485,11 +485,10 @@ function AccountGroups({ notify }) {
               {list.map((account) => (
                 <div className="account-row" key={account.key}>
                   <div className="account-details">
-                    {account.key !== side && <small className="account-relation">{account.label}</small>}
                     <strong>{account.bank} {account.number}</strong>
                     <small>예금주 {account.holder}</small>
                   </div>
-                  <button className="account-copy" type="button" onClick={() => copyAccount(account)} aria-label={`${account.label} 계좌번호 복사`}>
+                  <button className="account-copy" type="button" onClick={() => copyAccount(account)} aria-label={`${account.label || account.holder} 계좌번호 복사`}>
                     <Copy aria-hidden="true" weight="light" />
                     <span>복사</span>
                   </button>
