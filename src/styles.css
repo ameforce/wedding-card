@@ -200,6 +200,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .account-list { padding: 0 12px 9px; }
 .account-row { display: grid; min-height: 64px; padding: 8px 2px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; border-top: 1px solid rgba(91, 82, 73, .11); }
 .account-details { display: grid; min-width: 0; gap: 3px; }
+.account-relation { color: #5c554f; font-size: 12px; font-weight: 680; letter-spacing: .01em; }
 .account-details strong { overflow-wrap: anywhere; font-family: "Noto Serif KR Variable", serif; font-size: 15px; font-weight: 540; }
 .account-details small { color: #77716c; font-size: 13px; }
 .account-copy { display: inline-flex; min-width: 64px; min-height: 44px; padding: 0 9px; align-items: center; justify-content: center; gap: 5px; color: inherit; background: rgba(255, 255, 255, .72); border: 1px solid rgba(91, 82, 73, .14); border-radius: 22px; cursor: pointer; font-size: 13px; }
