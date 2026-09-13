@@ -103,6 +103,68 @@ test("admin documents preserve non-editable public and search-privacy contracts"
   assert.equal(normalized.photos.pastel.hero.src.startsWith("/assets/photos/"), true);
 });
 
+test("admin edits account fields while structural side labels stay fixed", () => {
+  const document = createContentDocument(weddingContent);
+  document.content.accounts.groom.bank = "테스트은행";
+  document.content.accounts.groom.number = " 000 - 111 - 2222 ";
+  document.content.accounts.groom.holder = "테스트 예금주";
+  document.content.accounts.groom.label = "바뀐 라벨";
+  document.content.accounts.groom.emoji = "🚫";
+
+  const normalized = normalizeContentDocument(document, weddingContent);
+  assert.equal(normalized.content.accounts.groom.bank, "테스트은행");
+  assert.equal(normalized.content.accounts.groom.number, "000-111-2222");
+  assert.equal(normalized.content.accounts.groom.holder, "테스트 예금주");
+  assert.equal(normalized.content.accounts.groom.label, weddingContent.accounts.groom.label);
+  assert.equal(normalized.content.accounts.groom.emoji, weddingContent.accounts.groom.emoji);
+  assert.equal(normalized.content.accounts.groom.key, "groom");
+  assert.deepEqual(normalized.content.accounts.bride, weddingContent.accounts.bride);
+  assert.deepEqual(validateEditableContentDocument(normalized), {});
+});
+
+test("invalid account entries fail validation and normalize back to the confirmed value", () => {
+  const document = createContentDocument(weddingContent);
+  document.content.accounts.bride.number = "abc-def";
+  assert.equal(typeof validateEditableContentDocument(document)["신부 측 계좌번호"], "string");
+  assert.equal(normalizeContentDocument(document, weddingContent).content.accounts.bride.number, weddingContent.accounts.bride.number);
+  assert.throws(() => serializeContentDocument(document), (error) => error.code === "INVALID_CONTENT" && typeof error.fieldErrors["신부 측 계좌번호"] === "string");
+
+  const missing = createContentDocument(weddingContent);
+  missing.content.accounts.groom.bank = "  ";
+  missing.content.accounts.groom.holder = "";
+  assert.equal(typeof validateEditableContentDocument(missing)["신랑 측 은행"], "string");
+  assert.equal(typeof validateEditableContentDocument(missing)["신랑 측 예금주"], "string");
+});
+
+test("publish review summarizes account edits with bank, number, and holder", () => {
+  const published = createContentDocument(weddingContent);
+  const current = cloneContentDocument(published);
+  current.content.accounts.bride.bank = "새 은행";
+  current.content.accounts.bride.number = "999-888";
+  const diff = buildPublishDiff(current, published);
+  assert.deepEqual(diff.sections, ["계좌 정보"]);
+  assert.equal(diff.changes.length, 1);
+  const change = diff.changes.find((item) => item.label === "신부 측 계좌");
+  assert.match(change.current, /새 은행/);
+  assert.match(change.current, /999-888/);
+  assert.match(change.current, /예금주/);
+  assert.doesNotMatch(change.current, /\[object Object\]/);
+});
+
+test("the admin editor exposes account fields for both sides with a preview anchor", async () => {
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /title="계좌 정보"/);
+  assert.match(source, /label="은행"/);
+  assert.match(source, /label="예금주"/);
+  assert.match(source, /label="계좌번호"/);
+  assert.match(source, /\["content", "accounts", side, "bank"\]/);
+  assert.match(source, /\["content", "accounts", side, "holder"\]/);
+  assert.match(source, /\["content", "accounts", side, "number"\]/);
+  assert.match(source, /accounts: "\.account-groups"/);
+  assert.match(styles, /\.content-admin-account-group \{/);
+});
+
 test("schema v1 documents remain readable with the bundled music fallback and new writes use v2", () => {
   const legacy = createContentDocument(weddingContent);
   legacy.schemaVersion = 1;

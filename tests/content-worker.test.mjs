@@ -486,6 +486,35 @@ test("content validation dual-reads schema v1, requires v2 writes, and validates
   });
 });
 
+test("schema v2 writes validate editable account fields while v1 reads stay compatible", () => {
+  const document = confirmedDocument();
+  document.content.accounts.groom.bank = "테스트은행";
+  document.content.accounts.groom.number = "000-111-2222";
+  document.content.accounts.groom.holder = "테스트 예금주";
+  assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
+
+  const invalidNumber = confirmedDocument();
+  invalidNumber.content.accounts.bride.number = "abc-123";
+  assert.throws(() => __test.validateInvitationDocument(invalidNumber, { write: true }), (error) => {
+    assert.equal(error.code, "INVALID_CONTENT");
+    assert.match(error.message, /content\.accounts\.bride\.number/);
+    return true;
+  });
+
+  const missing = confirmedDocument();
+  delete missing.content.accounts.groom;
+  assert.throws(() => __test.validateInvitationDocument(missing, { write: true }), (error) => {
+    assert.equal(error.code, "INVALID_CONTENT");
+    assert.match(error.message, /content\.accounts\.groom/);
+    return true;
+  });
+
+  const legacy = confirmedDocument();
+  legacy.schemaVersion = 1;
+  delete legacy.content.accounts;
+  assert.doesNotThrow(() => __test.validateInvitationDocument(legacy));
+});
+
 test("content publishing rejects unconfirmed or search-indexable documents", async () => {
   const db = invitationDatabase();
   const fixture = await accessFixture();
