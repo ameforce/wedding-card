@@ -468,31 +468,37 @@ function AccountGroups({ notify }) {
       <div className="account-section-heading">
         <h3 id="account-title">마음 전하실 곳</h3>
       </div>
-      {["groom", "bride"].flatMap((side) =>
-        Object.values(content.accounts).filter((account) => accountSide(account) === side)
-      ).map((account) => (
-        <details className={`contact-group account-group is-${accountSide(account)}`} key={account.key}>
-          <summary>
-            <span className="group-summary-label">
-              <span className="side-emoji" aria-hidden="true">{account.emoji}</span>
-              <span>{account.label} 계좌</span>
-            </span>
-            <CaretDown aria-hidden="true" weight="light" />
-          </summary>
-          <div className="account-list">
-            <div className="account-row">
-              <div className="account-details">
-                <strong>{account.bank} {account.number}</strong>
-                <small>예금주 {account.holder}</small>
-              </div>
-              <button className="account-copy" type="button" onClick={() => copyAccount(account)} aria-label={`${account.label} 계좌번호 복사`}>
-                <Copy aria-hidden="true" weight="light" />
-                <span>복사</span>
-              </button>
+      {["groom", "bride"].map((side) => {
+        const list = Object.values(content.accounts).filter((account) => accountSide(account) === side);
+        if (list.length === 0) return null;
+        const lead = list.find((account) => account.key === side) ?? list[0];
+        return (
+          <details className={`contact-group account-group is-${side}`} key={side}>
+            <summary>
+              <span className="group-summary-label">
+                <span className="side-emoji" aria-hidden="true">{lead.emoji}</span>
+                <span>{lead.label} 계좌</span>
+              </span>
+              <CaretDown aria-hidden="true" weight="light" />
+            </summary>
+            <div className="account-list">
+              {list.map((account) => (
+                <div className="account-row" key={account.key}>
+                  <div className="account-details">
+                    {account.key !== side && <small className="account-relation">{account.label}</small>}
+                    <strong>{account.bank} {account.number}</strong>
+                    <small>예금주 {account.holder}</small>
+                  </div>
+                  <button className="account-copy" type="button" onClick={() => copyAccount(account)} aria-label={`${account.label} 계좌번호 복사`}>
+                    <Copy aria-hidden="true" weight="light" />
+                    <span>복사</span>
+                  </button>
+                </div>
+              ))}
             </div>
-          </div>
-        </details>
-      ))}
+          </details>
+        );
+      })}
     </section>
   );
 }

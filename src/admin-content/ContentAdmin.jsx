@@ -398,7 +398,7 @@ export function ContentAdmin() {
     let key = `extra-${index}`;
     while (current[key]) key = `extra-${index += 1}`;
     const next = cloneContentDocument(documentRef.current);
-    next.content.accounts[key] = { key, side, label: "", emoji: current[side]?.emoji ?? "", bank: "", number: "", holder: "" };
+    next.content.accounts[key] = { key, side, label: "", bank: "", number: "", holder: "" };
     commitEdit(next, ".account-groups");
   };
 
@@ -656,8 +656,7 @@ export function ContentAdmin() {
                               </select>
                               {validationErrors[`${label} 소속`] && <small className="is-error" role="alert">{validationErrors[`${label} 소속`]}</small>}
                             </label>
-                            <Field label="표시 이름" value={extra.label} maxLength={80} error={validationErrors[`${label} 표시 이름`]} onChange={(value) => update(["content", "accounts", key, "label"], value)} hint={`공개 화면의 ${sideLabel} 영역에서 \`표시 이름 계좌\`로 표시됩니다. 예: 아버지`} />
-                            <Field label="이모지" required={false} value={extra.emoji} maxLength={16} error={validationErrors[`${label} 이모지`]} onChange={(value) => update(["content", "accounts", key, "emoji"], value)} hint={`선택 입력. 기본값은 ${sideLabel} 이모지입니다.`} />
+                            <Field label="표시 이름" value={extra.label} maxLength={80} error={validationErrors[`${label} 표시 이름`]} onChange={(value) => update(["content", "accounts", key, "label"], value)} hint={`공개 화면의 ${sideLabel} 계좌 목록에서 이 계좌를 구분하는 이름입니다. 예: 아버지`} />
                             <Field label="은행" value={extra.bank} maxLength={80} error={validationErrors[`${label} 은행`]} onChange={(value) => update(["content", "accounts", key, "bank"], value)} />
                             <Field label="예금주" value={extra.holder} maxLength={50} error={validationErrors[`${label} 예금주`]} onChange={(value) => update(["content", "accounts", key, "holder"], value)} />
                             <Field label="계좌번호" wide inputMode="numeric" value={extra.number} maxLength={60} error={validationErrors[`${label} 계좌번호`]} onChange={(value) => update(["content", "accounts", key, "number"], value)} hint="숫자와 하이픈(-)만 입력해 주세요. 예: 123-45-67890" />
