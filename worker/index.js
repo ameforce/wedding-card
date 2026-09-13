@@ -617,6 +617,13 @@ function requireHttpsUrl(value, path) {
   }
 }
 
+function requireAccountNumber(value, path) {
+  const normalized = typeof value === "string" ? value.replace(/\s+/g, "") : "";
+  if (!/^\d+(?:-\d+)*$/.test(normalized) || normalized.length > 40) {
+    throw { status: 400, code: "INVALID_CONTENT", message: `${path} 값을 확인해 주세요.` };
+  }
+}
+
 function requireMusicSource(value) {
   requireText(value, "content.music.src", 2048);
   if (!/^(?:\/assets\/audio\/[a-z0-9._-]+\.mp3|\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3)$/i.test(value)) {
@@ -698,14 +705,32 @@ function validateInvitationDocument(document, { publish = false, write = false }
     requireText(music.licenseLabel, "content.music.licenseLabel", 80);
     requireHttpsUrl(music.licenseUrl, "content.music.licenseUrl");
     const accounts = requirePlainObject(content.accounts, "content.accounts");
+    const accountKeys = Object.keys(accounts);
+    if (accountKeys.length > 8) {
+      throw { status: 400, code: "INVALID_CONTENT", message: "content.accounts 항목은 최대 8개까지 허용됩니다." };
+    }
     for (const side of ["groom", "bride"]) {
       const account = requirePlainObject(accounts[side], `content.accounts.${side}`);
       requireText(account.bank, `content.accounts.${side}.bank`, 80);
       requireText(account.holder, `content.accounts.${side}.holder`, 50);
-      const accountNumber = typeof account.number === "string" ? account.number.replace(/\s+/g, "") : "";
-      if (!/^\d+(?:-\d+)*$/.test(accountNumber) || accountNumber.length > 40) {
-        throw { status: 400, code: "INVALID_CONTENT", message: `content.accounts.${side}.number 값을 확인해 주세요.` };
+      requireAccountNumber(account.number, `content.accounts.${side}.number`);
+    }
+    for (const key of accountKeys) {
+      if (key === "groom" || key === "bride") continue;
+      if (!/^[a-z0-9][a-z0-9-]{0,30}$/.test(key)) {
+        throw { status: 400, code: "INVALID_CONTENT", message: `content.accounts.${key} 키 형식이 올바르지 않습니다.` };
       }
+      const account = requirePlainObject(accounts[key], `content.accounts.${key}`);
+      if (account.key !== key) {
+        throw { status: 400, code: "INVALID_CONTENT", message: `content.accounts.${key}.key 값이 항목 키와 다릅니다.` };
+      }
+      requireText(account.label, `content.accounts.${key}.label`, 80);
+      if (account.emoji !== undefined && (typeof account.emoji !== "string" || account.emoji.length > 16)) {
+        throw { status: 400, code: "INVALID_CONTENT", message: `content.accounts.${key}.emoji 값을 확인해 주세요.` };
+      }
+      requireText(account.bank, `content.accounts.${key}.bank`, 80);
+      requireText(account.holder, `content.accounts.${key}.holder`, 50);
+      requireAccountNumber(account.number, `content.accounts.${key}.number`);
     }
   }
   if (write && document.schemaVersion !== 2) {

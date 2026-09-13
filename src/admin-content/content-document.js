@@ -15,6 +15,8 @@ const MAX_LENGTH = {
 
 export const ACCOUNT_SIDES = Object.freeze(["groom", "bride"]);
 export const ACCOUNT_SIDE_LABELS = Object.freeze({ groom: "신랑 측", bride: "신부 측" });
+export const MAX_ACCOUNT_ENTRIES = 8;
+const ACCOUNT_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{0,30}$/;
 
 const DAY_LABELS = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 export const EVENT_TIMEZONE = Object.freeze({ iana: "Asia/Seoul", utcOffset: "+09:00" });
@@ -36,8 +38,6 @@ const DIFF_FIELDS = [
   { section: "교통과 주차", label: "주차", path: ["content", "transit", "parking"] },
   { section: "교통과 주차", label: "주차 등록 위치", path: ["content", "transit", "parkingRegistrationLocation"] },
   { section: "교통과 주차", label: "주차 등록 안내", path: ["content", "transit", "parkingRegistration"] },
-  { section: "계좌 정보", label: "신랑 측 계좌", path: ["content", "accounts", "groom"] },
-  { section: "계좌 정보", label: "신부 측 계좌", path: ["content", "accounts", "bride"] },
   { section: "배경 음악", label: "배경 음악", path: ["content", "music"] },
   { section: "사진", label: "대표 사진", path: ["photos", "pastel", "hero"] },
   { section: "사진", label: "갤러리", path: ["photos", "pastel", "gallery"] },
@@ -133,6 +133,10 @@ function displayDiffValue(value, counterpart, current) {
   return String(value ?? "");
 }
 
+function accountDiffLabel(key, entry) {
+  return `${ACCOUNT_SIDE_LABELS[key] ?? entry?.label ?? key} 계좌`;
+}
+
 export function buildPublishDiff(currentDocument, publishedDocument) {
   const changes = DIFF_FIELDS.flatMap((field) => {
     const current = valueAtPath(currentDocument, field.path);
@@ -145,6 +149,21 @@ export function buildPublishDiff(currentDocument, publishedDocument) {
       published: displayDiffValue(published, current, false),
     }];
   });
+  const currentAccounts = currentDocument?.content?.accounts ?? {};
+  const publishedAccounts = publishedDocument?.content?.accounts ?? {};
+  const accountKeys = [...new Set([...Object.keys(currentAccounts), ...Object.keys(publishedAccounts)])];
+  for (const key of accountKeys) {
+    const current = currentAccounts[key];
+    const published = publishedAccounts[key];
+    if (JSON.stringify(current) === JSON.stringify(published)) continue;
+    const suffix = !published ? " 추가" : !current ? " 삭제" : "";
+    changes.push({
+      section: "계좌 정보",
+      label: `${accountDiffLabel(key, current ?? published)}${suffix}`,
+      current: displayDiffValue(current, published, true),
+      published: displayDiffValue(published, current, false),
+    });
+  }
   return {
     changes,
     sections: [...new Set(changes.map((change) => change.section))],
@@ -178,14 +197,34 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
       errors[label] = `${label}의 모든 줄을 입력해 주세요.`;
     }
   }
+  const allAccounts = document?.content?.accounts && typeof document.content.accounts === "object" && !Array.isArray(document.content.accounts)
+    ? document.content.accounts
+    : {};
+  const accountNumberError = (label) => `${label} 계좌번호는 숫자와 하이픈(-)만 ${MAX_LENGTH.accountNumber}자 이내로 입력해 주세요.`;
   for (const side of ACCOUNT_SIDES) {
-    const account = document?.content?.accounts?.[side];
+    const account = allAccounts[side];
     const sideLabel = ACCOUNT_SIDE_LABELS[side];
     required(account?.bank, `${sideLabel} 은행`, MAX_LENGTH.short);
     required(account?.holder, `${sideLabel} 예금주`, MAX_LENGTH.name);
-    if (normalizeAccountNumber(account?.number) === null) {
-      errors[`${sideLabel} 계좌번호`] = `${sideLabel} 계좌번호는 숫자와 하이픈(-)만 ${MAX_LENGTH.accountNumber}자 이내로 입력해 주세요.`;
+    if (normalizeAccountNumber(account?.number) === null) errors[`${sideLabel} 계좌번호`] = accountNumberError(sideLabel);
+  }
+  const extraAccounts = Object.keys(allAccounts).filter((key) => !ACCOUNT_SIDES.includes(key));
+  extraAccounts.forEach((key, index) => {
+    const account = allAccounts[key];
+    const label = `추가 계좌 ${index + 1}`;
+    if (!ACCOUNT_KEY_PATTERN.test(key) || account?.key !== key) {
+      errors[`${label} 항목`] = `${label} 항목 키가 올바르지 않습니다.`;
     }
+    required(account?.label, `${label} 표시 이름`, MAX_LENGTH.short);
+    if (account?.emoji !== undefined && (typeof account.emoji !== "string" || account.emoji.length > 16)) {
+      errors[`${label} 이모지`] = `${label} 이모지는 16자 이내로 입력해 주세요.`;
+    }
+    required(account?.bank, `${label} 은행`, MAX_LENGTH.short);
+    required(account?.holder, `${label} 예금주`, MAX_LENGTH.name);
+    if (normalizeAccountNumber(account?.number) === null) errors[`${label} 계좌번호`] = accountNumberError(label);
+  });
+  if (Object.keys(allAccounts).length > MAX_ACCOUNT_ENTRIES) {
+    errors["계좌 정보"] = `계좌는 최대 ${MAX_ACCOUNT_ENTRIES}개까지 추가할 수 있습니다.`;
   }
   Object.assign(errors, validateMusicContent(document?.content?.music, { allowLocalPreview }));
   const photos = [document?.photos?.pastel?.hero, ...(document?.photos?.pastel?.gallery || [])];
@@ -233,6 +272,19 @@ function normalizeAccount(value, fallback) {
     bank: text(value?.bank, fallback.bank, MAX_LENGTH.short),
     holder: text(value?.holder, fallback.holder, MAX_LENGTH.name),
     number: normalizeAccountNumber(value?.number) ?? fallback.number,
+  };
+}
+
+function normalizeExtraAccount(key, value) {
+  if (!ACCOUNT_KEY_PATTERN.test(key)) return null;
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    key,
+    label: text(source.label, "", MAX_LENGTH.short),
+    emoji: text(source.emoji, "", 16),
+    bank: text(source.bank, "", MAX_LENGTH.short),
+    number: normalizeAccountNumber(source.number) ?? "",
+    holder: text(source.holder, "", MAX_LENGTH.name),
   };
 }
 
@@ -376,6 +428,11 @@ export function normalizeContentDocument(document, fallbackContent, options = {}
     groom: normalizeAccount(accounts.groom, content.accounts.groom),
     bride: normalizeAccount(accounts.bride, content.accounts.bride),
   };
+  for (const key of Object.keys(accounts)) {
+    if (ACCOUNT_SIDES.includes(key)) continue;
+    const extra = normalizeExtraAccount(key, accounts[key]);
+    if (extra) content.accounts[key] = extra;
+  }
   content.music = normalizeMusic(source.schemaVersion === CONTENT_SCHEMA_VERSION ? sourceContent.music : undefined, content.music, options);
   photos.pastel = {
     ...photos.pastel,
