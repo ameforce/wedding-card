@@ -730,7 +730,6 @@ function validateInvitationDocument(document, { publish = false, write = false }
       if (account.side !== "groom" && account.side !== "bride") {
         throw { status: 400, code: "INVALID_CONTENT", message: `content.accounts.${key}.side 값을 확인해 주세요.` };
       }
-      requireText(account.label, `content.accounts.${key}.label`, 80);
       requireText(account.bank, `content.accounts.${key}.bank`, 80);
       requireText(account.holder, `content.accounts.${key}.holder`, 50);
       requireAccountNumber(account.number, `content.accounts.${key}.number`);

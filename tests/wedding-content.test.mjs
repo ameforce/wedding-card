@@ -132,7 +132,7 @@ test("confirmed account details are modeled once for initially collapsed Pastel-
   assert.match(app, /<h3 id="account-title">마음 전하실 곳<\/h3>/);
   assert.match(app, /<details className=\{`contact-group account-group is-\$\{side\}`\} key=\{side\}>/);
   assert.match(app, /list\.map\(\(account\) =>/);
-  assert.match(app, /account-relation/);
+  assert.match(app, /account\.label \|\| account\.holder/);
   assert.match(app, /copyText\(account\.number\)/);
   assert.match(app, /<ContactSection pastel notify=\{notify\} \/>/);
   assert.match(app, /<ScrollReveal><ContactSection \/><\/ScrollReveal>/);

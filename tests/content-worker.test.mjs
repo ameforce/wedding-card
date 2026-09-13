@@ -515,18 +515,18 @@ test("schema v2 writes validate editable account fields while v1 reads stay comp
   assert.doesNotThrow(() => __test.validateInvitationDocument(legacy));
 });
 
-test("schema v2 writes accept labeled extra accounts and reject malformed ones", () => {
+test("schema v2 writes accept extra accounts and reject malformed ones", () => {
   const document = confirmedDocument();
-  document.content.accounts["extra-1"] = { key: "extra-1", side: "groom", label: "추가 계좌", bank: "추가은행", number: "1-2", holder: "추가 예금주" };
-  document.content.accounts["extra-2"] = { key: "extra-2", side: "bride", label: "추가 계좌2", bank: "추가은행2", number: "3-4", holder: "추가 예금주2" };
+  document.content.accounts["extra-1"] = { key: "extra-1", side: "groom", bank: "추가은행", number: "1-2", holder: "추가 예금주" };
+  document.content.accounts["extra-2"] = { key: "extra-2", side: "bride", bank: "추가은행2", number: "3-4", holder: "추가 예금주2" };
   assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
 
   const badKey = confirmedDocument();
-  badKey.content.accounts["bad_key"] = { key: "bad_key", side: "groom", label: "x", bank: "은행", number: "1", holder: "예금주" };
+  badKey.content.accounts["bad_key"] = { key: "bad_key", side: "groom", bank: "은행", number: "1", holder: "예금주" };
   assert.throws(() => __test.validateInvitationDocument(badKey, { write: true }), (error) => error.code === "INVALID_CONTENT");
 
   const noSide = confirmedDocument();
-  noSide.content.accounts["extra-1"] = { key: "extra-1", label: "x", bank: "은행", number: "1", holder: "예금주" };
+  noSide.content.accounts["extra-1"] = { key: "extra-1", bank: "은행", number: "1", holder: "예금주" };
   assert.throws(() => __test.validateInvitationDocument(noSide, { write: true }), (error) => {
     assert.equal(error.code, "INVALID_CONTENT");
     assert.match(error.message, /content\.accounts\.extra-1\.side/);
@@ -534,28 +534,28 @@ test("schema v2 writes accept labeled extra accounts and reject malformed ones",
   });
 
   const badSide = confirmedDocument();
-  badSide.content.accounts["extra-1"] = { key: "extra-1", side: "elsewhere", label: "x", bank: "은행", number: "1", holder: "예금주" };
+  badSide.content.accounts["extra-1"] = { key: "extra-1", side: "elsewhere", bank: "은행", number: "1", holder: "예금주" };
   assert.throws(() => __test.validateInvitationDocument(badSide, { write: true }), (error) => error.code === "INVALID_CONTENT");
 
   const flippedCanonical = confirmedDocument();
   flippedCanonical.content.accounts.groom.side = "bride";
   assert.throws(() => __test.validateInvitationDocument(flippedCanonical, { write: true }), (error) => error.code === "INVALID_CONTENT");
 
-  const noLabel = confirmedDocument();
-  noLabel.content.accounts["extra-1"] = { key: "extra-1", side: "groom", label: "", bank: "은행", number: "1", holder: "예금주" };
-  assert.throws(() => __test.validateInvitationDocument(noLabel, { write: true }), (error) => {
+  const noBank = confirmedDocument();
+  noBank.content.accounts["extra-1"] = { key: "extra-1", side: "groom", bank: "", number: "1", holder: "예금주" };
+  assert.throws(() => __test.validateInvitationDocument(noBank, { write: true }), (error) => {
     assert.equal(error.code, "INVALID_CONTENT");
-    assert.match(error.message, /content\.accounts\.extra-1\.label/);
+    assert.match(error.message, /content\.accounts\.extra-1\.bank/);
     return true;
   });
 
   const mismatchedKey = confirmedDocument();
-  mismatchedKey.content.accounts["extra-1"] = { key: "other", side: "groom", label: "x", bank: "은행", number: "1", holder: "예금주" };
+  mismatchedKey.content.accounts["extra-1"] = { key: "other", side: "groom", bank: "은행", number: "1", holder: "예금주" };
   assert.throws(() => __test.validateInvitationDocument(mismatchedKey, { write: true }), (error) => error.code === "INVALID_CONTENT");
 
   const overflow = confirmedDocument();
   for (let index = 1; index <= 7; index += 1) {
-    overflow.content.accounts[`extra-${index}`] = { key: `extra-${index}`, side: "groom", label: `추가${index}`, bank: "은행", number: "1", holder: "예금주" };
+    overflow.content.accounts[`extra-${index}`] = { key: `extra-${index}`, side: "groom", bank: "은행", number: "1", holder: "예금주" };
   }
   assert.throws(() => __test.validateInvitationDocument(overflow, { write: true }), (error) => error.code === "INVALID_CONTENT");
 });
