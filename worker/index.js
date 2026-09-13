@@ -711,6 +711,9 @@ function validateInvitationDocument(document, { publish = false, write = false }
     }
     for (const side of ["groom", "bride"]) {
       const account = requirePlainObject(accounts[side], `content.accounts.${side}`);
+      if (account.side !== undefined && account.side !== side) {
+        throw { status: 400, code: "INVALID_CONTENT", message: `content.accounts.${side}.side 값을 확인해 주세요.` };
+      }
       requireText(account.bank, `content.accounts.${side}.bank`, 80);
       requireText(account.holder, `content.accounts.${side}.holder`, 50);
       requireAccountNumber(account.number, `content.accounts.${side}.number`);
@@ -723,6 +726,9 @@ function validateInvitationDocument(document, { publish = false, write = false }
       const account = requirePlainObject(accounts[key], `content.accounts.${key}`);
       if (account.key !== key) {
         throw { status: 400, code: "INVALID_CONTENT", message: `content.accounts.${key}.key 값이 항목 키와 다릅니다.` };
+      }
+      if (account.side !== "groom" && account.side !== "bride") {
+        throw { status: 400, code: "INVALID_CONTENT", message: `content.accounts.${key}.side 값을 확인해 주세요.` };
       }
       requireText(account.label, `content.accounts.${key}.label`, 80);
       if (account.emoji !== undefined && (typeof account.emoji !== "string" || account.emoji.length > 16)) {

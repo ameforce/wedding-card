@@ -134,7 +134,9 @@ function displayDiffValue(value, counterpart, current) {
 }
 
 function accountDiffLabel(key, entry) {
-  return `${ACCOUNT_SIDE_LABELS[key] ?? entry?.label ?? key} 계좌`;
+  if (ACCOUNT_SIDE_LABELS[key]) return `${ACCOUNT_SIDE_LABELS[key]} 계좌`;
+  const side = ACCOUNT_SIDE_LABELS[entry?.side] ?? "";
+  return `${side ? `${side} ` : ""}${entry?.label || key} 계좌`;
 }
 
 export function buildPublishDiff(currentDocument, publishedDocument) {
@@ -209,9 +211,14 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
     if (normalizeAccountNumber(account?.number) === null) errors[`${sideLabel} 계좌번호`] = accountNumberError(sideLabel);
   }
   const extraAccounts = Object.keys(allAccounts).filter((key) => !ACCOUNT_SIDES.includes(key));
-  extraAccounts.forEach((key, index) => {
+  const perSideCount = { groom: 0, bride: 0 };
+  extraAccounts.forEach((key) => {
     const account = allAccounts[key];
-    const label = `추가 계좌 ${index + 1}`;
+    const sideValid = ACCOUNT_SIDES.includes(account?.side);
+    const side = sideValid ? account.side : "groom";
+    perSideCount[side] += 1;
+    const label = `${ACCOUNT_SIDE_LABELS[side]} 추가 계좌 ${perSideCount[side]}`;
+    if (!sideValid) errors[`${label} 소속`] = `${label}의 소속(신랑 측/신부 측)을 확인해 주세요.`;
     if (!ACCOUNT_KEY_PATTERN.test(key) || account?.key !== key) {
       errors[`${label} 항목`] = `${label} 항목 키가 올바르지 않습니다.`;
     }
@@ -280,6 +287,7 @@ function normalizeExtraAccount(key, value) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     key,
+    side: ACCOUNT_SIDES.includes(source.side) ? source.side : "groom",
     label: text(source.label, "", MAX_LENGTH.short),
     emoji: text(source.emoji, "", 16),
     bank: text(source.bank, "", MAX_LENGTH.short),

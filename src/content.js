@@ -114,6 +114,7 @@ export const weddingContent = {
   accounts: {
     groom: {
       key: "groom",
+      side: "groom",
       label: "신랑 측",
       emoji: "🤵",
       bank: "기업은행",
@@ -122,6 +123,7 @@ export const weddingContent = {
     },
     bride: {
       key: "bride",
+      side: "bride",
       label: "신부 측",
       emoji: "👰",
       bank: "국민",
