@@ -439,7 +439,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-editor fieldset:first-of-type { border-top: 0; }
 .content-admin-editor legend { margin-bottom: 18px; padding: 0; font-family: "Noto Serif KR Variable", serif; font-size: 21px; font-weight: 620; }
 .content-admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.content-admin-venue-fields { display: grid; min-width: 0; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.content-admin-venue-fields { display: grid; min-width: 0; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .content-admin-field { display: grid; align-content: start; gap: 7px; min-width: 0; color: #334b62; font-size: 14px; }
 .content-admin-field.is-wide { grid-column: 1 / -1; }
 .content-admin-field > span { font-weight: 650; }
@@ -453,16 +453,16 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-storage > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .content-admin-storage span, .content-admin-storage small { color: #6b7c8d; font-size: 13px; line-height: 1.5; }
 .content-admin-storage progress { width: 100%; height: 9px; overflow: hidden; accent-color: #6486a5; border: 0; border-radius: 999px; }
-.content-admin-music-card { display: grid; gap: 18px; padding: 18px; background: #f6f4f0; border-radius: 16px; }
+.content-admin-music-card { display: grid; gap: 12px; padding: 12px; background: #f6f4f0; border-radius: 10px; }
 .content-admin-music-upload { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid rgba(65,83,104,.12); }
 .content-admin-music-upload > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; }
 .content-admin-music-upload > div span, .content-admin-music-upload > small { color: #71808d; font-size: 13px; line-height: 1.5; }
 .content-admin-music-preview { display: block; width: 100%; min-height: 44px; }
-.content-admin-account-groups { display: grid; gap: 16px; }
-.content-admin-account-side { display: grid; gap: 12px; padding: 16px; border: 1px solid rgba(59,81,103,.18); border-radius: 18px; }
-.content-admin-account-side-title { font-size: 17px; font-weight: 720; }
-.content-admin-account-group { display: grid; gap: 14px; padding: 18px; background: #f6f4f0; border-radius: 16px; }
-.content-admin-account-group > strong { font-size: 16px; }
+.content-admin-account-groups { display: grid; gap: 12px; }
+.content-admin-account-side { display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(59,81,103,.18); border-radius: 12px; }
+.content-admin-account-side-title { font-size: 15px; font-weight: 720; }
+.content-admin-account-group { display: grid; gap: 10px; padding: 12px; background: #f6f4f0; border-radius: 10px; }
+.content-admin-account-group > strong { font-size: 14px; }
 .content-admin-account-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .content-admin-account-heading > strong { font-size: 16px; }
 .content-admin-account-fixed { padding: 3px 9px; color: #617e99; background: rgba(97,126,153,.1); border: 1px solid rgba(97,126,153,.25); border-radius: 999px; font-size: 12px; font-weight: 650; }
@@ -561,20 +561,20 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-validation-summary ul { display: grid; margin: 0; padding: 0; gap: 5px; list-style: none; }
 .content-admin-validation-summary li { display: grid; grid-template-columns: minmax(110px, auto) minmax(0, 1fr); gap: 8px; }
 .content-admin-validation-summary li span { overflow-wrap: anywhere; }
-.content-admin-editor fieldset { padding: 16px 0; }
-.content-admin-editor legend { margin-bottom: 13px; color: var(--admin-ink-strong); font: 650 17px "Noto Serif KR Variable", serif; }
+.content-admin-editor fieldset { padding: 12px 0; }
+.content-admin-editor legend { margin-bottom: 10px; color: var(--admin-ink-strong); font: 650 17px "Noto Serif KR Variable", serif; }
 .content-admin-section { border-top: 1px solid var(--admin-border); }
-.content-admin-section summary { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 10px; color: var(--admin-ink-strong); cursor: pointer; list-style: none; font: 650 16px "Noto Serif KR Variable", serif; }
+.content-admin-section summary { display: flex; min-height: 46px; align-items: center; justify-content: space-between; gap: 10px; color: var(--admin-ink-strong); cursor: pointer; list-style: none; font: 650 16px "Noto Serif KR Variable", serif; }
 .content-admin-section summary::-webkit-details-marker { display: none; }
 .content-admin-section summary::after { content: "+"; display: grid; width: 28px; height: 28px; place-items: center; color: #66839e; border: 1px solid #d6e1e9; border-radius: 50%; font: 400 18px/1 "Noto Sans KR Variable", sans-serif; }
 .content-admin-section[open] summary::after { content: "−"; }
 .content-admin-section summary span { width: 8px; height: 8px; margin-left: auto; background: #e54e4e; border-radius: 50%; }
 .content-admin-section fieldset { padding-top: 0; }
-.content-admin-grid { gap: 12px; }
-.content-admin-field { gap: 5px; color: #28557d; font-size: 12px; }
-.content-admin-field input, .content-admin-field textarea { min-height: 40px; padding: 8px 10px; color: #0d477c; border-color: #d4e0e9; border-radius: 7px; font-size: 14px; }
-.content-admin-field textarea { line-height: 1.6; }
-.content-admin-derived { display: flex; min-height: 38px; margin: 0; align-items: center; gap: 7px; color: #49708f; font-size: 12px; }
+.content-admin-grid { gap: 10px; }
+.content-admin-field { gap: 4px; color: #28557d; font-size: 12px; }
+.content-admin-field input, .content-admin-field textarea, .content-admin-field select { min-height: 34px; padding: 5px 9px; color: #0d477c; border-color: #d4e0e9; border-radius: 7px; font-size: 13px; line-height: 1.45; }
+.content-admin-field textarea { line-height: 1.5; }
+.content-admin-derived { display: flex; min-height: 32px; margin: 0; align-items: center; gap: 7px; color: #49708f; font-size: 12px; }
 .content-admin-derived.is-wide { grid-column: 1 / -1; }
 .content-admin-derived svg { width: 16px; height: 16px; color: #3d835d; }
 .content-admin-photo-card { grid-template-columns: 92px minmax(0, 1fr); padding: 12px; gap: 12px; border: 1px solid #e2e8ed; border-radius: 10px; }
