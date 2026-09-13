@@ -151,6 +151,81 @@ test("publish review summarizes account edits with bank, number, and holder", ()
   assert.doesNotMatch(change.current, /\[object Object\]/);
 });
 
+test("extra account entries round-trip with their own label and emoji after the fixed sides", () => {
+  const document = createContentDocument(weddingContent);
+  document.content.accounts["extra-1"] = { key: "extra-1", label: "신랑 아버지", emoji: "🤵", bank: "추가은행", number: "111-222", holder: "추가 예금주" };
+  const normalized = normalizeContentDocument(document, weddingContent);
+  assert.deepEqual(Object.keys(normalized.content.accounts).slice(0, 2), ["groom", "bride"]);
+  assert.deepEqual(normalized.content.accounts["extra-1"], {
+    key: "extra-1",
+    label: "신랑 아버지",
+    emoji: "🤵",
+    bank: "추가은행",
+    number: "111-222",
+    holder: "추가 예금주",
+  });
+  assert.deepEqual(validateEditableContentDocument(normalized), {});
+});
+
+test("extra accounts drop unsafe keys and require complete fields", () => {
+  const document = createContentDocument(weddingContent);
+  const crafted = JSON.parse('{"bad_key":{"key":"bad_key","label":"x","emoji":"","bank":"은행","number":"1-2","holder":"예금주"},"__proto__":{"key":"__proto__","label":"x","emoji":"","bank":"은행","number":"1","holder":"예금주"}}');
+  document.content.accounts = { ...document.content.accounts, ...crafted };
+  const normalized = normalizeContentDocument(document, weddingContent);
+  assert.equal(Object.hasOwn(normalized.content.accounts, "bad_key"), false);
+  assert.equal(Object.hasOwn(normalized.content.accounts, "__proto__"), false);
+  assert.equal(Object.getPrototypeOf(normalized.content.accounts), Object.prototype);
+  const keyErrors = validateEditableContentDocument(document);
+  assert.equal(typeof keyErrors["추가 계좌 1 항목"], "string");
+  assert.equal(typeof keyErrors["추가 계좌 2 항목"], "string");
+
+  document.content.accounts = { groom: document.content.accounts.groom, bride: document.content.accounts.bride };
+  document.content.accounts["extra-1"] = { key: "extra-1", label: "", emoji: "", bank: "", number: "abc", holder: "" };
+  const errors = validateEditableContentDocument(document);
+  assert.equal(typeof errors["추가 계좌 1 표시 이름"], "string");
+  assert.equal(typeof errors["추가 계좌 1 은행"], "string");
+  assert.equal(typeof errors["추가 계좌 1 예금주"], "string");
+  assert.equal(typeof errors["추가 계좌 1 계좌번호"], "string");
+});
+
+test("account entries are capped and publish review labels added and removed rows", () => {
+  const overflow = createContentDocument(weddingContent);
+  for (let index = 1; index <= 7; index += 1) {
+    overflow.content.accounts[`extra-${index}`] = { key: `extra-${index}`, label: `추가${index}`, emoji: "", bank: "은행", number: "1", holder: "예금주" };
+  }
+  assert.equal(typeof validateEditableContentDocument(overflow)["계좌 정보"], "string");
+
+  const published = createContentDocument(weddingContent);
+  const current = cloneContentDocument(published);
+  current.content.accounts["extra-1"] = { key: "extra-1", label: "신랑 아버지", emoji: "🤵", bank: "추가은행", number: "111-222", holder: "추가 예금주" };
+  delete current.content.accounts.bride;
+  const diff = buildPublishDiff(current, published);
+  assert.deepEqual(diff.sections, ["계좌 정보"]);
+  const added = diff.changes.find((change) => change.label.endsWith("추가"));
+  const removed = diff.changes.find((change) => change.label.endsWith("삭제"));
+  assert.match(added.label, /신랑 아버지 계좌/);
+  assert.match(added.current, /추가은행/);
+  assert.match(added.current, /111-222/);
+  assert.match(removed.label, /신부 측 계좌/);
+  assert.match(removed.published, /예금주/);
+});
+
+test("the admin editor can add and remove extra account entries", async () => {
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /계좌 추가/);
+  assert.match(source, /addAccount/);
+  assert.match(source, /removeAccount/);
+  assert.match(source, /MAX_ACCOUNT_ENTRIES/);
+  assert.match(source, /Object\.entries\(accounts\)/);
+  assert.match(source, /label="표시 이름"/);
+  assert.match(source, /label="이모지"/);
+  assert.match(source, /\["content", "accounts", key, "label"\]/);
+  assert.match(source, /\["content", "accounts", key, "emoji"\]/);
+  assert.match(styles, /\.content-admin-account-add/);
+  assert.match(styles, /\.content-admin-account-remove/);
+});
+
 test("the admin editor exposes account fields for both sides with a preview anchor", async () => {
   const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");

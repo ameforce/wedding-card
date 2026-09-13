@@ -461,6 +461,13 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-account-groups { display: grid; gap: 16px; }
 .content-admin-account-group { display: grid; gap: 14px; padding: 18px; background: #f6f4f0; border-radius: 16px; }
 .content-admin-account-group > strong { font-size: 16px; }
+.content-admin-account-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.content-admin-account-heading > strong { font-size: 16px; }
+.content-admin-account-remove { display: inline-flex; min-height: 36px; padding: 0 12px; align-items: center; gap: 5px; color: #8b3f49; background: rgba(255,255,255,.7); border: 1px solid rgba(139,63,73,.25); border-radius: 9px; cursor: pointer; font: 620 13px "Noto Sans KR Variable", sans-serif; }
+.content-admin-account-remove svg { width: 15px; height: 15px; }
+.content-admin-account-remove:disabled { cursor: not-allowed; opacity: .5; }
+.content-admin-account-add { display: inline-flex; width: fit-content; min-height: 44px; margin-top: 16px; padding: 0 16px; align-items: center; gap: 6px; color: #fff; background: #617e99; border: 0; border-radius: 10px; cursor: pointer; font: 650 14px "Noto Sans KR Variable", sans-serif; }
+.content-admin-account-add:disabled { cursor: not-allowed; opacity: .5; }
 .content-admin-photo-card { display: grid; grid-template-columns: 136px minmax(0, 1fr); align-items: start; gap: 18px; padding: 16px; background: #f6f4f0; border-radius: 16px; }
 .content-admin-photo-card > img { width: 136px; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 44px 44px 12px 12px; }
 .content-admin-photo-card > div { display: grid; gap: 12px; }

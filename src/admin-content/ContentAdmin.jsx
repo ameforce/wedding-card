@@ -1,10 +1,11 @@
-import { ArrowClockwise, ArrowsOutSimple, CheckCircle, DeviceMobile, PencilSimple, Warning, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowsOutSimple, CheckCircle, DeviceMobile, PencilSimple, Plus, Trash, Warning, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { weddingContent } from "../content.js";
 import {
   ACCOUNT_SIDE_LABELS,
   ACCOUNT_SIDES,
+  MAX_ACCOUNT_ENTRIES,
   buildPublishDiff,
   cloneContentDocument,
   contentDocumentsEqual,
@@ -372,18 +373,39 @@ export function ContentAdmin() {
     return () => window.clearTimeout(timer);
   }, [editingDocument, previewFocus]);
 
+  const commitEdit = (next, focusSelector) => {
+    documentRef.current = next;
+    setEditingDocument(next);
+    setStatus(contentDocumentsEqual(next, appliedDocument)
+      ? { tone: "success", message: "현재 내용은 마지막 임시 적용본과 같습니다." }
+      : { tone: "neutral", message: "아직 적용하지 않은 변경사항이 있습니다." });
+    setPreviewFocus(focusSelector);
+  };
+
   const update = (path, value) => {
     const next = setAtPath(documentRef.current, path, value);
     if (path[0] === "content" && path[1] === "event" && ["isoDate", "startTime24h"].includes(path[2])) {
       const derived = deriveEventDisplay(next.content.event.isoDate, next.content.event.startTime24h);
       if (derived) Object.assign(next.content.event, derived);
     }
-    documentRef.current = next;
-    setEditingDocument(next);
-    setStatus(contentDocumentsEqual(next, appliedDocument)
-      ? { tone: "success", message: "현재 내용은 마지막 임시 적용본과 같습니다." }
-      : { tone: "neutral", message: "아직 적용하지 않은 변경사항이 있습니다." });
-    setPreviewFocus(previewSelectorForPath(path));
+    commitEdit(next, previewSelectorForPath(path));
+  };
+
+  const addAccount = () => {
+    const current = documentRef.current.content.accounts;
+    if (Object.keys(current).length >= MAX_ACCOUNT_ENTRIES) return;
+    let index = 1;
+    let key = `extra-${index}`;
+    while (current[key]) key = `extra-${index += 1}`;
+    const next = cloneContentDocument(documentRef.current);
+    next.content.accounts[key] = { key, label: "", emoji: "", bank: "", number: "", holder: "" };
+    commitEdit(next, ".account-groups");
+  };
+
+  const removeAccount = (key) => {
+    const next = cloneContentDocument(documentRef.current);
+    delete next.content.accounts[key];
+    commitEdit(next, ".account-groups");
   };
 
   const saveDraft = async ({ quiet = false, keepBusy = false } = {}) => {
@@ -595,7 +617,7 @@ export function ContentAdmin() {
             </div>
           </CollapsibleSection>
 
-          <CollapsibleSection title="계좌 정보" busy={busy} attention={ACCOUNT_SIDES.some((side) => validationErrors[`${ACCOUNT_SIDE_LABELS[side]} 계좌번호`] || validationErrors[`${ACCOUNT_SIDE_LABELS[side]} 은행`] || validationErrors[`${ACCOUNT_SIDE_LABELS[side]} 예금주`])}>
+          <CollapsibleSection title="계좌 정보" busy={busy} attention={Object.keys(validationErrors).some((key) => key.includes("계좌") || key.includes("은행") || key.includes("예금주") || key.includes("이모지"))}>
             <div className="content-admin-account-groups">
               {ACCOUNT_SIDES.map((side) => {
                 const account = accounts[side];
@@ -611,7 +633,32 @@ export function ContentAdmin() {
                   </section>
                 );
               })}
+              {Object.entries(accounts)
+                .filter(([key]) => !ACCOUNT_SIDES.includes(key))
+                .map(([key, account], index) => {
+                  const label = `추가 계좌 ${index + 1}`;
+                  return (
+                    <section className="content-admin-account-group" key={key}>
+                      <div className="content-admin-account-heading">
+                        <strong>{label}</strong>
+                        <button type="button" className="content-admin-account-remove" onClick={() => removeAccount(key)} aria-label={`${label} 삭제`}>
+                          <Trash aria-hidden="true" weight="light" /> 삭제
+                        </button>
+                      </div>
+                      <div className="content-admin-grid">
+                        <Field label="표시 이름" value={account.label} maxLength={80} error={validationErrors[`${label} 표시 이름`]} onChange={(value) => update(["content", "accounts", key, "label"], value)} hint="공개 화면에서 `표시 이름 계좌`로 표시됩니다. 예: 신랑 아버지" />
+                        <Field label="이모지" required={false} value={account.emoji} maxLength={16} error={validationErrors[`${label} 이모지`]} onChange={(value) => update(["content", "accounts", key, "emoji"], value)} hint="선택 입력. 예: 🤵" />
+                        <Field label="은행" value={account.bank} maxLength={80} error={validationErrors[`${label} 은행`]} onChange={(value) => update(["content", "accounts", key, "bank"], value)} />
+                        <Field label="예금주" value={account.holder} maxLength={50} error={validationErrors[`${label} 예금주`]} onChange={(value) => update(["content", "accounts", key, "holder"], value)} />
+                        <Field label="계좌번호" wide inputMode="numeric" value={account.number} maxLength={60} error={validationErrors[`${label} 계좌번호`]} onChange={(value) => update(["content", "accounts", key, "number"], value)} hint="숫자와 하이픈(-)만 입력해 주세요. 예: 123-45-67890" />
+                      </div>
+                    </section>
+                  );
+                })}
             </div>
+            <button type="button" className="content-admin-account-add" onClick={addAccount} disabled={Object.keys(accounts).length >= MAX_ACCOUNT_ENTRIES}>
+              <Plus aria-hidden="true" weight="light" /> 계좌 추가
+            </button>
           </CollapsibleSection>
 
           <CollapsibleSection title="배경 음악" busy={busy}>

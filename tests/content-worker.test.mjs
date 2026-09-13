@@ -515,6 +515,34 @@ test("schema v2 writes validate editable account fields while v1 reads stay comp
   assert.doesNotThrow(() => __test.validateInvitationDocument(legacy));
 });
 
+test("schema v2 writes accept labeled extra accounts and reject malformed ones", () => {
+  const document = confirmedDocument();
+  document.content.accounts["extra-1"] = { key: "extra-1", label: "추가 계좌", emoji: "", bank: "추가은행", number: "1-2", holder: "추가 예금주" };
+  assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
+
+  const badKey = confirmedDocument();
+  badKey.content.accounts["bad_key"] = { key: "bad_key", label: "x", emoji: "", bank: "은행", number: "1", holder: "예금주" };
+  assert.throws(() => __test.validateInvitationDocument(badKey, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const noLabel = confirmedDocument();
+  noLabel.content.accounts["extra-1"] = { key: "extra-1", label: "", emoji: "", bank: "은행", number: "1", holder: "예금주" };
+  assert.throws(() => __test.validateInvitationDocument(noLabel, { write: true }), (error) => {
+    assert.equal(error.code, "INVALID_CONTENT");
+    assert.match(error.message, /content\.accounts\.extra-1\.label/);
+    return true;
+  });
+
+  const mismatchedKey = confirmedDocument();
+  mismatchedKey.content.accounts["extra-1"] = { key: "other", label: "x", emoji: "", bank: "은행", number: "1", holder: "예금주" };
+  assert.throws(() => __test.validateInvitationDocument(mismatchedKey, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const overflow = confirmedDocument();
+  for (let index = 1; index <= 7; index += 1) {
+    overflow.content.accounts[`extra-${index}`] = { key: `extra-${index}`, label: `추가${index}`, emoji: "", bank: "은행", number: "1", holder: "예금주" };
+  }
+  assert.throws(() => __test.validateInvitationDocument(overflow, { write: true }), (error) => error.code === "INVALID_CONTENT");
+});
+
 test("content publishing rejects unconfirmed or search-indexable documents", async () => {
   const db = invitationDatabase();
   const fixture = await accessFixture();
