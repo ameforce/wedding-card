@@ -10,7 +10,11 @@ const MAX_LENGTH = {
   photoAlt: 300,
   photoUrl: 2048,
   url: 2048,
+  accountNumber: 40,
 };
+
+export const ACCOUNT_SIDES = Object.freeze(["groom", "bride"]);
+export const ACCOUNT_SIDE_LABELS = Object.freeze({ groom: "신랑 측", bride: "신부 측" });
 
 const DAY_LABELS = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 export const EVENT_TIMEZONE = Object.freeze({ iana: "Asia/Seoul", utcOffset: "+09:00" });
@@ -32,6 +36,8 @@ const DIFF_FIELDS = [
   { section: "교통과 주차", label: "주차", path: ["content", "transit", "parking"] },
   { section: "교통과 주차", label: "주차 등록 위치", path: ["content", "transit", "parkingRegistrationLocation"] },
   { section: "교통과 주차", label: "주차 등록 안내", path: ["content", "transit", "parkingRegistration"] },
+  { section: "계좌 정보", label: "신랑 측 계좌", path: ["content", "accounts", "groom"] },
+  { section: "계좌 정보", label: "신부 측 계좌", path: ["content", "accounts", "bride"] },
   { section: "배경 음악", label: "배경 음악", path: ["content", "music"] },
   { section: "사진", label: "대표 사진", path: ["photos", "pastel", "hero"] },
   { section: "사진", label: "갤러리", path: ["photos", "pastel", "gallery"] },
@@ -119,6 +125,9 @@ function displayDiffValue(value, counterpart, current) {
     if (typeof value.alt === "string") {
       return [value.alt, mediaLabel(value.src, counterpart?.src, current), value.position].filter(Boolean).join(" · ");
     }
+    if (typeof value.bank === "string" || typeof value.number === "string") {
+      return [`${value.bank ?? ""} ${value.number ?? ""}`.trim(), value.holder && `예금주 ${value.holder}`].filter(Boolean).join(" · ");
+    }
     return JSON.stringify(value);
   }
   return String(value ?? "");
@@ -169,6 +178,15 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
       errors[label] = `${label}의 모든 줄을 입력해 주세요.`;
     }
   }
+  for (const side of ACCOUNT_SIDES) {
+    const account = document?.content?.accounts?.[side];
+    const sideLabel = ACCOUNT_SIDE_LABELS[side];
+    required(account?.bank, `${sideLabel} 은행`, MAX_LENGTH.short);
+    required(account?.holder, `${sideLabel} 예금주`, MAX_LENGTH.name);
+    if (normalizeAccountNumber(account?.number) === null) {
+      errors[`${sideLabel} 계좌번호`] = `${sideLabel} 계좌번호는 숫자와 하이픈(-)만 ${MAX_LENGTH.accountNumber}자 이내로 입력해 주세요.`;
+    }
+  }
   Object.assign(errors, validateMusicContent(document?.content?.music, { allowLocalPreview }));
   const photos = [document?.photos?.pastel?.hero, ...(document?.photos?.pastel?.gallery || [])];
   if (photos.length !== 5) {
@@ -201,6 +219,21 @@ export function serializeContentDocument(document, { allowLocalPreview = false }
 
 function cropPosition(value, fallback) {
   return /^\d{1,3}%\s+\d{1,3}%$/.test(value) ? value : fallback;
+}
+
+function normalizeAccountNumber(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, "");
+  return normalized.length <= MAX_LENGTH.accountNumber && /^\d+(?:-\d+)*$/.test(normalized) ? normalized : null;
+}
+
+function normalizeAccount(value, fallback) {
+  return {
+    ...fallback,
+    bank: text(value?.bank, fallback.bank, MAX_LENGTH.short),
+    holder: text(value?.holder, fallback.holder, MAX_LENGTH.name),
+    number: normalizeAccountNumber(value?.number) ?? fallback.number,
+  };
 }
 
 function photoUrl(value, allowLocalPreview) {
@@ -301,6 +334,7 @@ export function normalizeContentDocument(document, fallbackContent, options = {}
   const event = sourceContent.event ?? {};
   const venue = sourceContent.venue ?? {};
   const transit = sourceContent.transit ?? {};
+  const accounts = sourceContent.accounts ?? {};
   const sourcePhotos = source.photos ?? {};
   const content = clone(fallback.content);
   const photos = clone(fallback.photos);
@@ -337,6 +371,10 @@ export function normalizeContentDocument(document, fallbackContent, options = {}
     parking: text(transit.parking, content.transit.parking),
     parkingRegistrationLocation: text(transit.parkingRegistrationLocation, content.transit.parkingRegistrationLocation),
     parkingRegistration: text(transit.parkingRegistration, content.transit.parkingRegistration),
+  };
+  content.accounts = {
+    groom: normalizeAccount(accounts.groom, content.accounts.groom),
+    bride: normalizeAccount(accounts.bride, content.accounts.bride),
   };
   content.music = normalizeMusic(source.schemaVersion === CONTENT_SCHEMA_VERSION ? sourceContent.music : undefined, content.music, options);
   photos.pastel = {

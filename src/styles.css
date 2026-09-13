@@ -458,6 +458,9 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-music-upload > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; }
 .content-admin-music-upload > div span, .content-admin-music-upload > small { color: #71808d; font-size: 13px; line-height: 1.5; }
 .content-admin-music-preview { display: block; width: 100%; min-height: 44px; }
+.content-admin-account-groups { display: grid; gap: 16px; }
+.content-admin-account-group { display: grid; gap: 14px; padding: 18px; background: #f6f4f0; border-radius: 16px; }
+.content-admin-account-group > strong { font-size: 16px; }
 .content-admin-photo-card { display: grid; grid-template-columns: 136px minmax(0, 1fr); align-items: start; gap: 18px; padding: 16px; background: #f6f4f0; border-radius: 16px; }
 .content-admin-photo-card > img { width: 136px; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 44px 44px 12px 12px; }
 .content-admin-photo-card > div { display: grid; gap: 12px; }

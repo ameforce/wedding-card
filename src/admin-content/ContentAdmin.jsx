@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { weddingContent } from "../content.js";
 import {
+  ACCOUNT_SIDE_LABELS,
+  ACCOUNT_SIDES,
   buildPublishDiff,
   cloneContentDocument,
   contentDocumentsEqual,
@@ -32,11 +34,11 @@ function setAtPath(document, path, value) {
   return next;
 }
 
-function Field({ label, value, onChange, type = "text", hint, error, required = true, wide = false, maxLength }) {
+function Field({ label, value, onChange, type = "text", hint, error, required = true, wide = false, maxLength, inputMode }) {
   return (
     <label className={`content-admin-field ${wide ? "is-wide" : ""}`}>
       <span>{label}</span>
-      <input type={type} value={value} maxLength={maxLength} onChange={(event) => onChange(event.target.value)} required={required} aria-invalid={error ? "true" : undefined} />
+      <input type={type} inputMode={inputMode} value={value} maxLength={maxLength} onChange={(event) => onChange(event.target.value)} required={required} aria-invalid={error ? "true" : undefined} />
       {error ? <small className="is-error" role="alert">{error}</small> : hint && <small>{hint}</small>}
     </label>
   );
@@ -108,6 +110,7 @@ function previewSelectorForPath(path) {
     event: ".pastel-schedule",
     venue: ".location-section",
     transit: ".location-section",
+    accounts: ".account-groups",
     message: ".greeting",
     story: ".pastel-story",
     music: ".music-control",
@@ -509,6 +512,7 @@ export function ContentAdmin() {
   const event = editingDocument.content.event;
   const venue = editingDocument.content.venue;
   const transit = editingDocument.content.transit;
+  const accounts = editingDocument.content.accounts;
   const music = editingDocument.content.music;
   const photos = editingDocument.photos.pastel;
   const musicErrors = validateMusicContent(music, { allowLocalPreview: localReview });
@@ -588,6 +592,25 @@ export function ContentAdmin() {
               <Field label="주차" value={transit.parking} onChange={(value) => update(["content", "transit", "parking"], value)} />
               <Field label="주차 등록 위치" value={transit.parkingRegistrationLocation} onChange={(value) => update(["content", "transit", "parkingRegistrationLocation"], value)} />
               <Field label="주차 등록 안내" value={transit.parkingRegistration} onChange={(value) => update(["content", "transit", "parkingRegistration"], value)} />
+            </div>
+          </CollapsibleSection>
+
+          <CollapsibleSection title="계좌 정보" busy={busy} attention={ACCOUNT_SIDES.some((side) => validationErrors[`${ACCOUNT_SIDE_LABELS[side]} 계좌번호`] || validationErrors[`${ACCOUNT_SIDE_LABELS[side]} 은행`] || validationErrors[`${ACCOUNT_SIDE_LABELS[side]} 예금주`])}>
+            <div className="content-admin-account-groups">
+              {ACCOUNT_SIDES.map((side) => {
+                const account = accounts[side];
+                const sideLabel = ACCOUNT_SIDE_LABELS[side];
+                return (
+                  <section className="content-admin-account-group" key={side}>
+                    <strong>{sideLabel} 계좌</strong>
+                    <div className="content-admin-grid">
+                      <Field label="은행" value={account.bank} maxLength={80} error={validationErrors[`${sideLabel} 은행`]} onChange={(value) => update(["content", "accounts", side, "bank"], value)} />
+                      <Field label="예금주" value={account.holder} maxLength={50} error={validationErrors[`${sideLabel} 예금주`]} onChange={(value) => update(["content", "accounts", side, "holder"], value)} />
+                      <Field label="계좌번호" wide inputMode="numeric" value={account.number} maxLength={60} error={validationErrors[`${sideLabel} 계좌번호`]} onChange={(value) => update(["content", "accounts", side, "number"], value)} hint="숫자와 하이픈(-)만 입력해 주세요. 예: 123-45-67890" />
+                    </div>
+                  </section>
+                );
+              })}
             </div>
           </CollapsibleSection>
 

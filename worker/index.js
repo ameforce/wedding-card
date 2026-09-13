@@ -697,6 +697,16 @@ function validateInvitationDocument(document, { publish = false, write = false }
     requireHttpsUrl(music.sourceUrl, "content.music.sourceUrl");
     requireText(music.licenseLabel, "content.music.licenseLabel", 80);
     requireHttpsUrl(music.licenseUrl, "content.music.licenseUrl");
+    const accounts = requirePlainObject(content.accounts, "content.accounts");
+    for (const side of ["groom", "bride"]) {
+      const account = requirePlainObject(accounts[side], `content.accounts.${side}`);
+      requireText(account.bank, `content.accounts.${side}.bank`, 80);
+      requireText(account.holder, `content.accounts.${side}.holder`, 50);
+      const accountNumber = typeof account.number === "string" ? account.number.replace(/\s+/g, "") : "";
+      if (!/^\d+(?:-\d+)*$/.test(accountNumber) || accountNumber.length > 40) {
+        throw { status: 400, code: "INVALID_CONTENT", message: `content.accounts.${side}.number 값을 확인해 주세요.` };
+      }
+    }
   }
   if (write && document.schemaVersion !== 2) {
     throw { status: 400, code: "UNSUPPORTED_CONTENT_SCHEMA", message: "새 초대장 콘텐츠는 schema v2로 저장해야 합니다." };
