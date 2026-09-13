@@ -369,7 +369,10 @@ export function ContentAdmin() {
       const target = previewDocument.querySelector(previewFocus);
       if (!target) return;
       target.classList.add("is-admin-preview-focused");
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      const view = previewDocument.defaultView;
+      const scroller = previewDocument.scrollingElement || previewDocument.documentElement;
+      const top = target.getBoundingClientRect().top + scroller.scrollTop - (view.innerHeight - target.offsetHeight) / 2;
+      scroller.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
     };
     const timer = window.setTimeout(focusPreview, 120);
     return () => window.clearTimeout(timer);

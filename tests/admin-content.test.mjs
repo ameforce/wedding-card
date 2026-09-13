@@ -651,6 +651,9 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.match(styles, /\.content-admin-preview-frame\s*\{[^}]*position:\s*relative/);
   assert.match(styles, /\.content-admin-preview iframe\s*\{[^}]*position:\s*absolute[^}]*left:\s*50%[^}]*transform:\s*translateX\(-50%\) scale\(var\(--content-preview-scale\)\)/);
   assert.doesNotMatch(styles, /\.content-admin-preview iframe\s*\{[^}]*transform:\s*scale\(/);
+  assert.doesNotMatch(source, /scrollIntoView/);
+  assert.match(source, /scrollingElement \|\| previewDocument\.documentElement/);
+  assert.match(source, /scroller\.scrollTo\(\{ top: Math\.max\(0, top\), behavior: "smooth" \}\)/);
 });
 
 test("public music controls and credits resolve from runtime content and reset on track replacement", async () => {
