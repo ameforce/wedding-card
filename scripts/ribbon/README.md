@@ -15,11 +15,17 @@ blender --background --factory-startup `
   --python scripts/ribbon/render_approved_sequence.py -- `
   --out <new-render-directory>
 
-python scripts/ribbon/package_sequence.py `
+py -3.14 scripts/ribbon/package_sequence.py `
   --input <new-render-directory> `
   --out <new-sequence-directory> `
   --count 75 --release-frame 31
 ```
+
+정식 Windows x64 패키징 환경은 Python 3.14.7, Pillow 11.3.0과 그 휠에
+포함된 libwebp 1.5.0이다. 새 가상 환경에서는 먼저
+`py -3.14 -m pip install --only-binary=:all: Pillow==11.3.0`을 실행한다.
+패키저는 세 버전을 모두 확인하고 다른 환경에서는 공개 파일을 쓰기 전에
+중단한다.
 
 모든 출력 디렉터리는 새 디렉터리이거나 비어 있어야 한다. 패키지는 모든 알파와
 가시 RGB를 보존하며, 완전 투명 픽셀의 보이지 않는 RGB만 0으로 정리한다.

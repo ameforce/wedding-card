@@ -60,11 +60,18 @@ blender --background --factory-startup `
 동작 증명본을 정상 속도와 0.25배 속도로 확인한 뒤 투명 프레임을 패키징한다.
 
 ```powershell
-python scripts/ribbon/package_sequence.py `
+py -3.14 scripts/ribbon/package_sequence.py `
   --input <new-render-directory> `
   --out <new-sequence-directory> `
   --count 75 --release-frame 31
 ```
+
+정식 패키징 도구 체인은 Windows x64의 Python 3.14.7, Pillow 11.3.0과
+Pillow 휠에 포함된 libwebp 1.5.0으로 고정한다. 새 가상 환경에서는
+`py -3.14 -m pip install --only-binary=:all: Pillow==11.3.0`으로 설치한다.
+`package_sequence.py`가 Python, Pillow와 libwebp 버전을 모두 검사하므로
+다른 환경은 출력 디렉터리를 만들기 전에 실패한다. 이 버전 고정은 같은 PNG가
+같은 WebP 바이트와 매니페스트 해시 이름으로 패키징되게 하는 공개 계약이다.
 
 패키저는 완전 투명 픽셀의 보이지 않는 RGB만 0으로 정리한다. 나머지 알파와
 가시 RGB는 PNG와 동일한 무손실 WebP로 보존한다. 각 파일 이름에는 내용

@@ -21,7 +21,11 @@ const maximumFrameSurfaces = 4 + 2 + 1; // cached frames, in-flight decodes, can
 assert.ok(manifest.width * manifest.height * 4 * maximumFrameSurfaces <= 32 * 1024 * 1024, "Frame surfaces must fit within 32 MiB (browser overhead excluded).");
 assert.equal(new Set(manifest.frames).size, manifest.frames.length, "Frame names must be unique.");
 const names = await readdir(directory);
-assert.equal(names.filter((name) => name.endsWith(".webp")).length, manifest.frames.length, "The published directory must contain only this sequence's frames.");
+assert.deepEqual(
+  names.toSorted(),
+  ["manifest.json", ...manifest.frames].toSorted(),
+  "The published directory must contain exactly the manifest and its declared WebP frames.",
+);
 
 let bytes = 0;
 const occupancy = [];

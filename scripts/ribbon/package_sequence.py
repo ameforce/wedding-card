@@ -8,15 +8,35 @@ import hashlib
 import html
 import json
 from pathlib import Path
+import sys
 
-from PIL import Image, ImageDraw
+import PIL
+from PIL import Image, ImageDraw, features
 
 APPROVED_FRAME_COUNT = 75
 APPROVED_RELEASE_FRAME = 31
 APPROVED_CANVAS = (960, 640)
+APPROVED_PYTHON = (3, 14, 7)
+APPROVED_PILLOW = '11.3.0'
+APPROVED_LIBWEBP = '1.5.0'
+
+
+def validate_packaging_environment():
+    actual_python = sys.version_info[:3]
+    actual_webp = features.version('webp')
+    if actual_python != APPROVED_PYTHON:
+        raise RuntimeError(
+            f'Packaging requires Python {".".join(map(str, APPROVED_PYTHON))}; '
+            f'found {".".join(map(str, actual_python))}.')
+    if PIL.__version__ != APPROVED_PILLOW or actual_webp != APPROVED_LIBWEBP:
+        raise RuntimeError(
+            f'Packaging requires Pillow {APPROVED_PILLOW} with libwebp '
+            f'{APPROVED_LIBWEBP}; found Pillow {PIL.__version__} with '
+            f'libwebp {actual_webp or "unavailable"}.')
 
 
 def main():
+    validate_packaging_environment()
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', required=True)
     parser.add_argument('--out', required=True)
