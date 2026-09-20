@@ -16,7 +16,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', required=True)
     parser.add_argument('--out', required=True)
-    parser.add_argument('--count', type=int, default=46)
+    parser.add_argument('--count', type=int, default=75)
     parser.add_argument('--release-frame', type=int, required=True)
     parser.add_argument('--label', default='리본 연속 동작 검토')
     args = parser.parse_args()

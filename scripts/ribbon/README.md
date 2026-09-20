@@ -1,20 +1,32 @@
 # 리본 제작
 
-정식 제작 경로는 `author_ribbon.py` → `studio_render.py` → `package_sequence.py`다.
-Blender와 Pillow는 별도의 제작 환경에서 사용하며 웹 앱에는 포함하지 않는다.
-
-재현 명령, 원작 출처와 제작 한계는
-[리본 작성과 재현](../../docs/design/ribbon/authoring.md)에 기록한다.
-이전 미통과 연구 소스와 렌더는 외부 검증 산출물에 보존하며 제품 빌드에 넣지 않는다.
+현재 공개 리본의 정식 제작 경로는 `approved_motion.py`로 동작 증명본을 확인한 뒤
+`render_approved_sequence.py`로 투명 PNG 75장을 만들고, `package_sequence.py`로
+무손실 WebP와 매니페스트를 생성하는 순서다. 두 Blender 스크립트는 4.5.13 LTS에
+고정되어 있으며 같은 리본 메시, 재질, 카메라, 960×640 캔버스와 30fps 등록점을
+사용한다.
 
 ```powershell
-python scripts/ribbon/author_ribbon.py --out <new-source-directory>
-python scripts/ribbon/studio_render.py --source <new-source-directory>/ribbon.blend --out <new-render-directory> --samples 16
-python scripts/ribbon/package_sequence.py --input <new-render-directory> --out <new-sequence-directory> --release-frame 35
+blender --background --factory-startup `
+  --python scripts/ribbon/approved_motion.py -- `
+  --out <new-proof-directory>
+
+blender --background --factory-startup `
+  --python scripts/ribbon/render_approved_sequence.py -- `
+  --out <new-render-directory>
+
+python scripts/ribbon/package_sequence.py `
+  --input <new-render-directory> `
+  --out <new-sequence-directory> `
+  --count 75 --release-frame 31
 ```
 
-모든 출력 디렉터리는 새 디렉터리 또는 빈 디렉터리여야 한다.
-패키지는 모든 알파와 가시 RGB를 보존하는 무손실 WebP다.
-완전 투명 픽셀의 보이지 않는 RGB만 0으로 정리한다.
-검토 화면과 증거 JSON은 공개 프레임 디렉터리의 바깥에 생성된다.
-변환 성공과 시각 검증 통과는 별개이며, 승인된 프레임만 공개 자산으로 복사한다.
+모든 출력 디렉터리는 새 디렉터리이거나 비어 있어야 한다. 패키지는 모든 알파와
+가시 RGB를 보존하며, 완전 투명 픽셀의 보이지 않는 RGB만 0으로 정리한다.
+`.blend`, PNG, 증명 영상, 검토 화면과 증거 JSON은 `public` 밖에 둔다. 공개
+디렉터리에는 해시가 이름에 결합된 WebP와 `manifest.json`만 둔다.
+
+`author_ribbon.py`, `studio_render.py`, `source-knot.json`은 이전 46프레임 제작
+경로를 재현하기 위한 보존 자료다. 현재 공개 시퀀스의 원본으로 사용하지 않는다.
+자세한 계약과 검증 근거는 [리본 작성과 재현](../../docs/design/ribbon/authoring.md)에
+기록한다.
