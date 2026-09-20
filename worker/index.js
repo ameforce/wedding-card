@@ -677,11 +677,14 @@ function validateInvitationPhoto(photo, path, seenSources) {
   if (!sourceDescriptor) {
     throw { status: 400, code: "INVALID_CONTENT", message: `${path}.src 값을 확인해 주세요.` };
   }
+  if (sourceDescriptor.width !== "480") {
+    throw { status: 400, code: "INVALID_CONTENT", message: `${path}.src 값은 480px 파생본이어야 합니다.` };
+  }
   if (seenSources.has(sourceDescriptor.identity)) {
     throw { status: 400, code: "INVALID_CONTENT", message: "같은 사진 파일을 중복해서 사용할 수 없습니다." };
   }
   seenSources.add(sourceDescriptor.identity);
-  if (photo.srcSet !== undefined && !validPhotoSrcSet(photo.srcSet, sourceDescriptor.identity)) {
+  if (!validPhotoSrcSet(photo.srcSet, sourceDescriptor.identity)) {
     throw { status: 400, code: "INVALID_CONTENT", message: `${path}.srcSet 값을 확인해 주세요.` };
   }
   if (photo.sizes !== undefined && !validPhotoSizes(photo.sizes)) {

@@ -237,6 +237,14 @@ test("Worker rejects legacy copy counts, invalid gallery counts, duplicates, and
   };
   assert.throws(() => __test.validateInvitationDocument(missingWidthSuffix, { write: true }), (error) => error.code === "INVALID_CONTENT");
 
+  const missingSrcSet = confirmedDocument();
+  delete missingSrcSet.photos.pastel.gallery[0].srcSet;
+  assert.throws(() => __test.validateInvitationDocument(missingSrcSet, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const largeDefault = confirmedDocument();
+  largeDefault.photos.pastel.gallery[0].src = largeDefault.photos.pastel.gallery[0].src.replace("-480.webp", "-960.webp");
+  assert.throws(() => __test.validateInvitationDocument(largeDefault, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
   const invalidCrop = confirmedDocument();
   invalidCrop.photos.pastel.gallery[0].position = "50% 101%";
   assert.throws(() => __test.validateInvitationDocument(invalidCrop, { write: true }), (error) => error.code === "INVALID_CONTENT");

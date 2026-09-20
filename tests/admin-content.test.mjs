@@ -139,6 +139,14 @@ test("photo validation binds src and responsive variants to one media identity",
     srcSet: "/assets/photos/sample.webp 480w, /assets/photos/sample.webp 960w",
   };
   assert.equal(typeof validateEditableContentDocument(missingWidthSuffix)["갤러리 1 반응형 파일"], "string");
+
+  const missingSrcSet = createContentDocument(weddingContent);
+  delete missingSrcSet.photos.pastel.gallery[0].srcSet;
+  assert.equal(typeof validateEditableContentDocument(missingSrcSet)["갤러리 1 반응형 파일"], "string");
+
+  const largeDefault = createContentDocument(weddingContent);
+  largeDefault.photos.pastel.gallery[0].src = largeDefault.photos.pastel.gallery[0].src.replace("-480.webp", "-960.webp");
+  assert.equal(typeof validateEditableContentDocument(largeDefault)["갤러리 1 파일"], "string");
 });
 
 test("edit-revert equality follows the applied document instead of sticky input history", () => {
