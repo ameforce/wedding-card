@@ -8,12 +8,24 @@ import { validateRibbonManifest } from "../src/intro/ribbon-player.mjs";
 const directory = new URL("../public/assets/design/ribbon-sequence/", import.meta.url);
 const manifest = JSON.parse(await readFile(new URL("manifest.json", directory), "utf8"));
 validateRibbonManifest(manifest);
+assert.equal(manifest.schemaVersion, 1, "The approved ribbon manifest uses schema version 1.");
 assert.equal(manifest.fps, 30, "The approved ribbon motion uses 30 fps.");
+assert.equal(manifest.width, 960, "The approved ribbon canvas width is 960px.");
+assert.equal(manifest.height, 640, "The approved ribbon canvas height is 640px.");
+assert.equal(manifest.frames.length, 75, "The approved ribbon sequence contains exactly 75 frames.");
+assert.equal(manifest.releaseFrame, 31, "The approved ribbon releases at frame 31.");
+assert.equal(manifest.holdMs, 600, "The approved tied-frame hold is 600ms.");
+assert.equal(manifest.panelDelayMs, 300, "The approved paper-panel delay is 300ms.");
+assert.equal(manifest.panelDurationMs, 1200, "The approved paper-panel duration is 1200ms.");
 const maximumFrameSurfaces = 4 + 2 + 1; // cached frames, in-flight decodes, canvas backing store
 assert.ok(manifest.width * manifest.height * 4 * maximumFrameSurfaces <= 32 * 1024 * 1024, "Frame surfaces must fit within 32 MiB (browser overhead excluded).");
 assert.equal(new Set(manifest.frames).size, manifest.frames.length, "Frame names must be unique.");
 const names = await readdir(directory);
-assert.equal(names.filter((name) => name.endsWith(".webp")).length, manifest.frames.length, "The published directory must contain only this sequence's frames.");
+assert.deepEqual(
+  names.toSorted(),
+  ["manifest.json", ...manifest.frames].toSorted(),
+  "The published directory must contain exactly the manifest and its declared WebP frames.",
+);
 
 let bytes = 0;
 const occupancy = [];

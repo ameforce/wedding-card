@@ -12,7 +12,7 @@ const expectedFrames = manifest.frames.map((_frame, index) => index);
 
 // Installed before App: observe actual fetch/decode/draw without changing assets,
 // timing, or production code. Keep hero identity/source inside the browser only.
-function instrumentIntro() {
+function instrumentIntro({ terminalFrameIndex }) {
   const byteIndexes = new WeakMap();
   const blobIndexes = new WeakMap();
   const bitmapIndexes = new WeakMap();
@@ -47,7 +47,7 @@ function instrumentIntro() {
     if (this.canvas.matches(".pastel-intro-cover__ribbon")) {
       const index = bitmapIndexes.get(source);
       let alphaPixels = null;
-      if (index === 45) {
+      if (index === terminalFrameIndex) {
         const pixels = this.getImageData(0, 0, this.canvas.width, this.canvas.height).data;
         alphaPixels = 0;
         for (let i = 3; i < pixels.length; i += 4) if (pixels[i]) alphaPixels++;
@@ -148,11 +148,11 @@ test("real invitation ribbon preserves every frame and restores access across lo
   async function newPage(options = {}) {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, ...options });
     assert.equal(await page.evaluate(() => innerWidth), options.viewport?.width ?? 390, "Viewport setup must take effect before loading App.");
-    await page.addInitScript(instrumentIntro);
+    await page.addInitScript(instrumentIntro, { terminalFrameIndex: expectedFrames.at(-1) });
     return page;
   }
 
-  await t.test("all 46 real frames precede paper opening; reload mounts again even with reduced motion", async () => {
+  await t.test(`all ${manifest.frames.length} real frames precede paper opening; reload mounts again even with reduced motion`, async () => {
     const page = await newPage({ reducedMotion: "reduce" });
     try {
       await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
