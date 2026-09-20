@@ -147,6 +147,18 @@ test("photo validation binds src and responsive variants to one media identity",
   const largeDefault = createContentDocument(weddingContent);
   largeDefault.photos.pastel.gallery[0].src = largeDefault.photos.pastel.gallery[0].src.replace("-480.webp", "-960.webp");
   assert.equal(typeof validateEditableContentDocument(largeDefault)["갤러리 1 파일"], "string");
+
+  assert.equal(typeof validateEditableContentDocument(missingSrcSet, { allowLocalPreview: true })["갤러리 1 반응형 파일"], "string");
+  assert.equal(typeof validateEditableContentDocument(largeDefault, { allowLocalPreview: true })["갤러리 1 파일"], "string");
+
+  const ephemeralPreview = createContentDocument(weddingContent);
+  ephemeralPreview.photos.pastel.gallery[0] = {
+    src: "data:image/webp;base64,AA==",
+    alt: "로컬 미리보기 임시 사진",
+    position: "50% 50%",
+  };
+  assert.equal(validateEditableContentDocument(ephemeralPreview, { allowLocalPreview: true })["갤러리 1 파일"], undefined);
+  assert.equal(validateEditableContentDocument(ephemeralPreview, { allowLocalPreview: true })["갤러리 1 반응형 파일"], undefined);
 });
 
 test("edit-revert equality follows the applied document instead of sticky input history", () => {

@@ -268,11 +268,12 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
     const label = index === 0 ? "상단 대표 사진" : `갤러리 ${index}`;
     const normalizedSource = photoUrl(photo?.src, allowLocalPreview);
     const sourceDescriptor = photoMediaDescriptor(photo?.src, allowLocalPreview);
+    const ephemeralPreviewPhoto = allowLocalPreview && /^(?:data:image\/(?:jpeg|png|webp);base64,|blob:)/i.test(photo?.src || "");
     if (!normalizedSource) errors[`${label} 파일`] = `${label} 파일을 확인해 주세요.`;
-    else if (!allowLocalPreview && sourceDescriptor.width !== "480") errors[`${label} 파일`] = `${label} 기본 파일은 480px 파생본이어야 합니다.`;
+    else if (!ephemeralPreviewPhoto && sourceDescriptor.width !== "480") errors[`${label} 파일`] = `${label} 기본 파일은 480px 파생본이어야 합니다.`;
     else if (seenSources.has(sourceDescriptor.identity)) errors[`${label} 파일`] = "같은 사진 파일을 갤러리에 중복해서 사용할 수 없습니다.";
     else seenSources.add(sourceDescriptor.identity);
-    if ((!allowLocalPreview && photo?.srcSet === undefined)
+    if ((!ephemeralPreviewPhoto && photo?.srcSet === undefined)
       || (photo?.srcSet !== undefined && !photoSrcSet(photo.srcSet, allowLocalPreview, sourceDescriptor?.identity))) {
       errors[`${label} 반응형 파일`] = `${label} 480px 및 960px 반응형 파일을 확인해 주세요.`;
     }
