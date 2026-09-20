@@ -83,6 +83,16 @@ function ribbonPlaybackEvidence(overrides = {}) {
     intro: {
       mounts: 1,
       draws: [{ index: 0, at: 900, alphaPixels: 1 }, { index: 1, at: terminalAt, alphaPixels: 0 }],
+      earlyPoster: { present: true, observedBeforeMain: true, sha256: HASH_B },
+      handoff: { claimedAt: 910, firstCanvasDrawAt: 900, lateMounts: 0 },
+      panelSamples: [{
+        at: terminalAt + 800, leftProgress: 0.5, rightProgress: 0.5,
+        leftTransform: hingeMatrix(0.5, 1), rightTransform: hingeMatrix(0.5, -1),
+        leftWidth: 196, rightWidth: 196, leftOuterEdge: 0, rightOuterEdge: 390,
+        leftInnerEdge: 98, rightInnerEdge: 292,
+      }],
+      progressiveHero: [{ at: terminalAt + 800, coverPresent: true, rootTransparent: true, opacity: "1" }],
+      visibility: { hiddenPause: true, noProgressWhileHidden: true, resumed: true },
       panelsOpenedAt: terminalAt + 300,
       removedAt: terminalAt + 1_500,
       coverPresent: false,
@@ -112,7 +122,7 @@ function ribbonV2PlaybackEvidence(overrides = {}) {
       ],
       earlyPoster: { present: true, observedBeforeMain: true, sha256: HASH_B },
       panelConfig: { panelCurve: ribbonV2Expectation.panelCurve },
-      handoff: { claimedAt: 890, firstCanvasDrawAt: 900, lateMounts: 0 },
+      handoff: { claimedAt: 910, firstCanvasDrawAt: 900, lateMounts: 0 },
       panelsOpenedAt: terminalAt + 600,
       panelSamples: [{
         at: terminalAt + measuredMidCurvePoint.offset * 1_400,
@@ -320,6 +330,24 @@ test("render canary rejects intro fail-open, stale assets, and incorrect product
   })), /Content-Type/);
 });
 
+test("v1 render canary rejects missing poster, handoff, hinged paper, hero reveal, and visibility evidence", () => {
+  for (const [change, message] of [
+    [{ earlyPoster: { present: false, observedBeforeMain: false, sha256: "" } }, /first HTML tied poster/],
+    [{ earlyPoster: { present: true, observedBeforeMain: true, sha256: HASH_A } }, /poster SHA-256/],
+    [{ handoff: { claimedAt: 890, firstCanvasDrawAt: 900, lateMounts: 0 } }, /hand-off/],
+    [{ handoff: { claimedAt: 910, firstCanvasDrawAt: 900, lateMounts: 1 } }, /hand-off/],
+    [{ panelSamples: [] }, /mid-open/],
+    [{ panelSamples: [{ ...ribbonPlaybackEvidence().intro.panelSamples[0], leftTransform: "matrix(1, 0, 0, 1, -100, 0)" }] }, /rotateY/],
+    [{ progressiveHero: [] }, /progressively/],
+    [{ visibility: { hiddenPause: true, noProgressWhileHidden: false, resumed: true } }, /숨김/],
+  ]) {
+    assert.throws(() => validateRibbonPlaybackEvidence(ribbonPlaybackEvidence({
+      intro: { ...ribbonPlaybackEvidence().intro, ...change },
+    })), message);
+  }
+  assert.equal(validateRibbonPlaybackEvidence(ribbonPlaybackEvidence()), true);
+});
+
 test("v2 render canary rejects first-paint, root-exit, asymmetric-panel, hero-reveal, and resume evidence gaps", () => {
   const firstFullyOpenIndex = ribbonV2Expectation.panelCurve.findIndex((point) => point.progress === 1);
   assert.ok(firstFullyOpenIndex > 0 && firstFullyOpenIndex < ribbonV2Expectation.panelCurve.length - 1, "The v2 canary fixture must use the measured curve that reaches progress=1 before its final offset.");
@@ -340,7 +368,7 @@ test("v2 render canary rejects first-paint, root-exit, asymmetric-panel, hero-re
     intro: { ...ribbonV2PlaybackEvidence().intro, panelSamples: [{
       ...ribbonV2PlaybackEvidence().intro.panelSamples[0], leftInnerEdge: 90,
     }] },
-  })), /measured curve/);
+  })), /inner edge/);
   assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({
     intro: { ...ribbonV2PlaybackEvidence().intro, progressiveHero: [] },
   })), /progressively/);

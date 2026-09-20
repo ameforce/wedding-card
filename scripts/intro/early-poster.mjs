@@ -8,7 +8,10 @@ function dataUri(file, mime) {
   return `data:${mime};base64,${readFileSync(file).toString("base64")}`;
 }
 
-export function createEarlyPosterMarkup({ bootSource }) {
+export function createEarlyPosterMarkup() {
+  // This small controller must arrive with the HTML. A blocking external
+  // request would postpone both the first poster and its fail-open deadline.
+  const bootContents = readFileSync(new URL("../../src/intro/early-cover-boot.js", import.meta.url), "utf8").replaceAll("\r\n", "\n").trim();
   const manifestPath = resolve(process.cwd(), "public/assets/design/ribbon-sequence/manifest.json");
   const manifestBytes = readFileSync(manifestPath);
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
@@ -42,7 +45,7 @@ html.early-intro-enabled #pastel-intro-early-poster{display:block}
 #pastel-intro-early-poster .pastel-intro-cover__seam{position:absolute;z-index:2;inset-block:0;left:50%;width:1px;background:rgba(163,137,109,.22);transform:translateX(-.5px)}
 #pastel-intro-early-poster .pastel-intro-cover__ribbon{position:absolute;z-index:3;top:calc(50% + var(--pastel-intro-registration-y));left:calc(50% + var(--pastel-intro-registration-x));display:block;width:100vw;height:auto;transform:translate(-50%,-50%);pointer-events:none}
 </style>
-<script src="${bootSource}"></script>`;
+<script id="pastel-intro-early-boot">${bootContents}</script>`;
   const posterNode = `<div id="pastel-intro-early-poster" data-ribbon-schema="${manifest.schemaVersion}" data-ribbon-frame="${manifest.frames[0]}" data-ribbon-poster-sha256="${posterSha256}" data-ribbon-manifest-sha256="${manifestSha256}" data-ribbon-manifest-base64="${manifestBase64}" data-ribbon-width="${manifest.width}" data-ribbon-height="${manifest.height}" style="--pastel-intro-registration-x:${registrationXvw}vw;--pastel-intro-registration-y:${registrationYvw}vw" aria-hidden="true"><div class="pastel-intro-cover__panel pastel-intro-cover__panel--left"><span class="pastel-intro-cover__paper"></span></div><div class="pastel-intro-cover__panel pastel-intro-cover__panel--right"><span class="pastel-intro-cover__paper"></span></div><div class="pastel-intro-cover__seam"></div><img class="pastel-intro-cover__ribbon" src="${poster}" width="${manifest.width}" height="${manifest.height}" alt="" /></div>`;
   return { styles, posterNode };
 }

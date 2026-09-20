@@ -805,7 +805,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     await page.route(`${syntheticUrl}/`, async (route) => {
       const response = await route.fetch();
       let html = await response.text();
-      const earlyHead = /<style id="pastel-intro-early-style">[\s\S]*?<\/style>\s*<script src="([^"]+)"><\/script>/;
+      const earlyHead = /<style id="pastel-intro-early-style">[\s\S]*?<\/style>\s*<script id="pastel-intro-early-boot">[\s\S]*?<\/script>/;
       const match = html.match(earlyHead);
       assert.ok(match, "The real compiled entry must contain the production early style and boot script.");
       const originalCwd = process.cwd();
@@ -814,7 +814,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
         // The actual production generator resolves its manifest from cwd. This synchronous
         // call supplies test-owned inputs without changing any repository product file.
         process.chdir(syntheticRoot);
-        markup = createEarlyPosterMarkup({ bootSource: match[1] });
+        markup = createEarlyPosterMarkup();
       } finally { process.chdir(originalCwd); }
       html = html.replace(earlyHead, markup.styles);
       const start = html.indexOf('<div id="pastel-intro-early-poster"');

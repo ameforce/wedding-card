@@ -7,10 +7,108 @@ import { test } from "node:test";
 import { chromium } from "playwright";
 import sharp from "sharp";
 import { createServer } from "vite";
+import { createEarlyPosterMarkup } from "../scripts/intro/early-poster.mjs";
+import worker from "../worker/index.js";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const sequenceManifest = JSON.parse(await readFile(join(projectRoot, "public/assets/design/ribbon-sequence/manifest.json"), "utf8"));
 const expectedF0Hash = createHash("sha256").update(await readFile(join(projectRoot, "public/assets/design/ribbon-sequence", sequenceManifest.frames[0]))).digest("hex");
+
+test("first poster does not wait for a separate early-controller request", { timeout: 15_000 }, async (t) => {
+  const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  let releaseBoot;
+  const bootGate = new Promise((resolve) => { releaseBoot = resolve; });
+  t.after(async () => { releaseBoot(); await page.unrouteAll({ behavior: "wait" }); await browser.close(); await server.close(); });
+  let bootRequests = 0;
+  await page.route("**/src/intro/early-cover-boot.js*", async (route) => {
+    bootRequests += 1;
+    await bootGate;
+    await route.continue().catch(() => {});
+  });
+  await page.route("**/src/main.jsx*", (route) => route.abort());
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`, { waitUntil: "commit" });
+  await page.waitForTimeout(500);
+  const poster = await page.evaluate(() => {
+    const image = document.querySelector("#pastel-intro-early-poster img");
+    const cover = image?.parentElement;
+    return Boolean(image?.complete && image.naturalWidth > 0 && cover && getComputedStyle(cover).display !== "none");
+  });
+  assert.equal(poster, true, "The tied poster must be painted while every external controller is unavailable.");
+  assert.equal(bootRequests, 0, "Initial display and fail-open must not depend on a second controller request.");
+});
+
+test("a page initially hidden preserves preparation and starts after visibility resumes", { timeout: 20_000 }, async (t) => {
+  const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); await server.close(); });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+  });
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(5_500);
+  assert.equal(await page.evaluate(() => window.__pastelIntroEarly?.status), "poster", "An initially hidden page must not exhaust the visible readiness deadline.");
+  await page.evaluate(() => {
+    delete document.hidden;
+    delete document.visibilityState;
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForFunction(() => window.__pastelIntroEarly?.status === "claimed", null, { timeout: 3000 });
+  await page.waitForFunction(() => window.__pastelIntroEarly?.reason === "finished", null, { timeout: 8000 });
+  assert.equal(await page.locator(".pastel-intro-cover").count(), 0);
+  assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).overflow), "hidden");
+  assert.deepEqual(errors, []);
+});
+
+test("blocked early boot still permits runtime skip and restores invitation access", { timeout: 20_000 }, async (t) => {
+  const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); await server.close(); });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route(/\/\s*$/u, async (route) => {
+    const response = await route.fetch();
+    const html = (await response.text()).replace(/<script id="pastel-intro-early-boot">[\s\S]*?<\/script>/u, "");
+    await route.fulfill({ response, body: html });
+  });
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`, { waitUntil: "domcontentloaded" });
+  await page.locator(".pastel-intro-cover").waitFor({ state: "visible" });
+  assert.equal(await page.evaluate(() => window.__pastelIntroEarly), undefined);
+  await page.locator(".pastel-intro-cover").click({ position: { x: 30, y: 30 } });
+  await page.waitForFunction(() => !document.querySelector(".pastel-intro-cover") && !document.body.classList.contains("intro-lock"), null, { timeout: 3000 });
+  assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).overflow), "hidden");
+  assert.deepEqual(errors, []);
+});
+
+test("production CSP admits the exact inline controller and rejects unrelated inline code", { timeout: 15_000 }, async (t) => {
+  const { styles, posterNode } = createEarlyPosterMarkup();
+  const html = `<!doctype html><html><head>${styles}</head><body>${posterNode}<script>window.__untrustedInlineExecuted = true;</script></body></html>`;
+  const response = await worker.fetch(new Request("https://wdcard.enmsoftware.com/"), {
+    ASSETS: { fetch: async () => new Response(html, { headers: { "content-type": "text/html" } }) },
+  });
+  const csp = response.headers.get("content-security-policy");
+  const scriptText = styles.match(/<script id="pastel-intro-early-boot">([\s\S]*?)<\/script>/u)[1];
+  assert.ok(csp.includes(`'sha256-${createHash("sha256").update(scriptText).digest("base64")}'`));
+  assert.doesNotMatch(csp.match(/script-src[^;]+/u)[0], /unsafe-inline|unsafe-eval/u);
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route("https://wdcard.enmsoftware.com/", (route) => route.fulfill({ status: 200, headers: Object.fromEntries(response.headers), body: html }));
+  await page.goto("https://wdcard.enmsoftware.com/", { waitUntil: "domcontentloaded" });
+  assert.equal(await page.evaluate(() => window.__pastelIntroEarly?.status), "poster");
+  assert.equal(await page.evaluate(() => window.__untrustedInlineExecuted), undefined);
+  await page.locator("#pastel-intro-early-poster").click({ position: { x: 10, y: 10 } });
+  assert.equal(await page.evaluate(() => window.__pastelIntroEarly.reason), "skip");
+});
 
 test("loading runtime cover CSS cannot recolor the still-visible initial paper", { timeout: 90_000 }, async (t) => {
   const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
