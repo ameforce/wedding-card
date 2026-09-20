@@ -11,7 +11,9 @@ import {
   deriveEventDisplay,
   contentDocumentsEqual,
   normalizeContentDocument,
+  removeEditableCopyLine,
   serializeContentDocument,
+  updateRequiredCopyLine,
   validateEditableContentDocument,
   validateMusicContent,
 } from "../src/admin-content/content-document.js";
@@ -40,6 +42,103 @@ test("strict serialization preserves invalid values and reports field paths", ()
     assert.equal(invalid.content.couple.groom, "");
     return true;
   });
+});
+
+test("three-line and five-line copy remains visible until the administrator resolves it", () => {
+  for (const lineCount of [3, 5]) {
+    const document = createContentDocument(weddingContent);
+    document.content.message = Array.from({ length: lineCount }, (_, index) => `인사말 ${index + 1}`);
+    document.content.story = Array.from({ length: lineCount }, (_, index) => `이야기 ${index + 1}`);
+
+    const normalized = normalizeContentDocument(document, weddingContent);
+    assert.deepEqual(normalized.content.message, document.content.message);
+    assert.deepEqual(normalized.content.story, document.content.story);
+    assert.equal(typeof validateEditableContentDocument(normalized)["인사말"], "string");
+    assert.equal(typeof validateEditableContentDocument(normalized)["우리의 이야기"], "string");
+    assert.throws(() => serializeContentDocument(normalized), (error) => error.code === "INVALID_CONTENT");
+  }
+});
+
+test("four-line editor preserves legacy line counts until an explicit resolution", () => {
+  const threeLines = ["첫째", "둘째", "셋째"];
+  assert.deepEqual(updateRequiredCopyLine(threeLines, 0, "첫째 수정"), ["첫째 수정", "둘째", "셋째"]);
+  assert.deepEqual(updateRequiredCopyLine(threeLines, 3, "넷째"), ["첫째", "둘째", "셋째", "넷째"]);
+
+  const fiveLines = ["첫째", "둘째", "셋째", "넷째", "다섯째"];
+  assert.deepEqual(updateRequiredCopyLine(fiveLines, 1, "둘째 수정"), ["첫째", "둘째 수정", "셋째", "넷째", "다섯째"]);
+  assert.deepEqual(removeEditableCopyLine(fiveLines, 4), ["첫째", "둘째", "셋째", "넷째"]);
+});
+
+test("gallery normalization preserves supported documents without filling or truncating photos", () => {
+  for (const photoCount of [1, 4, 12]) {
+    const document = createContentDocument(weddingContent);
+    document.photos.pastel.gallery = Array.from({ length: photoCount }, (_, index) => ({
+      src: `/api/media/invitation/00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}/pastel-gallery-${index}/480.webp`,
+      srcSet: `/api/media/invitation/00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}/pastel-gallery-${index}/480.webp 480w, /api/media/invitation/00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}/pastel-gallery-${index}/960.webp 960w`,
+      sizes: "(min-width: 768px) 430px, 100vw",
+      alt: `승인 사진 ${index + 1}`,
+      position: "50% 50%",
+    }));
+
+    const normalized = normalizeContentDocument(document, weddingContent);
+    assert.deepEqual(normalized.photos.pastel.gallery, document.photos.pastel.gallery);
+    assert.deepEqual(validateEditableContentDocument(normalized), {});
+    assert.equal(serializeContentDocument(normalized).photos.pastel.gallery.length, photoCount);
+  }
+});
+
+test("invalid gallery counts and incomplete photo metadata are rejected without fallback inheritance", () => {
+  for (const photoCount of [0, 13]) {
+    const document = createContentDocument(weddingContent);
+    document.photos.pastel.gallery = Array.from({ length: photoCount }, (_, index) => ({
+      src: `/assets/photos/gallery-${index}.webp`, alt: `사진 ${index + 1}`, position: "50% 50%",
+    }));
+    const normalized = normalizeContentDocument(document, weddingContent);
+    assert.equal(normalized.photos.pastel.gallery.length, photoCount);
+    assert.equal(typeof validateEditableContentDocument(normalized)["사진"], "string");
+  }
+
+  const missing = createContentDocument(weddingContent);
+  missing.photos.pastel.hero = { src: missing.photos.pastel.hero.src };
+  missing.photos.pastel.gallery[0] = { src: missing.photos.pastel.gallery[0].src };
+  const normalized = normalizeContentDocument(missing, weddingContent);
+  assert.equal(normalized.photos.pastel.hero.alt, undefined);
+  assert.equal(normalized.photos.pastel.gallery[0].alt, undefined);
+  assert.equal(typeof validateEditableContentDocument(normalized)["상단 대표 사진 대체 텍스트"], "string");
+  assert.equal(typeof validateEditableContentDocument(normalized)["갤러리 1 대체 텍스트"], "string");
+});
+
+test("gallery validation rejects duplicate sources and out-of-range crop positions", () => {
+  const duplicate = createContentDocument(weddingContent);
+  duplicate.photos.pastel.gallery[1].src = duplicate.photos.pastel.gallery[0].src;
+  assert.equal(typeof validateEditableContentDocument(duplicate)["갤러리 2 파일"], "string");
+
+  const position = createContentDocument(weddingContent);
+  position.photos.pastel.gallery[0].position = "101% 50%";
+  assert.equal(typeof validateEditableContentDocument(position)["갤러리 1 초점 위치"], "string");
+  position.photos.pastel.gallery[0].position = "0% 100%";
+  assert.equal(validateEditableContentDocument(position)["갤러리 1 초점 위치"], undefined);
+});
+
+test("photo validation binds src and responsive variants to one media identity", () => {
+  const mismatched = createContentDocument(weddingContent);
+  mismatched.photos.pastel.gallery[0].srcSet = mismatched.photos.pastel.gallery[1].srcSet;
+  assert.equal(typeof validateEditableContentDocument(mismatched)["갤러리 1 반응형 파일"], "string");
+
+  const duplicateVariant = createContentDocument(weddingContent);
+  duplicateVariant.photos.pastel.gallery[1] = {
+    ...duplicateVariant.photos.pastel.gallery[0],
+    src: duplicateVariant.photos.pastel.gallery[0].src.replace("-480.webp", "-960.webp"),
+  };
+  assert.equal(typeof validateEditableContentDocument(duplicateVariant)["갤러리 2 파일"], "string");
+
+  const missingWidthSuffix = createContentDocument(weddingContent);
+  missingWidthSuffix.photos.pastel.gallery[0] = {
+    ...missingWidthSuffix.photos.pastel.gallery[0],
+    src: "/assets/photos/sample.webp",
+    srcSet: "/assets/photos/sample.webp 480w, /assets/photos/sample.webp 960w",
+  };
+  assert.equal(typeof validateEditableContentDocument(missingWidthSuffix)["갤러리 1 반응형 파일"], "string");
 });
 
 test("edit-revert equality follows the applied document instead of sticky input history", () => {
@@ -817,4 +916,14 @@ test("applied admin content keeps full runtime photo objects", () => {
   const applied = applyContentDocument(document, weddingContent);
   assert.equal(applied.photoMetadata.pastel.hero.alt, "관리자 수정 대체 텍스트");
   assert.match(applied.photoMetadata.pastel.hero.srcSet, /480w/);
+});
+
+test("content administration exposes four line inputs and document-only gallery controls", async () => {
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  assert.match(source, /function FourLineCopyField/);
+  assert.match(source, /Array\.from\(\{ length: REQUIRED_COPY_LINES \}/);
+  assert.match(source, /moveGalleryPhoto/);
+  assert.match(source, /removeGalleryPhoto/);
+  assert.match(source, /pastel-gallery-new/);
+  assert.doesNotMatch(source, /deletePhoto|deleteMedia|removeObject/);
 });

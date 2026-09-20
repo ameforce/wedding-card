@@ -1,17 +1,22 @@
-import { ArrowClockwise, ArrowsOutSimple, CheckCircle, DeviceMobile, PencilSimple, Plus, Trash, Warning, X } from "@phosphor-icons/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowClockwise, ArrowDown, ArrowUp, ArrowsOutSimple, CheckCircle, DeviceMobile, PencilSimple, Plus, Trash, Warning, X } from "@phosphor-icons/react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { weddingContent } from "../content.js";
 import {
   ACCOUNT_SIDE_LABELS,
   ACCOUNT_SIDES,
   MAX_ACCOUNT_ENTRIES,
+  MAX_GALLERY_PHOTOS,
+  MIN_GALLERY_PHOTOS,
+  REQUIRED_COPY_LINES,
   buildPublishDiff,
   cloneContentDocument,
   contentDocumentsEqual,
   createContentDocument,
   deriveEventDisplay,
   normalizeContentDocument,
+  removeEditableCopyLine,
+  updateRequiredCopyLine,
   validateEditableContentDocument,
   validateMusicContent,
 } from "./content-document.js";
@@ -39,7 +44,7 @@ function Field({ label, value, onChange, type = "text", hint, error, required = 
   return (
     <label className={`content-admin-field ${wide ? "is-wide" : ""}`}>
       <span>{label}</span>
-      <input type={type} inputMode={inputMode} value={value} maxLength={maxLength} onChange={(event) => onChange(event.target.value)} required={required} aria-invalid={error ? "true" : undefined} />
+      <input type={type} inputMode={inputMode} value={value ?? ""} maxLength={maxLength} onChange={(event) => onChange(event.target.value)} required={required} aria-invalid={error ? "true" : undefined} />
       {error ? <small className="is-error" role="alert">{error}</small> : hint && <small>{hint}</small>}
     </label>
   );
@@ -55,14 +60,45 @@ function CopyField({ label, lines, onChange, hint, error }) {
   );
 }
 
-function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, fileError, altError, positionError }) {
+function FourLineCopyField({ label, lines, onChange, error }) {
+  const errorId = useId();
+  const displayedLines = Array.from({ length: REQUIRED_COPY_LINES }, (_, index) => typeof lines?.[index] === "string" ? lines[index] : "");
+  const overflowLines = Array.isArray(lines) ? lines.slice(REQUIRED_COPY_LINES) : [];
+  return (
+    <fieldset className="content-admin-copy-lines" aria-invalid={error ? "true" : undefined} aria-describedby={error ? errorId : undefined}>
+      <legend>{label}</legend>
+      {displayedLines.map((line, index) => (
+        <Field key={index} label={`${index + 1}번째 줄`} value={line} maxLength={240} onChange={(value) => onChange(updateRequiredCopyLine(lines, index, value))} error={!line.trim() ? `${index + 1}번째 줄을 입력해 주세요.` : line.length > 240 ? `${index + 1}번째 줄은 240자 이내로 입력해 주세요.` : undefined} />
+      ))}
+      {overflowLines.length > 0 && (
+        <div className="content-admin-copy-overflow" aria-label={`${label} 추가 줄`}>
+          {overflowLines.map((line, offset) => {
+            const sourceIndex = REQUIRED_COPY_LINES + offset;
+            return (
+              <div key={sourceIndex}>
+                <span><strong>{sourceIndex + 1}번째 줄</strong> {String(line)}</span>
+                <button type="button" onClick={() => onChange(removeEditableCopyLine(lines, sourceIndex))}>{sourceIndex + 1}번째 줄 삭제</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {error && <small id={errorId} className="is-error" role="alert">{lines?.length !== REQUIRED_COPY_LINES ? `기존 문구가 ${lines?.length ?? 0}줄입니다. ${overflowLines.length ? "추가 줄을 확인하고 명시적으로 삭제해 주세요." : "비어 있는 줄을 직접 입력해 주세요."}` : error}</small>}
+    </fieldset>
+  );
+}
+
+function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, fileError, altError, positionError, actions }) {
   const [replacementAlt, setReplacementAlt] = useState("");
   const replacementReady = replacementAlt.trim().length > 0;
   return (
     <article className="content-admin-photo-card">
       <img src={photo.src} alt="" style={{ objectPosition: photo.position }} />
       <div>
-        <strong>{title}</strong>
+        <div className="content-admin-photo-heading">
+          <strong>{title}</strong>
+          {actions}
+        </div>
         <Field label="현재 사진 대체 텍스트" value={photo.alt} onChange={(value) => onMetaChange("alt", value)} error={altError} />
         <Field
           label="새 사진 대체 텍스트"
@@ -82,6 +118,38 @@ function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, fileErr
         <Field label="초점 위치" value={photo.position} onChange={(value) => onMetaChange("position", value)} error={positionError} hint="예: 50% 58%" />
       </div>
     </article>
+  );
+}
+
+function GalleryPhotoUploader({ onUpload, busy, disabled, limitReached }) {
+  const [alt, setAlt] = useState("");
+  const [position, setPosition] = useState("50% 50%");
+  const positionMatch = position.trim().match(/^(\d{1,3})%\s+(\d{1,3})%$/);
+  const ready = alt.trim().length > 0
+    && Boolean(positionMatch)
+    && Number(positionMatch?.[1]) <= 100
+    && Number(positionMatch?.[2]) <= 100;
+  return (
+    <section className="content-admin-gallery-add">
+      <strong>갤러리 사진 추가</strong>
+      <p>실제 승인된 사진을 업로드하면 성공한 뒤 목록 끝에 추가됩니다.</p>
+      <div className="content-admin-grid">
+        <Field label="새 사진 대체 텍스트" value={alt} maxLength={300} onChange={setAlt} />
+        <Field label="초점 위치" value={position} onChange={setPosition} hint="예: 50% 50%" />
+      </div>
+      <label className={`content-admin-file ${ready && !disabled ? "" : "is-disabled"}`}>
+        <span>{busy ? "이미지 처리 중…" : "사진 선택 및 추가"}</span>
+        <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || disabled || !ready} onChange={async (event) => {
+          const file = event.target.files?.[0];
+          if (file && await onUpload("pastel-gallery-new", file, alt.trim(), position.trim())) {
+            setAlt("");
+            setPosition("50% 50%");
+          }
+          event.target.value = "";
+        }} />
+      </label>
+      {limitReached && <small>갤러리는 최대 {MAX_GALLERY_PHOTOS}장까지 추가할 수 있습니다.</small>}
+    </section>
   );
 }
 
@@ -413,6 +481,23 @@ export function ContentAdmin() {
     commitEdit(next, ".account-groups");
   };
 
+  const moveGalleryPhoto = (index, direction) => {
+    if (uploadingSlot) return;
+    const targetIndex = index + direction;
+    const gallery = documentRef.current.photos.pastel.gallery;
+    if (targetIndex < 0 || targetIndex >= gallery.length) return;
+    const next = cloneContentDocument(documentRef.current);
+    [next.photos.pastel.gallery[index], next.photos.pastel.gallery[targetIndex]] = [next.photos.pastel.gallery[targetIndex], next.photos.pastel.gallery[index]];
+    commitEdit(next, ".pastel-gallery-section");
+  };
+
+  const removeGalleryPhoto = (index) => {
+    if (uploadingSlot || documentRef.current.photos.pastel.gallery.length <= MIN_GALLERY_PHOTOS) return;
+    const next = cloneContentDocument(documentRef.current);
+    next.photos.pastel.gallery.splice(index, 1);
+    commitEdit(next, ".pastel-gallery-section");
+  };
+
   const saveDraft = async ({ quiet = false, keepBusy = false } = {}) => {
     const documentErrors = validateEditableContentDocument(editingDocument, { allowLocalPreview: localReview });
     if (Object.keys(documentErrors).length > 0) {
@@ -494,18 +579,30 @@ export function ContentAdmin() {
     }
   };
 
-  const uploadPhoto = async (slot, file, replacementAlt) => {
+  const uploadPhoto = async (slot, file, replacementAlt, requestedPosition) => {
     if (!replacementAlt.trim()) {
       setStatus({ tone: "error", message: "새 사진에 맞는 대체 텍스트를 먼저 입력해 주세요." });
+      return false;
+    }
+    if (slot === "pastel-gallery-new" && documentRef.current.photos.pastel.gallery.length >= MAX_GALLERY_PHOTOS) {
+      setStatus({ tone: "error", message: `갤러리는 최대 ${MAX_GALLERY_PHOTOS}장까지 추가할 수 있습니다.` });
       return false;
     }
     setUploadingSlot(slot);
     try {
       const isHero = slot === "pastel-hero";
-      const index = isHero ? -1 : Number(slot.replace("pastel-gallery-", ""));
-      const current = isHero ? editingDocument.photos.pastel.hero : editingDocument.photos.pastel.gallery[index];
-      const result = await adapter.uploadPhoto({ slot, file, alt: replacementAlt.trim(), position: current.position });
-      update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], result.photo);
+      const isNewGalleryPhoto = slot === "pastel-gallery-new";
+      const index = isHero || isNewGalleryPhoto ? -1 : Number(slot.replace("pastel-gallery-", ""));
+      const current = isHero ? documentRef.current.photos.pastel.hero : documentRef.current.photos.pastel.gallery[index];
+      const position = requestedPosition || current?.position;
+      const result = await adapter.uploadPhoto({ slot, file, alt: replacementAlt.trim(), position });
+      if (isNewGalleryPhoto) {
+        const next = cloneContentDocument(documentRef.current);
+        next.photos.pastel.gallery.push(result.photo);
+        commitEdit(next, ".pastel-gallery-section");
+      } else {
+        update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], result.photo);
+      }
       setMediaUsage(result.usage || await adapter.getMediaUsage());
       setStatus({ tone: "success", message: "새 사진을 초안에 넣었습니다. 초점과 설명을 확인해 주세요." });
       return true;
@@ -615,9 +712,9 @@ export function ContentAdmin() {
           </fieldset>
 
           <CollapsibleSection title="초대 문구" busy={busy} attention={Boolean(validationErrors["인사말"] || validationErrors["우리의 이야기"])}>
-            <div className="content-admin-grid">
-              <CopyField label="인사말" lines={editingDocument.content.message} error={validationErrors["인사말"]} onChange={(value) => update(["content", "message"], value)} />
-              <CopyField label="우리의 이야기" lines={editingDocument.content.story} error={validationErrors["우리의 이야기"]} onChange={(value) => update(["content", "story"], value)} />
+            <div className="content-admin-copy-groups">
+              <FourLineCopyField label="인사말" lines={editingDocument.content.message} error={validationErrors["인사말"]} onChange={(value) => update(["content", "message"], value)} />
+              <FourLineCopyField label="우리의 이야기" lines={editingDocument.content.story} error={validationErrors["우리의 이야기"]} onChange={(value) => update(["content", "story"], value)} />
             </div>
           </CollapsibleSection>
 
@@ -724,10 +821,27 @@ export function ContentAdmin() {
 
           <CollapsibleSection title="사진" busy={busy} attention={Boolean(uploadingSlot || validationErrors["사진"])}>
             <div className="content-admin-photo-list">
-              <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={uploadingSlot === "pastel-hero"} fileError={validationErrors["상단 대표 사진 파일"]} altError={validationErrors["상단 대표 사진 대체 텍스트"]} positionError={validationErrors["상단 대표 사진 초점 위치"]} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
+              <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={Boolean(uploadingSlot)} fileError={validationErrors["상단 대표 사진 파일"]} altError={validationErrors["상단 대표 사진 대체 텍스트"]} positionError={validationErrors["상단 대표 사진 초점 위치"]} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
               {photos.gallery.map((photo, index) => (
-                <PhotoEditor key={`gallery-${index}`} title={`갤러리 ${index + 1}`} slot={`pastel-gallery-${index}`} photo={photo} busy={uploadingSlot === `pastel-gallery-${index}`} fileError={validationErrors[`갤러리 ${index + 1} 파일`]} altError={validationErrors[`갤러리 ${index + 1} 대체 텍스트`]} positionError={validationErrors[`갤러리 ${index + 1} 초점 위치`]} onUpload={uploadPhoto} onMetaChange={(key, value) => update(["photos", "pastel", "gallery", index, key], value)} />
+                <PhotoEditor
+                  key={photo.src}
+                  title={`갤러리 ${index + 1}`}
+                  slot={`pastel-gallery-${index}`}
+                  photo={photo}
+                  busy={Boolean(uploadingSlot)}
+                  fileError={validationErrors[`갤러리 ${index + 1} 파일`]}
+                  altError={validationErrors[`갤러리 ${index + 1} 대체 텍스트`]}
+                  positionError={validationErrors[`갤러리 ${index + 1} 초점 위치`]}
+                  onUpload={uploadPhoto}
+                  onMetaChange={(key, value) => update(["photos", "pastel", "gallery", index, key], value)}
+                  actions={<div className="content-admin-photo-actions" aria-label={`갤러리 ${index + 1} 순서와 삭제`}>
+                    <button type="button" onClick={() => moveGalleryPhoto(index, -1)} disabled={Boolean(uploadingSlot) || index === 0} aria-label={`갤러리 ${index + 1} 앞으로 이동`}><ArrowUp aria-hidden="true" /></button>
+                    <button type="button" onClick={() => moveGalleryPhoto(index, 1)} disabled={Boolean(uploadingSlot) || index === photos.gallery.length - 1} aria-label={`갤러리 ${index + 1} 뒤로 이동`}><ArrowDown aria-hidden="true" /></button>
+                    <button type="button" className="is-destructive" onClick={() => removeGalleryPhoto(index)} disabled={Boolean(uploadingSlot) || photos.gallery.length <= MIN_GALLERY_PHOTOS} aria-label={`갤러리 ${index + 1} 목록에서 제거`}><Trash aria-hidden="true" /></button>
+                  </div>}
+                />
               ))}
+              <GalleryPhotoUploader onUpload={uploadPhoto} busy={uploadingSlot === "pastel-gallery-new"} disabled={Boolean(uploadingSlot) || photos.gallery.length >= MAX_GALLERY_PHOTOS} limitReached={photos.gallery.length >= MAX_GALLERY_PHOTOS} />
             </div>
           </CollapsibleSection>
 

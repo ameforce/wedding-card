@@ -19,6 +19,9 @@ const MAX_CONTENT_BODY_BYTES = 131_072;
 const MAX_MEDIA_BODY_BYTES = 30 * 1024 * 1024;
 const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
 const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+const REQUIRED_COPY_LINES = 4;
+const MIN_GALLERY_PHOTOS = 1;
+const MAX_GALLERY_PHOTOS = 12;
 const GUESTBOOK_RETENTION = "permanent";
 const PUBLIC_BOOTSTRAP_SCHEMA_VERSION = 1;
 const PUBLIC_BOOTSTRAP_MARKER = "<!-- WEDDING_PUBLIC_BOOTSTRAP -->";
@@ -631,6 +634,65 @@ function requireMusicSource(value) {
   }
 }
 
+function validPhotoSource(value) {
+  return typeof value === "string" && value.length <= 2048
+    && /^(?:\/assets\/photos\/[a-z0-9._-]+\.webp|\/api\/media\/invitation\/[a-f0-9-]{36}\/[a-z0-9-]{1,40}\/(?:480|960)\.webp)$/i.test(value);
+}
+
+function photoMediaDescriptor(value) {
+  if (!validPhotoSource(value)) return null;
+  const asset = value.match(/^\/assets\/photos\/(.+?)(?:-(480|960))?\.webp$/i);
+  if (asset) return { identity: `asset:${asset[1].toLowerCase()}`, width: asset[2] || null };
+  const uploaded = value.match(/^\/api\/media\/invitation\/([a-f0-9-]{36})\/([a-z0-9-]{1,40})\/(480|960)\.webp$/i);
+  return uploaded
+    ? { identity: `upload:${uploaded[1].toLowerCase()}/${uploaded[2].toLowerCase()}`, width: uploaded[3] }
+    : null;
+}
+
+function validPhotoSrcSet(value, sourceIdentity) {
+  if (typeof value !== "string" || value.length < 1 || value.length > 2048) return false;
+  const candidates = value.split(",").map((candidate) => candidate.trim().match(/^(\S+)\s+(480|960)w$/));
+  if (candidates.length !== 2 || candidates.some((candidate) => !candidate)
+    || candidates[0][2] !== "480" || candidates[1][2] !== "960") return false;
+  const descriptors = candidates.map((candidate) => photoMediaDescriptor(candidate[1]));
+  if (descriptors.some((descriptor) => !descriptor)) return false;
+  if (descriptors.some((descriptor, index) => descriptor.width !== candidates[index][2])) return false;
+  return descriptors.every((descriptor) => descriptor.identity === sourceIdentity);
+}
+
+function validPhotoSizes(value) {
+  return typeof value === "string" && value.length >= 1 && value.length <= 300
+    && /^(?!.*(?:javascript:|data:|<|>))[(),:\w\s.%-]+$/i.test(value);
+}
+
+function validCropPosition(value) {
+  if (typeof value !== "string") return false;
+  const match = value.trim().match(/^(\d{1,3})%\s+(\d{1,3})%$/);
+  return Boolean(match) && Number(match[1]) <= 100 && Number(match[2]) <= 100;
+}
+
+function validateInvitationPhoto(photo, path, seenSources) {
+  requirePlainObject(photo, path);
+  const sourceDescriptor = photoMediaDescriptor(photo.src);
+  if (!sourceDescriptor) {
+    throw { status: 400, code: "INVALID_CONTENT", message: `${path}.src 값을 확인해 주세요.` };
+  }
+  if (seenSources.has(sourceDescriptor.identity)) {
+    throw { status: 400, code: "INVALID_CONTENT", message: "같은 사진 파일을 중복해서 사용할 수 없습니다." };
+  }
+  seenSources.add(sourceDescriptor.identity);
+  if (photo.srcSet !== undefined && !validPhotoSrcSet(photo.srcSet, sourceDescriptor.identity)) {
+    throw { status: 400, code: "INVALID_CONTENT", message: `${path}.srcSet 값을 확인해 주세요.` };
+  }
+  if (photo.sizes !== undefined && !validPhotoSizes(photo.sizes)) {
+    throw { status: 400, code: "INVALID_CONTENT", message: `${path}.sizes 값을 확인해 주세요.` };
+  }
+  requireText(photo.alt, `${path}.alt`, 300);
+  if (!validCropPosition(photo.position)) {
+    throw { status: 400, code: "INVALID_CONTENT", message: `${path}.position 값을 확인해 주세요.` };
+  }
+}
+
 function derivedEventLabels(isoDate, startTime24h) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate || "") || !/^\d{2}:\d{2}$/.test(startTime24h || "")) return null;
   const [year, month, day] = isoDate.split("-").map(Number);
@@ -654,22 +716,13 @@ function validateInvitationDocument(document, { publish = false, write = false }
   const content = requirePlainObject(document.content, "content");
   const photos = requirePlainObject(document.photos, "photos");
   requirePlainObject(photos.pastel, "photos.pastel");
-  requirePlainObject(photos.pastel.hero, "photos.pastel.hero");
-  requireText(photos.pastel.hero.src, "photos.pastel.hero.src", 500);
-  requireText(photos.pastel.hero.alt, "photos.pastel.hero.alt", 300);
-  if (!/^\d{1,3}%\s+\d{1,3}%$/.test(photos.pastel.hero.position || "")) {
-    throw { status: 400, code: "INVALID_CONTENT", message: "photos.pastel.hero.position 값을 확인해 주세요." };
-  }
-  if (!Array.isArray(photos.pastel.gallery) || photos.pastel.gallery.length !== 4) {
-    throw { status: 400, code: "INVALID_CONTENT", message: "photos.pastel.gallery에는 사진 4개가 필요합니다." };
+  const seenPhotoSources = new Set();
+  validateInvitationPhoto(photos.pastel.hero, "photos.pastel.hero", seenPhotoSources);
+  if (!Array.isArray(photos.pastel.gallery) || photos.pastel.gallery.length < MIN_GALLERY_PHOTOS || photos.pastel.gallery.length > MAX_GALLERY_PHOTOS) {
+    throw { status: 400, code: "INVALID_CONTENT", message: `photos.pastel.gallery에는 사진 ${MIN_GALLERY_PHOTOS}-${MAX_GALLERY_PHOTOS}개가 필요합니다.` };
   }
   for (const [index, photo] of photos.pastel.gallery.entries()) {
-    requirePlainObject(photo, `photos.pastel.gallery[${index}]`);
-    requireText(photo.src, `photos.pastel.gallery[${index}].src`, 500);
-    requireText(photo.alt, `photos.pastel.gallery[${index}].alt`, 300);
-    if (!/^\d{1,3}%\s+\d{1,3}%$/.test(photo.position || "")) {
-      throw { status: 400, code: "INVALID_CONTENT", message: `photos.pastel.gallery[${index}].position 값을 확인해 주세요.` };
-    }
+    validateInvitationPhoto(photo, `photos.pastel.gallery[${index}]`, seenPhotoSources);
   }
   const requiredTextPaths = [
     [content.couple?.groom, "content.couple.groom", 50],
@@ -739,10 +792,10 @@ function validateInvitationDocument(document, { publish = false, write = false }
     throw { status: 400, code: "UNSUPPORTED_CONTENT_SCHEMA", message: "새 초대장 콘텐츠는 schema v2로 저장해야 합니다." };
   }
   for (const [value, path] of [[content.message, "content.message"], [content.story, "content.story"]]) {
-    if (!Array.isArray(value) || value.length < 1 || value.length > 20) {
+    if (!Array.isArray(value) || value.length !== REQUIRED_COPY_LINES) {
       throw { status: 400, code: "INVALID_CONTENT", message: `${path} 값을 확인해 주세요.` };
     }
-    for (const line of value) requireText(line, `${path}[]`, 500);
+    for (const line of value) requireText(line, `${path}[]`, 240);
   }
   if (content.publishing?.searchIndexing !== false) {
     throw { status: 400, code: "SEARCH_PRIVACY_REQUIRED", message: "검색 비노출 정책은 해제할 수 없습니다." };
@@ -1116,7 +1169,8 @@ async function uploadInvitationMedia(request, env) {
   const slot = String(form.get("slot") || "").trim().toLowerCase();
   const alt = String(form.get("alt") || "").trim();
   const position = String(form.get("position") || "50% 50%").trim();
-  if (!/^[a-z0-9-]{1,40}$/.test(slot) || alt.length < 1 || alt.length > 300 || position.length > 32) {
+  const validSlot = /^(?:pastel-hero|pastel-gallery-(?:new|[0-9]|1[01]))$/.test(slot);
+  if (!validSlot || alt.length < 1 || alt.length > 300 || !validCropPosition(position)) {
     return apiError(400, "INVALID_MEDIA_METADATA", "이미지 슬롯, 설명 또는 초점 위치를 확인해 주세요.");
   }
   if (!validUpload(original, ["image/jpeg", "image/png", "image/webp"], 25 * 1024 * 1024)
@@ -1136,17 +1190,23 @@ async function uploadInvitationMedia(request, env) {
   const totalBytes = original.size + small.size + large.size;
   await reserveMediaStorage(db, { mediaId, slot, totalBytes });
   try {
-    await Promise.all([
-      bucket.put(keys[0], await original.arrayBuffer(), { httpMetadata: { contentType: original.type } }),
-      bucket.put(keys[1], await small.arrayBuffer(), { httpMetadata: { contentType: "image/webp" } }),
-      bucket.put(keys[2], await large.arrayBuffer(), { httpMetadata: { contentType: "image/webp" } }),
+    const [originalBytes, smallBytes, largeBytes] = await Promise.all([
+      original.arrayBuffer(),
+      small.arrayBuffer(),
+      large.arrayBuffer(),
     ]);
+    const writeResults = await Promise.allSettled([
+      bucket.put(keys[0], originalBytes, { httpMetadata: { contentType: original.type } }),
+      bucket.put(keys[1], smallBytes, { httpMetadata: { contentType: "image/webp" } }),
+      bucket.put(keys[2], largeBytes, { httpMetadata: { contentType: "image/webp" } }),
+    ]);
+    const failedWrite = writeResults.find((result) => result.status === "rejected");
+    if (failedWrite) throw failedWrite.reason;
     await commitMediaStorage(db, mediaId);
   } catch (error) {
-    await Promise.allSettled([
-      typeof bucket.delete === "function" ? bucket.delete(keys) : Promise.resolve(),
-      releaseMediaStorage(db, mediaId),
-    ]);
+    if (typeof bucket.delete !== "function") throw new Error("R2 media cleanup is unavailable", { cause: error });
+    await bucket.delete(keys);
+    await releaseMediaStorage(db, mediaId);
     throw error;
   }
   const src = `${MEDIA_API_PREFIX}/${baseKey}/480.webp`;
