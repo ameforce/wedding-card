@@ -40,19 +40,64 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', required=True)
     parser.add_argument('--out', required=True)
-    parser.add_argument('--count', type=int, default=75)
-    parser.add_argument('--release-frame', type=int, required=True)
+    parser.add_argument('--count', type=int, default=46)
+    parser.add_argument('--release-complete-frame', type=int, required=True)
+    parser.add_argument('--root-track', required=True, help='Author-extracted JSON object with rootYPx pixels.')
+    parser.add_argument('--panel-curve', required=True, help='Measured-reference JSON array of {offset,progress}.')
+    parser.add_argument('--registration-x', type=float, required=True)
+    parser.add_argument('--registration-y', type=float, required=True)
     parser.add_argument('--label', default='리본 연속 동작 검토')
     args = parser.parse_args()
     source, output = Path(args.input).resolve(), Path(args.out).resolve()
-    if args.count != APPROVED_FRAME_COUNT or args.release_frame != APPROVED_RELEASE_FRAME:
-        parser.error('The approved public sequence requires exactly 75 frames and release frame 31.')
+    if not 2 <= args.count <= 300 or not 0 <= args.release_complete_frame < args.count - 1:
+        parser.error('Invalid frame count or release-complete frame.')
     if output.exists() and any(output.iterdir()):
         parser.error('Output must be new or empty; never overwrite a reviewed sequence.')
     output.mkdir(parents=True, exist_ok=True)
     width, height = Image.open(source / 'frame-000.png').size
-    if (width, height) != APPROVED_CANVAS:
-        raise ValueError('The approved public sequence requires a 960x640 canvas.')
+    if not 480 <= width <= 960 or width % 3 or height * 3 != width * 2:
+        raise ValueError('v2 requires 960x640 or one uniformly downscaled 3:2 canvas.')
+    root_track_path = Path(args.root_track).resolve()
+    panel_curve_path = Path(args.panel_curve).resolve()
+    root_track = json.loads(root_track_path.read_text(encoding='utf-8'))
+    root_y = root_track.get('rootYPx') if isinstance(root_track, dict) else None
+    if not isinstance(root_y, list) or len(root_y) != args.count:
+        raise ValueError('Author root track must contain rootYPx for every frame.')
+    if any(not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0 for value in root_y):
+        raise ValueError('Author root track contains an invalid vertical value.')
+    if any(value != 0 for value in root_y[:args.release_complete_frame + 1]):
+        raise ValueError('Root motion begins before complete knot and paper release.')
+    if any(next_value < value or next_value - value > height for value, next_value in zip(root_y, root_y[1:])):
+        raise ValueError('Author root track is not continuous and downward-only.')
+    panel_curve_evidence = json.loads(panel_curve_path.read_text(encoding='utf-8'))
+    if isinstance(panel_curve_evidence, dict):
+        if panel_curve_evidence.get('kind') != 'reference-paper-measurement' or panel_curve_evidence.get('panelDurationMs') != 1400:
+            raise ValueError('Panel curve evidence must be the measured 1400 ms paper reference.')
+        source_sha = panel_curve_evidence.get('sourceSha256')
+        if not isinstance(source_sha, str) or len(source_sha) != 64:
+            raise ValueError('Panel curve evidence is missing its source hash.')
+        panel_curve = panel_curve_evidence.get('panelCurve')
+    else:
+        # A raw curve is accepted for isolated packaging fixtures. Production
+        # packaging uses the evidence object above and retains its source hash.
+        panel_curve = panel_curve_evidence
+    if not isinstance(panel_curve, list) or len(panel_curve) < 2:
+        raise ValueError('Measured panel curve must include at least two points.')
+    previous_offset = previous_progress = previous_left = previous_right = -1
+    for point in panel_curve:
+        if not isinstance(point, dict) or set(point) != {'offset', 'progress', 'leftProgress', 'rightProgress'}:
+            raise ValueError('Measured panel curve points must be exactly {offset,progress,leftProgress,rightProgress}.')
+        offset, progress, left, right = point['offset'], point['progress'], point['leftProgress'], point['rightProgress']
+        if (not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (offset, progress, left, right))
+                or not all(0 <= value <= 1 for value in (offset, progress, left, right))
+                or offset <= previous_offset or progress < previous_progress or left < previous_left or right < previous_right):
+            raise ValueError('Measured panel curve is not normalized and monotonic.')
+        previous_offset, previous_progress, previous_left, previous_right = offset, progress, left, right
+    if (panel_curve[0] != {'offset': 0, 'progress': 0, 'leftProgress': 0, 'rightProgress': 0}
+            or panel_curve[-1] != {'offset': 1, 'progress': 1, 'leftProgress': 1, 'rightProgress': 1}):
+        raise ValueError('Measured panel curve must start at 0/0 and end at 1/1.')
+    if not 0 <= args.registration_x <= width or not 0 <= args.registration_y <= height:
+        raise ValueError('Registration must remain inside the fixed canvas.')
     if width * height * 4 * 7 > 32 * 1024 * 1024:
         raise ValueError('Decoded surfaces exceed the 32 MiB budget.')
     evidence = []
@@ -95,17 +140,43 @@ def main():
     total = sum(frame['bytes'] for frame in evidence)
     if not evidence[0]['alphaBounds'] or evidence[-1]['alphaBounds'] is not None:
         raise ValueError('First frame must be visible and terminal frame fully transparent.')
+    final_visible = evidence[-2]['alphaBounds']
+    if not final_visible:
+        raise ValueError('The visible release must leave before, not at, the transparent terminal frame.')
+    def root_translation(index, viewport_width, viewport_height):
+        if index <= args.release_complete_frame:
+            return 0
+        scale = viewport_width / width
+        last_visible = args.count - 2
+        progress = min(1, (index - args.release_complete_frame) / max(1, last_visible - args.release_complete_frame))
+        authored = root_y[index] * scale
+        required = viewport_height / 2 + args.registration_y * scale + 16
+        return authored + max(0, required * progress - authored)
+    for viewport_width, viewport_height in ((360, 800), (390, 844), (430, 932), (768, 1024), (1440, 900)):
+        scale = viewport_width / width
+        canvas_top = viewport_height / 2 - args.registration_y * scale
+        visible_top = canvas_top + final_visible[1] * scale + root_translation(args.count - 2, viewport_width, viewport_height)
+        if visible_top < viewport_height + 16:
+            raise ValueError(f'Released ribbon has not exited {viewport_width}x{viewport_height} before terminal transparency.')
     if total > 4 * 1024 * 1024:
         raise ValueError(f'Compressed sequence exceeds 4 MiB: {total} bytes.')
     manifest = {
-        'schemaVersion': 1, 'fps': 30, 'width': width, 'height': height,
-        'frames': [frame['file'] for frame in evidence], 'holdMs': 600,
-        'releaseFrame': args.release_frame, 'panelDelayMs': 300, 'panelDurationMs': 1200,
+        'schemaVersion': 2, 'fps': 30, 'width': width, 'height': height,
+        'frames': [frame['file'] for frame in evidence], 'holdMs': 800,
+        'panelDelayMs': 600, 'panelDurationMs': 1400,
+        'releaseCompleteFrame': args.release_complete_frame,
+        'registration': {'x': args.registration_x, 'y': args.registration_y},
+        'rootYPx': root_y,
+        'poster': {'frameIndex': 0, 'sha256': evidence[0]['sha256']},
+        'panelCurve': panel_curve,
     }
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     # Review artifacts sit beside, never inside, the publishable sequence directory.
     report = {'encodingPassed': True, 'visualAdmission': 'not-evaluated',
-              'width': width, 'height': height, 'bytes': total, 'frames': evidence}
+              'width': width, 'height': height, 'bytes': total, 'frames': evidence,
+              'rootTrack': {'path': str(root_track_path), 'sha256': hashlib.sha256(root_track_path.read_bytes()).hexdigest()},
+              'panelCurve': {'path': str(panel_curve_path), 'sha256': hashlib.sha256(panel_curve_path.read_bytes()).hexdigest()},
+              'exitBeforeTransparentTerminal': True}
     (output.parent / f'{output.name}-encoding.json').write_text(
         json.dumps(report, indent=2), encoding='utf-8')
     selected = sorted(set(round(i * (args.count - 1) / 11) for i in range(12)))

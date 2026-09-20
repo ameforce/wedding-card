@@ -1,9 +1,8 @@
 # 리본 작성과 재현
 
-현재 공개 리본은 프로젝트에서 직접 작성한 하나의 연결된 메시다. 외부 3D 자산,
-다운로드한 `.blend`, 애드온이나 런타임 3D에 의존하지 않는다.
-`scripts/ribbon/approved_motion.py`가 형상과 동작의 원본이며,
-`render_approved_sequence.py`가 같은 장면을 투명 PNG 시퀀스로 렌더한다.
+이 문서는 현재 운영 중인 스키마 1 리본의 재현 기록이다. 사용자 피드백 이후 채택한 실제 천 풀림 제작 방식은 [ADR 2](adr-0002-cloth-and-initial-cover.md)와 [현재 구조](architecture.md)를 따른다. 아래 형태 보간 작성기를 새 물리 리본 제작기로 사용하거나, 과거 재현 결과를 새 동작의 승인으로 해석하지 않는다.
+
+현재 운영 자산은 프로젝트에서 직접 작성한 하나의 연결된 메시이며 `scripts/ribbon/approved_motion.py`와 `render_approved_sequence.py`로 재현한다. 그보다 앞선 46프레임 자산은 `scripts/ribbon/author_ribbon.py`와 `source-knot.json`으로 재현한다. 두 경로 모두 외부 3D 자산, 다운로드한 `.blend`, 애드온이나 런타임 3D에 의존하지 않지만 실제 매듭 통과를 입증하지 못했으므로 새 제작 경로로 사용하지 않는다.
 
 ## 제작 계약
 

@@ -33,6 +33,16 @@ const STALE_VERSION = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const projectRoot = new URL("..", import.meta.url);
+const measuredPanelCurve = JSON.parse(await readFile(new URL("../scripts/ribbon/reference-paper-curve.json", import.meta.url), "utf8")).panelCurve;
+const measuredMidCurvePoint = measuredPanelCurve.find((point) => (
+  point.leftProgress > 0.2 && point.leftProgress < 0.8
+    && point.rightProgress > 0.2 && point.rightProgress < 0.8
+));
+const hingeMatrix = (progress, direction) => {
+  const cosine = 1 - progress;
+  const sine = Math.sqrt(1 - cosine ** 2);
+  return `matrix3d(${cosine}, 0, ${direction * sine}, 0, 0, 1, 0, 0, ${-direction * sine}, 0, ${cosine}, 0, 0, 0, 0, 1)`;
+};
 const ribbonExpectation = createRibbonExpectation({
   schemaVersion: 1,
   fps: 30,
@@ -44,6 +54,25 @@ const ribbonExpectation = createRibbonExpectation({
 }, {
   manifestHash: HASH_A,
   frameHashes: { "frame-000-test.webp": HASH_B, "frame-001-test.webp": HASH_B },
+});
+
+const ribbonV2Expectation = createRibbonExpectation({
+  schemaVersion: 2,
+  fps: 30,
+  width: 960,
+  height: 640,
+  frames: ["frame-000-v2.webp", "frame-001-v2.webp", "frame-002-v2.webp"],
+  holdMs: 800,
+  panelDelayMs: 600,
+  panelDurationMs: 1400,
+  releaseCompleteFrame: 0,
+  registration: { x: 480, y: 320 },
+  rootYPx: [0, 120, 120],
+  poster: { frameIndex: 0, sha256: HASH_B },
+  panelCurve: measuredPanelCurve,
+}, {
+  manifestHash: HASH_A,
+  frameHashes: { "frame-000-v2.webp": HASH_B, "frame-001-v2.webp": HASH_B, "frame-002-v2.webp": HASH_B },
 });
 
 function ribbonPlaybackEvidence(overrides = {}) {
@@ -64,6 +93,47 @@ function ribbonPlaybackEvidence(overrides = {}) {
       { url: `${BASE}assets/design/ribbon-sequence/manifest.json`, status: 200, contentType: "application/json", sha256: HASH_A },
       { url: `${BASE}assets/design/ribbon-sequence/frame-000-test.webp`, status: 200, contentType: "image/webp", sha256: HASH_B },
       { url: `${BASE}assets/design/ribbon-sequence/frame-001-test.webp`, status: 200, contentType: "image/webp", sha256: HASH_B },
+    ],
+    ...overrides,
+  };
+}
+
+function ribbonV2PlaybackEvidence(overrides = {}) {
+  const terminalAt = 1_000;
+  return {
+    baseUrl: BASE,
+    ribbonExpectation: ribbonV2Expectation,
+    intro: {
+      mounts: 1,
+      draws: [
+        { index: 0, at: 900, alphaPixels: 1 },
+        { index: 1, at: 967, alphaPixels: 1, alphaViewportTop: 860, viewportHeight: 844 },
+        { index: 2, at: terminalAt, alphaPixels: 0 },
+      ],
+      earlyPoster: { present: true, observedBeforeMain: true, sha256: HASH_B },
+      panelConfig: { panelCurve: ribbonV2Expectation.panelCurve },
+      handoff: { claimedAt: 890, firstCanvasDrawAt: 900, lateMounts: 0 },
+      panelsOpenedAt: terminalAt + 600,
+      panelSamples: [{
+        at: terminalAt + measuredMidCurvePoint.offset * 1_400,
+        leftProgress: measuredMidCurvePoint.leftProgress, rightProgress: measuredMidCurvePoint.rightProgress,
+        leftTransform: hingeMatrix(measuredMidCurvePoint.leftProgress, 1),
+        rightTransform: hingeMatrix(measuredMidCurvePoint.rightProgress, -1),
+        leftWidth: 196, rightWidth: 196, leftOuterEdge: 0, rightOuterEdge: 390,
+        leftInnerEdge: 196 * (1 - measuredMidCurvePoint.leftProgress), rightInnerEdge: 390 - 196 * (1 - measuredMidCurvePoint.rightProgress),
+      }],
+      progressiveHero: [{ at: terminalAt + 1_000, coverPresent: true, rootTransparent: true, opacity: "1" }],
+      visibility: { hiddenPause: true, noProgressWhileHidden: true, resumed: true },
+      removedAt: terminalAt + 2_000,
+      coverPresent: false,
+      bodyLocked: false,
+      finalHero: { sampledAfterCoverRemoved: true, opacity: "1", display: "block", visibility: "visible" },
+    },
+    ribbonResponses: [
+      { url: `${BASE}assets/design/ribbon-sequence/manifest.json`, status: 200, contentType: "application/json", sha256: HASH_A },
+      { url: `${BASE}assets/design/ribbon-sequence/frame-000-v2.webp`, status: 200, contentType: "image/webp", sha256: HASH_B },
+      { url: `${BASE}assets/design/ribbon-sequence/frame-001-v2.webp`, status: 200, contentType: "image/webp", sha256: HASH_B },
+      { url: `${BASE}assets/design/ribbon-sequence/frame-002-v2.webp`, status: 200, contentType: "image/webp", sha256: HASH_B },
     ],
     ...overrides,
   };
@@ -201,6 +271,7 @@ test("local published Worker canary proves every hash and excludes first-navigat
 
   assert.equal(result.ribbonResponses.length, ribbon.frames.length + 1, "Warm scenario must discard initial-navigation ribbon responses.");
   assert.ok(result.ribbonResponses.every((response) => response.status === 200));
+  assert.equal(result.intro.panelConfig?.schemaVersion, ribbon.schemaVersion, "The installed observer must capture the manifest read through Response.text().");
   assert.equal(validateRenderScenario({
     name: "local-warm-ribbon",
     baseUrl,
@@ -247,6 +318,35 @@ test("render canary rejects intro fail-open, stale assets, and incorrect product
       entry.url.endsWith("frame-001-test.webp") ? { ...entry, contentType: "text/html" } : entry
     )),
   })), /Content-Type/);
+});
+
+test("v2 render canary rejects first-paint, root-exit, asymmetric-panel, hero-reveal, and resume evidence gaps", () => {
+  const firstFullyOpenIndex = ribbonV2Expectation.panelCurve.findIndex((point) => point.progress === 1);
+  assert.ok(firstFullyOpenIndex > 0 && firstFullyOpenIndex < ribbonV2Expectation.panelCurve.length - 1, "The v2 canary fixture must use the measured curve that reaches progress=1 before its final offset.");
+  assert.equal(validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence()), true);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({
+    intro: { ...ribbonV2PlaybackEvidence().intro, earlyPoster: { present: false, observedBeforeMain: false, sha256: "" } },
+  })), /first HTML tied poster/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({
+    intro: { ...ribbonV2PlaybackEvidence().intro, panelConfig: { panelCurve: [] } },
+  })), /curve config/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({
+    intro: { ...ribbonV2PlaybackEvidence().intro, draws: [{ index: 0, at: 900, alphaPixels: 1 }, { index: 1, at: 967, alphaPixels: 1, alphaViewportTop: 859, viewportHeight: 844 }, { index: 2, at: 1_000, alphaPixels: 0 }] },
+  })), /16px/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({
+    intro: { ...ribbonV2PlaybackEvidence().intro, panelSamples: [{ leftProgress: 0.45, rightProgress: 0.4, leftTransform: "matrix(1, 0, 0, 1, -100, 0)", rightTransform: "matrix(1, 0, 0, 1, 80, 0)" }] },
+  })), /rotateY/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({
+    intro: { ...ribbonV2PlaybackEvidence().intro, panelSamples: [{
+      ...ribbonV2PlaybackEvidence().intro.panelSamples[0], leftInnerEdge: 90,
+    }] },
+  })), /measured curve/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({
+    intro: { ...ribbonV2PlaybackEvidence().intro, progressiveHero: [] },
+  })), /progressively/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({
+    intro: { ...ribbonV2PlaybackEvidence().intro, visibility: { hiddenPause: true, noProgressWhileHidden: false, resumed: true } },
+  })), /숨김/);
 });
 
 test("render canary samples final computed visibility after CSS-only transitions", () => {
