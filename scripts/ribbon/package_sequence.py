@@ -11,6 +11,10 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+APPROVED_FRAME_COUNT = 75
+APPROVED_RELEASE_FRAME = 31
+APPROVED_CANVAS = (960, 640)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -21,12 +25,14 @@ def main():
     parser.add_argument('--label', default='리본 연속 동작 검토')
     args = parser.parse_args()
     source, output = Path(args.input).resolve(), Path(args.out).resolve()
-    if not 2 <= args.count <= 300 or not 0 <= args.release_frame < args.count:
-        parser.error('Invalid frame count or release frame.')
+    if args.count != APPROVED_FRAME_COUNT or args.release_frame != APPROVED_RELEASE_FRAME:
+        parser.error('The approved public sequence requires exactly 75 frames and release frame 31.')
     if output.exists() and any(output.iterdir()):
         parser.error('Output must be new or empty; never overwrite a reviewed sequence.')
     output.mkdir(parents=True, exist_ok=True)
     width, height = Image.open(source / 'frame-000.png').size
+    if (width, height) != APPROVED_CANVAS:
+        raise ValueError('The approved public sequence requires a 960x640 canvas.')
     if width * height * 4 * 7 > 32 * 1024 * 1024:
         raise ValueError('Decoded surfaces exceed the 32 MiB budget.')
     evidence = []

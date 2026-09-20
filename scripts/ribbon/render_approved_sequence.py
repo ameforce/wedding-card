@@ -26,13 +26,16 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def render_sequence(scene: bpy.types.Scene, output: Path) -> list[dict[str, object]]:
+def configure_transparent_delivery(scene: bpy.types.Scene) -> None:
     scene.render.film_transparent = True
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
     scene.render.image_settings.color_depth = "8"
     scene.render.image_settings.compression = 45
 
+
+def render_sequence(scene: bpy.types.Scene, output: Path) -> list[dict[str, object]]:
+    configure_transparent_delivery(scene)
     frames: list[dict[str, object]] = []
     for frame in range(core.FRAME_COUNT):
         scene.frame_set(frame)
@@ -75,6 +78,7 @@ def main() -> None:
     if paper_data.users == 0:
         bpy.data.meshes.remove(paper_data)
 
+    configure_transparent_delivery(scene)
     blend_path = output / "ribbon-final-sequence.blend"
     bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
     frame_rows = render_sequence(scene, output)
