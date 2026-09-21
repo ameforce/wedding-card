@@ -50,8 +50,8 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export function createRibbonExpectation(manifest, { manifestHash, frameHashes } = {}) {
-  invariant(manifest && manifest.schemaVersion === 1, "리본 manifest schemaVersion이 올바르지 않습니다.");
+export function createRibbonExpectation(manifest, { manifestHash, frameHashes, packHash } = {}) {
+  invariant(manifest && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2), "리본 manifest schemaVersion이 올바르지 않습니다.");
   invariant(Number.isInteger(manifest.fps) && manifest.fps === 30, "리본 manifest는 30 fps여야 합니다.");
   invariant(Number.isInteger(manifest.width) && Number.isInteger(manifest.height), "리본 manifest canvas 크기가 없습니다.");
   invariant(Array.isArray(manifest.frames) && manifest.frames.length > 1, "리본 manifest frame 목록이 없습니다.");
@@ -62,14 +62,96 @@ export function createRibbonExpectation(manifest, { manifestHash, frameHashes } 
     invariant(typeof frameHashes[frame] === "string" && SHA256.test(frameHashes[frame]), `리본 frame SHA-256이 없습니다: ${frame}`);
     return frame;
   });
-  return Object.freeze({
+  const common = {
+    schemaVersion: manifest.schemaVersion,
     manifestPath: RIBBON_MANIFEST_PATH,
     manifestHash,
     frames: Object.freeze(frames),
     frameHashes: Object.freeze({ ...frameHashes }),
     panelDelayMs: manifest.panelDelayMs,
     panelDurationMs: manifest.panelDurationMs,
+    ...(manifest.framePack ? { framePack: Object.freeze({ ...manifest.framePack }) } : {}),
+  };
+  if (manifest.framePack) {
+    invariant(SHA256.test(packHash || "") && packHash === manifest.framePack.sha256, "리본 묶음 파일의 SHA-256이 빌드 파일과 다릅니다.");
+    invariant(manifest.framePack.file === `sequence-${packHash.slice(0, 12)}.bin`, "리본 묶음 파일 이름이 해시와 다릅니다.");
+  }
+  if (manifest.schemaVersion === 1) return Object.freeze({ ...common, transitional: true });
+
+  invariant(manifest.fps === 30 && manifest.width >= 480 && manifest.width <= 960 && ((manifest.width % 3 === 0 && manifest.height * 3 === manifest.width * 2) || (manifest.width === 480 && manifest.height === 1920)), "v2 리본 manifest canvas가 올바르지 않습니다.");
+  invariant(manifest.holdMs === 800 && manifest.panelDelayMs === 600 && manifest.panelDurationMs === 1400, "v2 리본 timing이 올바르지 않습니다.");
+  invariant(Number.isInteger(manifest.releaseCompleteFrame) && manifest.releaseCompleteFrame >= 0 && manifest.releaseCompleteFrame < frames.length - 1, "v2 releaseCompleteFrame이 올바르지 않습니다.");
+  invariant(manifest.registration && Number.isFinite(manifest.registration.x) && Number.isFinite(manifest.registration.y), "v2 registration이 올바르지 않습니다.");
+  invariant(Array.isArray(manifest.rootYPx) && manifest.rootYPx.length === frames.length && manifest.rootYPx.slice(0, manifest.releaseCompleteFrame + 1).every((value) => value === 0), "v2 root track이 release 전에 이동합니다.");
+  invariant(manifest.poster?.frameIndex === 0 && typeof manifest.poster.sha256 === "string" && SHA256.test(manifest.poster.sha256), "v2 F0 poster 계약이 올바르지 않습니다.");
+  invariant(manifest.poster.sha256 === frameHashes[frames[0]], "v2 F0 poster SHA-256이 frame 0과 다릅니다.");
+  invariant(Array.isArray(manifest.panelCurve) && manifest.panelCurve.length >= 2, "v2 measured panel curve가 없습니다.");
+  let previousOffset = -1;
+  let previousProgress = -1;
+  let previousLeft = -1;
+  let previousRight = -1;
+  for (const point of manifest.panelCurve) {
+    invariant(point && Number.isFinite(point.offset) && Number.isFinite(point.progress) && Number.isFinite(point.leftProgress) && Number.isFinite(point.rightProgress), "v2 panel curve point가 올바르지 않습니다.");
+    invariant(point.offset > previousOffset && point.progress >= previousProgress && point.leftProgress >= previousLeft && point.rightProgress >= previousRight, "v2 panel curve가 단조롭지 않습니다.");
+    previousOffset = point.offset;
+    previousProgress = point.progress;
+    previousLeft = point.leftProgress;
+    previousRight = point.rightProgress;
+  }
+  invariant(manifest.panelCurve[0].offset === 0 && manifest.panelCurve[0].progress === 0 && manifest.panelCurve[0].leftProgress === 0 && manifest.panelCurve[0].rightProgress === 0, "v2 panel curve 시작점이 올바르지 않습니다.");
+  invariant(manifest.panelCurve.at(-1).offset === 1 && manifest.panelCurve.at(-1).progress === 1 && manifest.panelCurve.at(-1).leftProgress === 1 && manifest.panelCurve.at(-1).rightProgress === 1, "v2 panel curve 종료점이 올바르지 않습니다.");
+  return Object.freeze({
+    ...common,
+    transitional: false,
+    holdMs: manifest.holdMs,
+    releaseCompleteFrame: manifest.releaseCompleteFrame,
+    registration: Object.freeze({ ...manifest.registration }),
+    rootYPx: Object.freeze([...manifest.rootYPx]),
+    poster: Object.freeze({ ...manifest.poster }),
+    panelCurve: Object.freeze(manifest.panelCurve.map((point) => Object.freeze({ ...point }))),
   });
+}
+
+function validateCoverPlaybackEvidence(ribbonExpectation, intro) {
+  invariant(intro?.earlyPoster?.present === true && intro.earlyPoster.observedBeforeMain === true, "first HTML tied poster 증거가 없습니다.");
+  invariant(intro.earlyPoster.sha256 === ribbonExpectation.frameHashes[ribbonExpectation.frames[0]], "first HTML poster SHA-256이 build F0와 다릅니다.");
+  invariant(Number.isFinite(intro.handoff?.claimedAt) && Number.isFinite(intro.handoff?.firstCanvasDrawAt) && intro.handoff.firstCanvasDrawAt <= intro.handoff.claimedAt && intro.handoff.lateMounts === 0, "early cover hand-off 또는 late mount 증거가 올바르지 않습니다.");
+  const panelSample = intro.panelSamples?.find((sample) => (
+    Number(sample.leftProgress) >= 0.2 && Number(sample.leftProgress) <= 0.8
+      && Number(sample.rightProgress) >= 0.2 && Number(sample.rightProgress) <= 0.8
+  ));
+  invariant(panelSample, "안정적인 mid-open paper 표본이 없습니다.");
+  const matrix3d = (transform, side) => {
+    const match = typeof transform === "string" && transform.match(/^matrix3d\((.+)\)$/u);
+    invariant(match, `${side} paper가 rotateY computed transform을 내놓지 않았습니다.`);
+    const values = match[1].split(",").map((value) => Number(value.trim()));
+    invariant(values.length === 16 && values.every(Number.isFinite) && Math.abs(values[2]) > 0.05 && Math.abs(values[8]) > 0.05, `${side} paper가 out-of-plane hinge가 아닙니다.`);
+  };
+  matrix3d(panelSample.leftTransform, "left");
+  matrix3d(panelSample.rightTransform, "right");
+  invariant(
+    Number.isFinite(panelSample.leftInnerEdge) && Number.isFinite(panelSample.rightInnerEdge)
+      && Number.isFinite(panelSample.leftOuterEdge) && Number.isFinite(panelSample.rightOuterEdge)
+      && Number.isFinite(panelSample.leftWidth) && Number.isFinite(panelSample.rightWidth),
+    "mid-open paper edge 측정값이 없습니다.",
+  );
+  const expectedLeftInnerEdge = panelSample.leftOuterEdge + panelSample.leftWidth * (1 - panelSample.leftProgress);
+  const expectedRightInnerEdge = panelSample.rightOuterEdge - panelSample.rightWidth * (1 - panelSample.rightProgress);
+  invariant(Math.abs(panelSample.leftInnerEdge - expectedLeftInnerEdge) <= 1 && Math.abs(panelSample.rightInnerEdge - expectedRightInnerEdge) <= 1, "hinged paper inner edge가 진행률에서 1px를 넘게 벗어났습니다.");
+  invariant(intro.progressiveHero?.some((sample) => sample.coverPresent === true && sample.rootTransparent === true && Number(sample.opacity) > 0), "transparent root cover 아래 hero가 progressively revealed되었다는 증거가 없습니다.");
+  invariant(intro.visibility?.hiddenPause === true && intro.visibility.noProgressWhileHidden === true && intro.visibility.resumed === true, "숨김/재개 presentation clock 증거가 없습니다.");
+}
+
+function validateV2RibbonPlaybackEvidence(ribbonExpectation, intro) {
+  invariant(JSON.stringify(intro.panelConfig?.panelCurve) === JSON.stringify(ribbonExpectation.panelCurve), "v2 measured per-side panel curve config가 runtime에 로드되지 않았습니다.");
+  const lastVisible = intro.draws.at(-2);
+  invariant(lastVisible?.alphaPixels > 0, "v2 transparent terminal 전 previous visible frame이 없습니다.");
+  invariant(Number.isFinite(lastVisible.alphaViewportTop) && Number.isFinite(lastVisible.viewportHeight) && lastVisible.alphaViewportTop >= lastVisible.viewportHeight + 16, "v2 ribbon root가 transparent terminal 전에 viewport 밖 16px로 나가지 않았습니다.");
+  invariant(intro.panelSamples?.some((sample) => (
+    Number(sample.leftProgress) >= 0.2 && Number(sample.leftProgress) <= 0.8
+      && Number(sample.rightProgress) >= 0.2 && Number(sample.rightProgress) <= 0.8
+      && sample.leftProgress !== sample.rightProgress
+  )), "v2 measured per-side panel curve 또는 안정적인 mid-open 표본이 없습니다.");
 }
 
 export function validateRibbonPlaybackEvidence({ baseUrl, ribbonExpectation, intro, ribbonResponses }) {
@@ -85,10 +167,14 @@ export function validateRibbonPlaybackEvidence({ baseUrl, ribbonExpectation, int
   invariant(intro.coverPresent === false && intro.bodyLocked === false, "최종 intro cover 또는 body scroll lock이 남아 있습니다.");
   invariant(intro.finalHero?.sampledAfterCoverRemoved === true, "cover 제거 뒤 최종 hero computed-style sample이 없습니다.");
   invariant(Number(intro.finalHero.opacity) > 0 && intro.finalHero.display !== "none" && intro.finalHero.visibility === "visible", "cover 제거 뒤 hero가 표시 상태가 아닙니다.");
+  validateCoverPlaybackEvidence(ribbonExpectation, intro);
+  if (ribbonExpectation.schemaVersion === 2) validateV2RibbonPlaybackEvidence(ribbonExpectation, intro);
 
   const expectedAssets = new Map([
     [ribbonExpectation.manifestPath, { hash: ribbonExpectation.manifestHash, contentType: "application/json" }],
-    ...ribbonExpectation.frames.map((frame) => [`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}${frame}`, { hash: ribbonExpectation.frameHashes[frame], contentType: "image/webp" }]),
+    ...(ribbonExpectation.framePack
+      ? [[`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}${ribbonExpectation.framePack.file}`, { hash: ribbonExpectation.framePack.sha256, contentType: "application/octet-stream" }]]
+      : ribbonExpectation.frames.map((frame) => [`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}${frame}`, { hash: ribbonExpectation.frameHashes[frame], contentType: "image/webp" }])),
   ]);
   for (const [assetPath, expected] of expectedAssets) {
     const responses = (ribbonResponses || []).filter((response) => pathname(response.url, baseUrl) === assetPath);
@@ -521,23 +607,71 @@ async function installHeroObserver(page) {
 async function installIntroObserver(page) {
   await page.addInitScript(() => {
     const byteIndexes = new WeakMap();
+    const packedBuffers = new WeakSet();
+    let framePack;
+    const packOffsets = new Map();
     const blobIndexes = new WeakMap();
     const bitmapIndexes = new WeakMap();
     const evidence = window.__weddingIntroEvidence = {
       draws: [], mounts: 0, mountedAt: null, panelsOpenedAt: null, removedAt: null,
+      earlyPoster: { present: false, observedBeforeMain: false, sha256: "" },
+      handoff: { claimedAt: null, firstCanvasDrawAt: null, lateMounts: 0 },
+      panelSamples: [], progressiveHero: [],
+      visibility: { hiddenPause: false, noProgressWhileHidden: false, resumed: false },
+    };
+    const digest = async (bytes) => {
+      const hash = await crypto.subtle.digest("SHA-256", bytes);
+      return [...new Uint8Array(hash)].map((value) => value.toString(16).padStart(2, "0")).join("");
+    };
+    const recordEarlyPoster = (image) => {
+      if (!image || evidence.earlyPoster.present) return;
+      evidence.earlyPoster = {
+        present: true,
+        observedBeforeMain: !document.querySelector(".pastel-intro-cover"),
+        sha256: "",
+      };
+      void fetch(image.currentSrc || image.src).then((response) => response.arrayBuffer()).then(digest)
+        .then((hash) => { evidence.earlyPoster.sha256 = hash; })
+        .catch((error) => { evidence.earlyPoster.error = error.message; });
+    };
+    const recordPanelConfig = (response, payload) => {
+      if (new URL(response.url, location.href).pathname !== "/assets/design/ribbon-sequence/manifest.json") return;
+      framePack = payload?.framePack;
+      packOffsets.clear();
+      let offset = 0;
+      framePack?.lengths?.forEach((length, index) => { packOffsets.set(offset, index); offset += length; });
+      evidence.panelConfig = {
+        schemaVersion: payload?.schemaVersion,
+        panelCurve: payload?.panelCurve,
+      };
     };
     const originalArrayBuffer = Response.prototype.arrayBuffer;
+    const originalText = Response.prototype.text;
+    const originalJson = Response.prototype.json;
     Response.prototype.arrayBuffer = async function (...args) {
       const bytes = await originalArrayBuffer.apply(this, args);
       const match = this.url.match(/\/ribbon-sequence\/frame-(\d+)-[^/]+\.webp$/u);
       if (match) byteIndexes.set(bytes, Number(match[1]));
+      if (framePack && this.url.split("/").at(-1) === framePack.file) packedBuffers.add(bytes);
       return bytes;
+    };
+    Response.prototype.text = async function (...args) {
+      const payload = await originalText.apply(this, args);
+      try { recordPanelConfig(this, JSON.parse(payload)); } catch { /* manifest validation owns malformed JSON */ }
+      return payload;
+    };
+    Response.prototype.json = async function (...args) {
+      const payload = await originalJson.apply(this, args);
+      recordPanelConfig(this, payload);
+      return payload;
     };
     const OriginalBlob = window.Blob;
     window.Blob = class extends OriginalBlob {
       constructor(parts, options) {
         super(parts, options);
         if (parts?.[0] && byteIndexes.has(parts[0])) blobIndexes.set(this, byteIndexes.get(parts[0]));
+        const first = parts?.[0];
+        if (ArrayBuffer.isView(first) && packedBuffers.has(first.buffer) && packOffsets.has(first.byteOffset)) blobIndexes.set(this, packOffsets.get(first.byteOffset));
       }
     };
     const originalCreateImageBitmap = window.createImageBitmap.bind(window);
@@ -557,14 +691,73 @@ async function installIntroObserver(page) {
           alphaPixels = 0;
           for (let offset = 3; offset < pixels.length; offset += 4) if (pixels[offset]) alphaPixels += 1;
         }
-        evidence.draws.push({ index, at: performance.now(), alphaPixels });
+        const draw = { index, at: performance.now(), alphaPixels };
+        evidence.draws.push(draw);
+        if (index === 0 && evidence.handoff.firstCanvasDrawAt === null) evidence.handoff.firstCanvasDrawAt = draw.at;
+        if (index !== undefined && index >= 0) {
+          let alphaTop = null;
+          if (alphaPixels > 0) {
+            const pixels = this.getImageData(0, 0, this.canvas.width, this.canvas.height).data;
+            for (let offset = 3; offset < pixels.length; offset += 4) {
+              if (pixels[offset]) { alphaTop = Math.floor((offset - 3) / 4 / this.canvas.width); break; }
+            }
+          }
+          queueMicrotask(() => {
+            const rect = this.canvas.getBoundingClientRect();
+            draw.alphaViewportTop = alphaTop === null ? null : rect.top + alphaTop * rect.height / this.canvas.height;
+            draw.viewportHeight = innerHeight;
+          });
+        }
       }
       return result;
     };
     let mountedCover;
+    let previousPanelSample = "";
+    const recordPanelAndHero = (cover) => {
+      if (!cover) return;
+      const style = getComputedStyle(cover);
+      const left = cover.querySelector(".pastel-intro-cover__panel--left");
+      const right = cover.querySelector(".pastel-intro-cover__panel--right");
+      const leftRect = left?.getBoundingClientRect();
+      const rightRect = right?.getBoundingClientRect();
+      const leftProgress = Number(style.getPropertyValue("--pastel-intro-left-progress").trim());
+      const rightProgress = Number(style.getPropertyValue("--pastel-intro-right-progress").trim());
+      const panelSample = {
+        at: performance.now(), leftProgress, rightProgress,
+        leftTransform: left ? getComputedStyle(left).transform : "none",
+        rightTransform: right ? getComputedStyle(right).transform : "none",
+        viewportWidth: innerWidth,
+        leftWidth: left?.offsetWidth ?? null,
+        rightWidth: right?.offsetWidth ?? null,
+        leftOuterEdge: leftRect?.left ?? null,
+        rightOuterEdge: rightRect?.right ?? null,
+        leftInnerEdge: leftRect?.right ?? null,
+        rightInnerEdge: rightRect?.left ?? null,
+      };
+      const serialized = JSON.stringify(panelSample);
+      if (serialized !== previousPanelSample) {
+        previousPanelSample = serialized;
+        evidence.panelSamples.push(panelSample);
+      }
+      if (leftProgress > 0 && leftProgress < 1 && rightProgress > 0 && rightProgress < 1) {
+        if (evidence.panelsOpenedAt === null) evidence.panelsOpenedAt = performance.now();
+        const hero = document.querySelector(".pastel-hero-photo img");
+        const background = style.backgroundColor;
+        evidence.progressiveHero.push({
+          at: performance.now(), coverPresent: true,
+          rootTransparent: background === "transparent" || background === "rgba(0, 0, 0, 0)",
+          opacity: hero ? getComputedStyle(hero).opacity : "0",
+        });
+      }
+    };
     const observe = () => {
+      const earlyPoster = document.querySelector("#pastel-intro-early-poster img");
+      recordEarlyPoster(earlyPoster);
+      const earlyCover = document.querySelector("#pastel-intro-early-poster");
+      if (earlyCover?.dataset.handoff === "claimed" && evidence.handoff.claimedAt === null) evidence.handoff.claimedAt = performance.now();
       const cover = document.querySelector(".pastel-intro-cover");
       if (cover && cover !== mountedCover) {
+        if (evidence.handoff.firstCanvasDrawAt !== null) evidence.handoff.lateMounts += 1;
         mountedCover = cover;
         evidence.mounts += 1;
         evidence.mountedAt = performance.now();
@@ -573,8 +766,13 @@ async function installIntroObserver(page) {
       if (cover?.classList.contains("pastel-intro-cover--opening-panels") && evidence.panelsOpenedAt === null) {
         evidence.panelsOpenedAt = performance.now();
       }
+      recordPanelAndHero(cover);
     };
-    new MutationObserver(observe).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) evidence.visibility.hiddenPause = true;
+      else if (evidence.visibility.hiddenPause) evidence.visibility.resumed = true;
+    });
+    new MutationObserver(observe).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-handoff"] });
     document.addEventListener("load", observe, true);
     observe();
   });
@@ -587,7 +785,10 @@ function recordRibbonResponse(response, records, tasks, isCurrent = () => true) 
   } catch {
     return;
   }
-  if (responsePath !== RIBBON_MANIFEST_PATH && !responsePath.startsWith(`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}frame-`)) return;
+  const sequenceDirectory = RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length);
+  const isFramePack = responsePath.startsWith(sequenceDirectory)
+    && /^sequence-[a-f0-9]{12}\.bin$/u.test(responsePath.slice(sequenceDirectory.length));
+  if (responsePath !== RIBBON_MANIFEST_PATH && !responsePath.startsWith(`${sequenceDirectory}frame-`) && !isFramePack) return;
   tasks.push((async () => {
     try {
       const bytes = await response.body();
@@ -739,6 +940,27 @@ export async function collectScenario({
       const image = document.querySelector(".pastel-hero-photo.is-image-ready img");
       return Boolean(root && image?.complete && image.naturalWidth > 0);
     }, null, { timeout: RENDER_TIMEOUT_MS });
+    if (ribbonExpectation) {
+      await page.waitForFunction((frameCount) => {
+        const intro = window.__weddingIntroEvidence;
+        return intro?.draws?.length >= Math.min(3, frameCount - 2) && intro.draws.length < frameCount - 1;
+      }, ribbonExpectation.frames.length, { timeout: RENDER_TIMEOUT_MS });
+      const hiddenState = await page.evaluate(() => {
+        const intro = window.__weddingIntroEvidence;
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+        return { draws: intro.draws.length, panelsOpenedAt: intro.panelsOpenedAt };
+      });
+      await page.waitForTimeout(250);
+      await page.evaluate((before) => {
+        const intro = window.__weddingIntroEvidence;
+        intro.visibility.noProgressWhileHidden = intro.draws.length === before.draws && intro.panelsOpenedAt === before.panelsOpenedAt;
+        delete document.hidden;
+        delete document.visibilityState;
+        document.dispatchEvent(new Event("visibilitychange"));
+      }, hiddenState);
+    }
     if (ribbonExpectation) {
       await page.waitForFunction((frameCount) => {
         const intro = window.__weddingIntroEvidence;
@@ -910,7 +1132,8 @@ async function readBuiltRibbonExpectation() {
     frame,
     sha256(await readFile(new URL(frame, directory))),
   ])));
-  return createRibbonExpectation(manifest, { manifestHash: sha256(manifestBytes), frameHashes });
+  const packHash = manifest.framePack ? sha256(await readFile(new URL(manifest.framePack.file, directory))) : undefined;
+  return createRibbonExpectation(manifest, { manifestHash: sha256(manifestBytes), frameHashes, packHash });
 }
 
 const isCli = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;

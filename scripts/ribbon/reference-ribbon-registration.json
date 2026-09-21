@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "kind": "manual-reference-ribbon-measurement",
+  "sourceSha256": "72854645e51ddb35efd536ba1b70f01a3a593da77d850c0eaa9429d2b1cb79f2",
+  "frameImageSha256": "dd79720c3cb82b711b2a2a9751132db22f2a51b54012d9e6a60669beddd57b00",
+  "sourceTimeSeconds": 0,
+  "imageSize": [1080, 1350],
+  "method": "Manual visual landmarks; approximate boundaries, not a segmented alpha mask.",
+  "estimatedBoundaryUncertaintyPx": 8,
+  "knotCenterPx": [537, 580],
+  "loopBoundsPx": [155, 404, 917, 684],
+  "horizontalBandYRangePx": [502, 705],
+  "tailBottomYPx": 969,
+  "ratiosToViewportWidth": {
+    "loopSpan": 0.705556,
+    "horizontalBandWidth": 0.187963,
+    "knotOffsetFromViewportCenterX": -0.002778,
+    "knotOffsetFromViewportCenterY": -0.087963,
+    "tailDropFromKnot": 0.360185
+  },
+  "acceptanceUse": "Initial silhouette and registration guide only; actual material passage and final naturalness require separate validation."
+}
