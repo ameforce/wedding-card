@@ -11,7 +11,9 @@ import {
   deriveEventDisplay,
   contentDocumentsEqual,
   normalizeContentDocument,
+  removeEditableCopyLine,
   serializeContentDocument,
+  updateRequiredCopyLine,
   validateEditableContentDocument,
   validateMusicContent,
 } from "../src/admin-content/content-document.js";
@@ -40,6 +42,123 @@ test("strict serialization preserves invalid values and reports field paths", ()
     assert.equal(invalid.content.couple.groom, "");
     return true;
   });
+});
+
+test("three-line and five-line copy remains visible until the administrator resolves it", () => {
+  for (const lineCount of [3, 5]) {
+    const document = createContentDocument(weddingContent);
+    document.content.message = Array.from({ length: lineCount }, (_, index) => `인사말 ${index + 1}`);
+    document.content.story = Array.from({ length: lineCount }, (_, index) => `이야기 ${index + 1}`);
+
+    const normalized = normalizeContentDocument(document, weddingContent);
+    assert.deepEqual(normalized.content.message, document.content.message);
+    assert.deepEqual(normalized.content.story, document.content.story);
+    assert.equal(typeof validateEditableContentDocument(normalized)["인사말"], "string");
+    assert.equal(typeof validateEditableContentDocument(normalized)["우리의 이야기"], "string");
+    assert.throws(() => serializeContentDocument(normalized), (error) => error.code === "INVALID_CONTENT");
+  }
+});
+
+test("four-line editor preserves legacy line counts until an explicit resolution", () => {
+  const threeLines = ["첫째", "둘째", "셋째"];
+  assert.deepEqual(updateRequiredCopyLine(threeLines, 0, "첫째 수정"), ["첫째 수정", "둘째", "셋째"]);
+  assert.deepEqual(updateRequiredCopyLine(threeLines, 3, "넷째"), ["첫째", "둘째", "셋째", "넷째"]);
+
+  const fiveLines = ["첫째", "둘째", "셋째", "넷째", "다섯째"];
+  assert.deepEqual(updateRequiredCopyLine(fiveLines, 1, "둘째 수정"), ["첫째", "둘째 수정", "셋째", "넷째", "다섯째"]);
+  assert.deepEqual(removeEditableCopyLine(fiveLines, 4), ["첫째", "둘째", "셋째", "넷째"]);
+});
+
+test("gallery normalization preserves supported documents without filling or truncating photos", () => {
+  for (const photoCount of [1, 4, 12]) {
+    const document = createContentDocument(weddingContent);
+    document.photos.pastel.gallery = Array.from({ length: photoCount }, (_, index) => ({
+      src: `/api/media/invitation/00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}/pastel-gallery-${index}/480.webp`,
+      srcSet: `/api/media/invitation/00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}/pastel-gallery-${index}/480.webp 480w, /api/media/invitation/00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}/pastel-gallery-${index}/960.webp 960w`,
+      sizes: "(min-width: 768px) 430px, 100vw",
+      alt: `승인 사진 ${index + 1}`,
+      position: "50% 50%",
+    }));
+
+    const normalized = normalizeContentDocument(document, weddingContent);
+    assert.deepEqual(normalized.photos.pastel.gallery, document.photos.pastel.gallery);
+    assert.deepEqual(validateEditableContentDocument(normalized), {});
+    assert.equal(serializeContentDocument(normalized).photos.pastel.gallery.length, photoCount);
+  }
+});
+
+test("invalid gallery counts and incomplete photo metadata are rejected without fallback inheritance", () => {
+  for (const photoCount of [0, 13]) {
+    const document = createContentDocument(weddingContent);
+    document.photos.pastel.gallery = Array.from({ length: photoCount }, (_, index) => ({
+      src: `/assets/photos/gallery-${index}.webp`, alt: `사진 ${index + 1}`, position: "50% 50%",
+    }));
+    const normalized = normalizeContentDocument(document, weddingContent);
+    assert.equal(normalized.photos.pastel.gallery.length, photoCount);
+    assert.equal(typeof validateEditableContentDocument(normalized)["사진"], "string");
+  }
+
+  const missing = createContentDocument(weddingContent);
+  missing.photos.pastel.hero = { src: missing.photos.pastel.hero.src };
+  missing.photos.pastel.gallery[0] = { src: missing.photos.pastel.gallery[0].src };
+  const normalized = normalizeContentDocument(missing, weddingContent);
+  assert.equal(normalized.photos.pastel.hero.alt, undefined);
+  assert.equal(normalized.photos.pastel.gallery[0].alt, undefined);
+  assert.equal(typeof validateEditableContentDocument(normalized)["상단 대표 사진 대체 텍스트"], "string");
+  assert.equal(typeof validateEditableContentDocument(normalized)["갤러리 1 대체 텍스트"], "string");
+});
+
+test("gallery validation rejects duplicate sources and out-of-range crop positions", () => {
+  const duplicate = createContentDocument(weddingContent);
+  duplicate.photos.pastel.gallery[1].src = duplicate.photos.pastel.gallery[0].src;
+  assert.equal(typeof validateEditableContentDocument(duplicate)["갤러리 2 파일"], "string");
+
+  const position = createContentDocument(weddingContent);
+  position.photos.pastel.gallery[0].position = "101% 50%";
+  assert.equal(typeof validateEditableContentDocument(position)["갤러리 1 초점 위치"], "string");
+  position.photos.pastel.gallery[0].position = "0% 100%";
+  assert.equal(validateEditableContentDocument(position)["갤러리 1 초점 위치"], undefined);
+});
+
+test("photo validation binds src and responsive variants to one media identity", () => {
+  const mismatched = createContentDocument(weddingContent);
+  mismatched.photos.pastel.gallery[0].srcSet = mismatched.photos.pastel.gallery[1].srcSet;
+  assert.equal(typeof validateEditableContentDocument(mismatched)["갤러리 1 반응형 파일"], "string");
+
+  const duplicateVariant = createContentDocument(weddingContent);
+  duplicateVariant.photos.pastel.gallery[1] = {
+    ...duplicateVariant.photos.pastel.gallery[0],
+    src: duplicateVariant.photos.pastel.gallery[0].src.replace("-480.webp", "-960.webp"),
+  };
+  assert.equal(typeof validateEditableContentDocument(duplicateVariant)["갤러리 2 파일"], "string");
+
+  const missingWidthSuffix = createContentDocument(weddingContent);
+  missingWidthSuffix.photos.pastel.gallery[0] = {
+    ...missingWidthSuffix.photos.pastel.gallery[0],
+    src: "/assets/photos/sample.webp",
+    srcSet: "/assets/photos/sample.webp 480w, /assets/photos/sample.webp 960w",
+  };
+  assert.equal(typeof validateEditableContentDocument(missingWidthSuffix)["갤러리 1 반응형 파일"], "string");
+
+  const missingSrcSet = createContentDocument(weddingContent);
+  delete missingSrcSet.photos.pastel.gallery[0].srcSet;
+  assert.equal(typeof validateEditableContentDocument(missingSrcSet)["갤러리 1 반응형 파일"], "string");
+
+  const largeDefault = createContentDocument(weddingContent);
+  largeDefault.photos.pastel.gallery[0].src = largeDefault.photos.pastel.gallery[0].src.replace("-480.webp", "-960.webp");
+  assert.equal(typeof validateEditableContentDocument(largeDefault)["갤러리 1 파일"], "string");
+
+  assert.equal(typeof validateEditableContentDocument(missingSrcSet, { allowLocalPreview: true })["갤러리 1 반응형 파일"], "string");
+  assert.equal(typeof validateEditableContentDocument(largeDefault, { allowLocalPreview: true })["갤러리 1 파일"], "string");
+
+  const ephemeralPreview = createContentDocument(weddingContent);
+  ephemeralPreview.photos.pastel.gallery[0] = {
+    src: "data:image/webp;base64,AA==",
+    alt: "로컬 미리보기 임시 사진",
+    position: "50% 50%",
+  };
+  assert.equal(validateEditableContentDocument(ephemeralPreview, { allowLocalPreview: true })["갤러리 1 파일"], undefined);
+  assert.equal(validateEditableContentDocument(ephemeralPreview, { allowLocalPreview: true })["갤러리 1 반응형 파일"], undefined);
 });
 
 test("edit-revert equality follows the applied document instead of sticky input history", () => {
@@ -101,6 +220,162 @@ test("admin documents preserve non-editable public and search-privacy contracts"
   assert.deepEqual(normalized.content.accounts, weddingContent.accounts);
   assert.deepEqual(normalized.content.familyContacts, weddingContent.familyContacts);
   assert.equal(normalized.photos.pastel.hero.src.startsWith("/assets/photos/"), true);
+});
+
+test("admin edits account fields while structural side labels stay fixed", () => {
+  const document = createContentDocument(weddingContent);
+  document.content.accounts.groom.bank = "테스트은행";
+  document.content.accounts.groom.number = " 000 - 111 - 2222 ";
+  document.content.accounts.groom.holder = "테스트 예금주";
+  document.content.accounts.groom.label = "바뀐 라벨";
+  document.content.accounts.groom.emoji = "🚫";
+
+  const normalized = normalizeContentDocument(document, weddingContent);
+  assert.equal(normalized.content.accounts.groom.bank, "테스트은행");
+  assert.equal(normalized.content.accounts.groom.number, "000-111-2222");
+  assert.equal(normalized.content.accounts.groom.holder, "테스트 예금주");
+  assert.equal(normalized.content.accounts.groom.label, weddingContent.accounts.groom.label);
+  assert.equal(normalized.content.accounts.groom.emoji, weddingContent.accounts.groom.emoji);
+  assert.equal(normalized.content.accounts.groom.key, "groom");
+  assert.deepEqual(normalized.content.accounts.bride, weddingContent.accounts.bride);
+  assert.deepEqual(validateEditableContentDocument(normalized), {});
+});
+
+test("invalid account entries fail validation and normalize back to the confirmed value", () => {
+  const document = createContentDocument(weddingContent);
+  document.content.accounts.bride.number = "abc-def";
+  assert.equal(typeof validateEditableContentDocument(document)["신부 측 계좌번호"], "string");
+  assert.equal(normalizeContentDocument(document, weddingContent).content.accounts.bride.number, weddingContent.accounts.bride.number);
+  assert.throws(() => serializeContentDocument(document), (error) => error.code === "INVALID_CONTENT" && typeof error.fieldErrors["신부 측 계좌번호"] === "string");
+
+  const missing = createContentDocument(weddingContent);
+  missing.content.accounts.groom.bank = "  ";
+  missing.content.accounts.groom.holder = "";
+  assert.equal(typeof validateEditableContentDocument(missing)["신랑 측 은행"], "string");
+  assert.equal(typeof validateEditableContentDocument(missing)["신랑 측 예금주"], "string");
+});
+
+test("publish review summarizes account edits with bank, number, and holder", () => {
+  const published = createContentDocument(weddingContent);
+  const current = cloneContentDocument(published);
+  current.content.accounts.bride.bank = "새 은행";
+  current.content.accounts.bride.number = "999-888";
+  const diff = buildPublishDiff(current, published);
+  assert.deepEqual(diff.sections, ["계좌 정보"]);
+  assert.equal(diff.changes.length, 1);
+  const change = diff.changes.find((item) => item.label === "신부 측 계좌");
+  assert.match(change.current, /새 은행/);
+  assert.match(change.current, /999-888/);
+  assert.match(change.current, /예금주/);
+  assert.doesNotMatch(change.current, /\[object Object\]/);
+});
+
+test("extra account entries round-trip with their own side", () => {
+  const document = createContentDocument(weddingContent);
+  document.content.accounts["extra-1"] = { key: "extra-1", side: "groom", label: "아버지", emoji: "🤵", bank: "추가은행", number: "111-222", holder: "추가 예금주" };
+  document.content.accounts["extra-2"] = { key: "extra-2", side: "bride", bank: "추가은행2", number: "333-444", holder: "추가 예금주2" };
+  const normalized = normalizeContentDocument(document, weddingContent);
+  assert.deepEqual(Object.keys(normalized.content.accounts).slice(0, 2), ["groom", "bride"]);
+  assert.deepEqual(normalized.content.accounts["extra-1"], {
+    key: "extra-1",
+    side: "groom",
+    bank: "추가은행",
+    number: "111-222",
+    holder: "추가 예금주",
+  });
+  assert.equal(normalized.content.accounts["extra-2"].side, "bride");
+  assert.deepEqual(validateEditableContentDocument(normalized), {});
+});
+
+test("extra accounts fall back to the groom side when the side is missing or invalid", () => {
+  const document = createContentDocument(weddingContent);
+  document.content.accounts["extra-1"] = { key: "extra-1", side: "elsewhere", bank: "은행", number: "1-2", holder: "예금주" };
+  document.content.accounts["extra-2"] = { key: "extra-2", bank: "은행", number: "3-4", holder: "예금주" };
+  const normalized = normalizeContentDocument(document, weddingContent);
+  assert.equal(normalized.content.accounts["extra-1"].side, "groom");
+  assert.equal(normalized.content.accounts["extra-2"].side, "groom");
+  const errors = validateEditableContentDocument(document);
+  assert.equal(typeof errors["신랑 측 추가 계좌 1 소속"], "string");
+  assert.equal(typeof errors["신랑 측 추가 계좌 2 소속"], "string");
+});
+
+test("extra accounts drop unsafe keys and require complete fields", () => {
+  const document = createContentDocument(weddingContent);
+  const crafted = JSON.parse('{"bad_key":{"key":"bad_key","side":"groom","bank":"은행","number":"1-2","holder":"예금주"},"__proto__":{"key":"__proto__","side":"bride","bank":"은행","number":"1","holder":"예금주"}}');
+  document.content.accounts = { ...document.content.accounts, ...crafted };
+  const normalized = normalizeContentDocument(document, weddingContent);
+  assert.equal(Object.hasOwn(normalized.content.accounts, "bad_key"), false);
+  assert.equal(Object.hasOwn(normalized.content.accounts, "__proto__"), false);
+  assert.equal(Object.getPrototypeOf(normalized.content.accounts), Object.prototype);
+  const keyErrors = validateEditableContentDocument(document);
+  assert.equal(typeof keyErrors["신랑 측 추가 계좌 1 항목"], "string");
+  assert.equal(typeof keyErrors["신부 측 추가 계좌 1 항목"], "string");
+
+  document.content.accounts = { groom: document.content.accounts.groom, bride: document.content.accounts.bride };
+  document.content.accounts["extra-1"] = { key: "extra-1", side: "bride", bank: "", number: "abc", holder: "" };
+  const errors = validateEditableContentDocument(document);
+  assert.equal(typeof errors["신부 측 추가 계좌 1 은행"], "string");
+  assert.equal(typeof errors["신부 측 추가 계좌 1 예금주"], "string");
+  assert.equal(typeof errors["신부 측 추가 계좌 1 계좌번호"], "string");
+});
+
+test("account entries are capped and publish review labels added and removed rows", () => {
+  const overflow = createContentDocument(weddingContent);
+  for (let index = 1; index <= 7; index += 1) {
+    overflow.content.accounts[`extra-${index}`] = { key: `extra-${index}`, side: "groom", bank: "은행", number: "1", holder: "예금주" };
+  }
+  assert.equal(typeof validateEditableContentDocument(overflow)["계좌 정보"], "string");
+
+  const published = createContentDocument(weddingContent);
+  const current = cloneContentDocument(published);
+  current.content.accounts["extra-1"] = { key: "extra-1", side: "groom", bank: "추가은행", number: "111-222", holder: "추가 예금주" };
+  delete current.content.accounts.bride;
+  const diff = buildPublishDiff(current, published);
+  assert.deepEqual(diff.sections, ["계좌 정보"]);
+  const added = diff.changes.find((change) => change.label.endsWith("추가"));
+  const removed = diff.changes.find((change) => change.label.endsWith("삭제"));
+  assert.match(added.label, /신랑 측 추가 예금주 계좌/);
+  assert.match(added.current, /추가은행/);
+  assert.match(added.current, /111-222/);
+  assert.match(removed.label, /신부 측 계좌/);
+  assert.match(removed.published, /예금주/);
+});
+
+test("the admin editor groups accounts by side with per-side add and reassignment", async () => {
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(source, /addAccount\(side\)/);
+  assert.match(source, /removeAccount/);
+  assert.match(source, /MAX_ACCOUNT_ENTRIES/);
+  assert.match(source, /계좌 추가/);
+  assert.match(source, /<select/);
+  assert.match(source, /\["content", "accounts", key, "side"\]/);
+  assert.doesNotMatch(source, /표시 이름/);
+  assert.doesNotMatch(source, /\["content", "accounts", key, "label"\]/);
+  assert.match(styles, /\.content-admin-account-add/);
+  assert.match(styles, /\.content-admin-account-remove/);
+  assert.match(styles, /\.content-admin-account-side/);
+  assert.match(styles, /\.content-admin-field select/);
+  assert.match(app, /accountSide\(account\)/);
+  assert.match(app, /account-group is-\$\{side\}/);
+  assert.match(app, /list\.map\(\(account\) =>/);
+  assert.doesNotMatch(app, /account-relation/);
+  assert.match(app, /account\.label \|\| account\.holder/);
+});
+
+test("the admin editor exposes account fields for both sides with a preview anchor", async () => {
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /title="계좌 정보"/);
+  assert.match(source, /label="은행"/);
+  assert.match(source, /label="예금주"/);
+  assert.match(source, /label="계좌번호"/);
+  assert.match(source, /\["content", "accounts", side, "bank"\]/);
+  assert.match(source, /\["content", "accounts", side, "holder"\]/);
+  assert.match(source, /\["content", "accounts", side, "number"\]/);
+  assert.match(source, /accounts: "\.account-groups"/);
+  assert.match(styles, /\.content-admin-account-group \{/);
 });
 
 test("schema v1 documents remain readable with the bundled music fallback and new writes use v2", () => {
@@ -495,6 +770,9 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.match(styles, /\.content-admin-preview-frame\s*\{[^}]*position:\s*relative/);
   assert.match(styles, /\.content-admin-preview iframe\s*\{[^}]*position:\s*absolute[^}]*left:\s*50%[^}]*transform:\s*translateX\(-50%\) scale\(var\(--content-preview-scale\)\)/);
   assert.doesNotMatch(styles, /\.content-admin-preview iframe\s*\{[^}]*transform:\s*scale\(/);
+  assert.doesNotMatch(source, /scrollIntoView/);
+  assert.match(source, /scrollingElement \|\| previewDocument\.documentElement/);
+  assert.match(source, /scroller\.scrollTo\(\{ top: Math\.max\(0, top\), behavior: "smooth" \}\)/);
 });
 
 test("public music controls and credits resolve from runtime content and reset on track replacement", async () => {
@@ -614,6 +892,10 @@ test("authentication, refresh, dialog focus, and rollback guards protect privile
   assert.doesNotMatch(source, /versionHistory\.length - index/);
   assert.match(source, /revision\.id\.startsWith\("local-"\) \? revision\.id\.slice\(-8\) : revision\.id\.slice\(0, 8\)/);
   assert.match(source, /content-admin-validation-summary/);
+  assert.match(source, /showValidationSummary && workflow\.errorCount > 0/);
+  assert.match(source, /setShowValidationSummary\(true\)/);
+  assert.match(source, /canApply: !busy && dirty/);
+  assert.match(source, /canReview: !busy,/);
   assert.match(shell, /inert=\{sidebarHidden \? true : undefined\}/);
   assert.match(shell, /event\.key === "Escape"/);
   assert.match(shell, /event\.key !== "Tab"/);
@@ -654,4 +936,14 @@ test("applied admin content keeps full runtime photo objects", () => {
   const applied = applyContentDocument(document, weddingContent);
   assert.equal(applied.photoMetadata.pastel.hero.alt, "관리자 수정 대체 텍스트");
   assert.match(applied.photoMetadata.pastel.hero.srcSet, /480w/);
+});
+
+test("content administration exposes four line inputs and document-only gallery controls", async () => {
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  assert.match(source, /function FourLineCopyField/);
+  assert.match(source, /Array\.from\(\{ length: REQUIRED_COPY_LINES \}/);
+  assert.match(source, /moveGalleryPhoto/);
+  assert.match(source, /removeGalleryPhoto/);
+  assert.match(source, /pastel-gallery-new/);
+  assert.doesNotMatch(source, /deletePhoto|deleteMedia|removeObject/);
 });

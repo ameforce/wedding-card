@@ -25,6 +25,8 @@ import { ContentAdmin } from "./admin-content/ContentAdmin.jsx";
 import { GuestbookAdmin } from "./admin-content/GuestbookAdmin.jsx";
 import { getInvitationPhotos } from "./admin-content/content-document.js";
 import { usePublicInvitationContent } from "./admin-content/public-content.jsx";
+import { pastelGalleryLayout } from "./gallery-layout.js";
+import { fallbackPhotoSource, findPhotoIndexBySource, movePhotoSource } from "./gallery-state.js";
 import { createGuestbookEntry, deleteGuestbookEntry, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
 import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
 import { PastelIntroCover } from "./intro/PastelIntroCover.jsx";
@@ -79,9 +81,9 @@ function PhotoButton({ photo, index, openPhoto, registerTrigger, className = "",
       aria-label={`${index + 1}번째 사진 크게 보기`}
       aria-busy={priority && !ready ? "true" : undefined}
       ref={(node) => {
-        registerTrigger(index, node);
+        registerTrigger(photo.src, node);
       }}
-      onClick={() => openPhoto(index)}
+      onClick={() => openPhoto(photo.src)}
       onDoubleClick={(event) => event.preventDefault()}
     >
       {!failed && (
@@ -118,38 +120,46 @@ function InvitationLoadingShell({ captureMode }) {
 }
 
 function usePhotoGallery() {
-  const [activeIndex, setActiveIndex] = useState(null);
-  const triggerRefs = useRef([]);
-  const openerIndexRef = useRef(null);
-  const openPhoto = (index) => {
-    openerIndexRef.current = index;
-    setActiveIndex(index);
+  const [activeSource, setActiveSource] = useState(null);
+  const triggerRefs = useRef(new Map());
+  const openerSourceRef = useRef(null);
+  const openPhoto = (source) => {
+    openerSourceRef.current = source;
+    setActiveSource(source);
   };
-  const registerTrigger = (index, node) => {
-    triggerRefs.current[index] = node;
+  const registerTrigger = (source, node) => {
+    if (node) triggerRefs.current.set(source, node);
+    else triggerRefs.current.delete(source);
   };
-  return { activeIndex, setActiveIndex, triggerRefs, openerIndexRef, openPhoto, registerTrigger };
+  return { activeSource, setActiveSource, triggerRefs, openerSourceRef, openPhoto, registerTrigger };
 }
 
 function PhotoLightbox({ photos, gallery, tone }) {
   const lightboxRef = useRef(null);
   const closeButtonRef = useRef(null);
   const pointerStartXRef = useRef(null);
-  const { activeIndex, setActiveIndex, triggerRefs, openerIndexRef } = gallery;
-  const activePhoto = photos[activeIndex];
+  const { activeSource, setActiveSource, triggerRefs, openerSourceRef } = gallery;
+  const activeIndex = findPhotoIndexBySource(photos, activeSource);
+  const activePhoto = activeIndex >= 0 ? photos[activeIndex] : null;
+  const lastActiveIndexRef = useRef(Math.max(activeIndex, 0));
+
+  useEffect(() => {
+    if (activeIndex >= 0) lastActiveIndexRef.current = activeIndex;
+  }, [activeIndex]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     const galleryTriggers = triggerRefs.current;
-    const openerIndex = openerIndexRef.current;
     document.body.style.overflow = "hidden";
     window.requestAnimationFrame(() => closeButtonRef.current?.focus());
 
     return () => {
       document.body.style.overflow = previousOverflow;
-      galleryTriggers[openerIndex]?.focus();
+      const preferredTrigger = galleryTriggers.get(openerSourceRef.current);
+      const fallbackTrigger = [...galleryTriggers.values()].find((node) => node?.isConnected);
+      (preferredTrigger?.isConnected ? preferredTrigger : fallbackTrigger)?.focus();
     };
-  }, [openerIndexRef, triggerRefs]);
+  }, [openerSourceRef, triggerRefs]);
 
   useEffect(() => {
     const lightbox = lightboxRef.current;
@@ -169,17 +179,17 @@ function PhotoLightbox({ photos, gallery, tone }) {
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        setActiveIndex(null);
+        setActiveSource(null);
         return;
       }
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        setActiveIndex((index) => (index - 1 + photos.length) % photos.length);
+        setActiveSource((source) => movePhotoSource(photos, source, -1));
         return;
       }
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        setActiveIndex((index) => (index + 1) % photos.length);
+        setActiveSource((source) => movePhotoSource(photos, source, 1));
         return;
       }
       if (event.key !== "Tab") return;
@@ -198,7 +208,16 @@ function PhotoLightbox({ photos, gallery, tone }) {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [photos.length, setActiveIndex]);
+  }, [photos, setActiveSource]);
+
+  useEffect(() => {
+    if (activeSource !== null && activeIndex < 0) {
+      openerSourceRef.current = fallbackPhotoSource(photos, lastActiveIndexRef.current);
+      setActiveSource(null);
+    }
+  }, [activeIndex, activeSource, openerSourceRef, photos, setActiveSource]);
+
+  if (!activePhoto) return null;
 
   return createPortal(
     <div
@@ -208,7 +227,7 @@ function PhotoLightbox({ photos, gallery, tone }) {
       aria-labelledby="gallery-lightbox-title"
       ref={lightboxRef}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) setActiveIndex(null);
+        if (event.target === event.currentTarget) setActiveSource(null);
       }}
       onPointerDown={(event) => { pointerStartXRef.current = event.clientX; }}
       onPointerUp={(event) => {
@@ -216,27 +235,23 @@ function PhotoLightbox({ photos, gallery, tone }) {
         const endX = event.clientX;
         pointerStartXRef.current = null;
         if (startX === null || Math.abs(endX - startX) < 48) return;
-        setActiveIndex((index) => (
-          endX < startX
-            ? (index + 1) % photos.length
-            : (index - 1 + photos.length) % photos.length
-        ));
+        setActiveSource((source) => movePhotoSource(photos, source, endX < startX ? 1 : -1));
       }}
       onPointerCancel={() => { pointerStartXRef.current = null; }}
       onDoubleClick={(event) => event.preventDefault()}
     >
       <h2 className="sr-only" id="gallery-lightbox-title">웨딩 사진 크게 보기</h2>
-      <button className="lightbox-close" type="button" aria-label="갤러리 닫기" ref={closeButtonRef} onClick={() => setActiveIndex(null)}>
+      <button className="lightbox-close" type="button" aria-label="갤러리 닫기" ref={closeButtonRef} onClick={() => setActiveSource(null)}>
         <X aria-hidden="true" weight="light" />
       </button>
       <figure className="lightbox-figure">
         <img src={activePhoto.src} srcSet={activePhoto.srcSet} sizes="min(88vw, 760px)" alt={activePhoto.alt} style={{ objectPosition: activePhoto.position }} />
         <figcaption aria-live="polite">{photos.length}장 중 {activeIndex + 1}번째 사진</figcaption>
       </figure>
-      <button className="lightbox-control is-previous" type="button" aria-label="이전 사진" onClick={() => setActiveIndex((index) => (index - 1 + photos.length) % photos.length)}>
+      <button className="lightbox-control is-previous" type="button" aria-label="이전 사진" onClick={() => setActiveSource((source) => movePhotoSource(photos, source, -1))}>
         <ArrowLeft aria-hidden="true" weight="light" />
       </button>
-      <button className="lightbox-control is-next" type="button" aria-label="다음 사진" onClick={() => setActiveIndex((index) => (index + 1) % photos.length)}>
+      <button className="lightbox-control is-next" type="button" aria-label="다음 사진" onClick={() => setActiveSource((source) => movePhotoSource(photos, source, 1))}>
         <ArrowRight aria-hidden="true" weight="light" />
       </button>
     </div>,
@@ -354,7 +369,7 @@ function Greeting() {
   return (
     <section className="greeting section-pad" aria-labelledby="greeting-title">
       <p className="eyebrow" id="greeting-title">INVITATION</p>
-      {content.message.map((line) => <p key={line}>{line}</p>)}
+      {content.message.map((line, index) => <p key={index}>{line}</p>)}
     </section>
   );
 }
@@ -448,12 +463,16 @@ function digitsOnly(phone) {
   return phone.replace(/\D/g, "");
 }
 
+function accountSide(account) {
+  return (account?.side ?? account?.key) === "bride" ? "bride" : "groom";
+}
+
 function AccountGroups({ notify }) {
   const { content } = useWeddingRuntime();
   const copyAccount = async (account) => {
     try {
       await copyText(account.number);
-      notify(`${account.label} 계좌번호를 복사했습니다.`);
+      notify(`${account.label || account.holder} 계좌번호를 복사했습니다.`);
     } catch {
       notify("계좌번호를 복사하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
     }
@@ -464,29 +483,36 @@ function AccountGroups({ notify }) {
       <div className="account-section-heading">
         <h3 id="account-title">마음 전하실 곳</h3>
       </div>
-      {Object.values(content.accounts).map((account) => (
-        <details className={`contact-group account-group is-${account.key}`} key={account.key}>
-          <summary>
-            <span className="group-summary-label">
-              <span className="side-emoji" aria-hidden="true">{account.emoji}</span>
-              <span>{account.label} 계좌</span>
-            </span>
-            <CaretDown aria-hidden="true" weight="light" />
-          </summary>
-          <div className="account-list">
-            <div className="account-row">
-              <div className="account-details">
-                <strong>{account.bank} {account.number}</strong>
-                <small>예금주 {account.holder}</small>
-              </div>
-              <button className="account-copy" type="button" onClick={() => copyAccount(account)} aria-label={`${account.label} 계좌번호 복사`}>
-                <Copy aria-hidden="true" weight="light" />
-                <span>복사</span>
-              </button>
+      {["groom", "bride"].map((side) => {
+        const list = Object.values(content.accounts).filter((account) => accountSide(account) === side);
+        if (list.length === 0) return null;
+        const lead = list.find((account) => account.key === side) ?? list[0];
+        return (
+          <details className={`contact-group account-group is-${side}`} key={side}>
+            <summary>
+              <span className="group-summary-label">
+                <span className="side-emoji" aria-hidden="true">{lead.emoji}</span>
+                <span>{lead.label} 계좌</span>
+              </span>
+              <CaretDown aria-hidden="true" weight="light" />
+            </summary>
+            <div className="account-list">
+              {list.map((account) => (
+                <div className="account-row" key={account.key}>
+                  <div className="account-details">
+                    <strong>{account.bank} {account.number}</strong>
+                    <small>예금주 {account.holder}</small>
+                  </div>
+                  <button className="account-copy" type="button" onClick={() => copyAccount(account)} aria-label={`${account.label || account.holder} 계좌번호 복사`}>
+                    <Copy aria-hidden="true" weight="light" />
+                    <span>복사</span>
+                  </button>
+                </div>
+              ))}
             </div>
-          </div>
-        </details>
-      ))}
+          </details>
+        );
+      })}
     </section>
   );
 }
@@ -864,7 +890,7 @@ function GuestbookSection({ notify }) {
   );
 }
 
-function QuietInvitation({ notify }) {
+function QuietInvitation({ notify, showMusic = true }) {
   const { content, photos: runtimePhotos } = useWeddingRuntime();
   const photos = [runtimePhotos.quiet.hero, ...runtimePhotos.quiet.gallery];
   const gallery = usePhotoGallery();
@@ -878,6 +904,7 @@ function QuietInvitation({ notify }) {
         <EventDate className="date-line" />
         <p className="venue-line">{content.venue.name} · {content.venue.floor}</p>
       </header>
+      {showMusic && <div className="music-control-slot"><MusicControl notify={notify} /></div>}
       <ScrollReveal><Greeting /></ScrollReveal>
       <ScrollReveal><FamilyIntroduction /></ScrollReveal>
       <ScrollReveal><CalendarPattern /></ScrollReveal>
@@ -902,7 +929,7 @@ function QuietInvitation({ notify }) {
       <ScrollReveal><GuestbookSection notify={notify} /></ScrollReveal>
       <ScrollReveal><BottomActions notify={notify} /></ScrollReveal>
       <MusicCredit />
-      {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="quiet" />}
+      {gallery.activeSource !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="quiet" />}
     </article>
   );
 }
@@ -916,23 +943,24 @@ function PastelGallery({ gallery, photos }) {
         <p className="gallery-hint">사진을 눌러 크게 보세요</p>
       </div>
       <div className="pastel-gallery">
-        {photos.map((photo, index) => (
-          <PhotoButton
+        {photos.map((photo, index) => {
+          const layout = pastelGalleryLayout(index, photos.length);
+          return <PhotoButton
             photo={photo}
             index={index + 1}
             openPhoto={gallery.openPhoto}
             registerTrigger={gallery.registerTrigger}
-            className="pastel-gallery-item"
-            sizes="(min-width: 768px) 169px, calc((100vw - 60px) / 2)"
+            className={`pastel-gallery-item ${layout.className}`}
+            sizes={layout.sizes}
             key={photo.src}
-          />
-        ))}
+          />;
+        })}
       </div>
     </section>
   );
 }
 
-function PastelInvitation({ notify }) {
+function PastelInvitation({ notify, showMusic = true }) {
   const { content, photos: runtimePhotos } = useWeddingRuntime();
   const photos = [runtimePhotos.pastel.hero, ...runtimePhotos.pastel.gallery];
   const gallery = usePhotoGallery();
@@ -961,6 +989,7 @@ function PastelInvitation({ notify }) {
           <p className="pastel-venue-line">{content.venue.name} · {content.venue.floor}</p>
         </div>
       </header>
+      {showMusic && <div className="music-control-slot"><MusicControl notify={notify} /></div>}
       <ScrollReveal><Greeting /></ScrollReveal>
       <ScrollReveal><FamilyIntroduction /></ScrollReveal>
       <ScrollReveal><PastelSchedule /></ScrollReveal>
@@ -971,7 +1000,7 @@ function PastelInvitation({ notify }) {
             <p className="eyebrow">OUR STORY</p>
             <h2 id="pastel-story-title">우리의 이야기</h2>
           </div>
-          <p>{content.story.join(" ")}</p>
+          <div className="pastel-story-lines">{content.story.map((line, index) => <p key={index}>{line}</p>)}</div>
         </section>
       </ScrollReveal>
       <ScrollReveal><Location notify={notify} /></ScrollReveal>
@@ -979,7 +1008,7 @@ function PastelInvitation({ notify }) {
       <ScrollReveal><GuestbookSection notify={notify} /></ScrollReveal>
       <ScrollReveal><BottomActions notify={notify} pastel /></ScrollReveal>
       <footer className="pastel-footer">따뜻한 축복으로<br />자리를 빛내 주세요.<MusicCredit /></footer>
-      {gallery.activeIndex !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="pastel" />}
+      {gallery.activeSource !== null && <PhotoLightbox photos={photos} gallery={gallery} tone="pastel" />}
     </article>
   );
 }
@@ -1021,12 +1050,11 @@ function WeddingApp() {
       data-content-revision={runtime.revisionId || ""}
     >
       <div className="invitation-stage">
-        {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
+        {variant === "pastel" ? <PastelInvitation notify={notify} showMusic={!captureMode} /> : <QuietInvitation notify={notify} showMusic={!captureMode} />}
       </div>
       {variant === "pastel" && !captureMode && !introFinished && (
         <PastelIntroCover onFinish={() => setIntroFinished(true)} />
       )}
-      {!captureMode && <MusicControl notify={notify} />}
       <div className={`toast is-${toast.tone} ${toast.message ? "is-visible" : ""}`} role="status" aria-live="polite">
         {toast.tone === "error" ? <WarningCircle aria-hidden="true" weight="bold" /> : <Check aria-hidden="true" weight="bold" />}
         <span>{toast.message}</span>

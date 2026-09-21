@@ -1,64 +1,105 @@
 # 리본 작성과 재현
 
-`scripts/ribbon/author_ribbon.py`가 현재 리본의 정식 작성기다. 같은 디렉터리의 `source-knot.json`과 bpy 4.5.13만 필요하다. 실험용 `study_*` 모듈, 외부 절대경로, 다운로드한 `.blend`, 애드온에 의존하지 않는다. 이전 실험 파일은 비교 증거로 보존한다.
+현재 공개 리본은 프로젝트에서 직접 작성한 하나의 연결된 메시다. 외부 3D 자산,
+다운로드한 `.blend`, 애드온이나 런타임 3D에 의존하지 않는다.
+`scripts/ribbon/approved_motion.py`가 형상과 동작의 원본이며,
+`render_approved_sequence.py`가 같은 장면을 투명 PNG 시퀀스로 렌더한다.
 
-## 원본 데이터
-
-`source-knot.json`에는 billhails의 [Three Knots](https://www.blendswap.com/blend/26843)에 포함된 `ShoeLace`의 두 열린 Bézier spline만 들어 있다. 각 spline은 제어점 9개와 좌우 핸들을 가진다. 원래 오브젝트의 배치 좌표는 제외하고 로컬 XYZ 좌표를 보존했다.
-
-곡선 형상의 원작 라이선스는 CC0이다. [TareminShoelaces의 공개 재배포](https://github.com/Taremin/TareminShoelaces)는 원작자와 원작 링크를 명시하며 저장소 소프트웨어의 라이선스는 MIT다. 사용한 커밋은 `14e1ca51c175fe5e2b14d7fa232da9a4fc2d7e11`, 원본 `knots.blend` SHA-256은 `0cbb699c5279ceb6c2229fc2b2fbaf9e27b0b4e3e567dae361ca243f43f37f31`이다. 데이터 파일에 원작·재배포·라이선스 URL과 추출 범위를 함께 기록한다. 내장 Python과 외부 저장소 코드는 포함하지 않는다.
-
-## 실행
-
-아래 `python`은 bpy 4.5.13이 설치된 제작 환경의 Python이다. 작성기는 버전을 확인하며, 새 디렉터리 또는 빈 디렉터리만 출력 위치로 허용한다. 기존 파일이 있는 디렉터리를 지정하면 쓰기 전에 종료 코드 2로 거부한다.
-
-```powershell
-python scripts/ribbon/author_ribbon.py --out <new-source-directory>
-```
-
-승인된 제작 원본과 비교하면서 작성할 수도 있다. 비교할 파일은 명령에서 명시하며, 작성기에 특정 작업 폴더를 하드코딩하지 않는다.
-
-```powershell
-python scripts/ribbon/author_ribbon.py `
-  --out <new-source-directory> `
-  --compare-reference <approved-baked-blend>
-```
-
-이 명령은 이미지 렌더 없이 0–45의 46프레임을 저장한다. 출력은 `ribbon.blend`, `authoring-evidence.json`, 작성기와 제어점 데이터 사본이며, 비교 옵션을 사용하면 `reference-comparison.json`도 생성한다. `.blend`는 Basis와 46개 absolute shape key를 포함하므로 내장 스크립트 없이 재생할 수 있다.
-
-형상은 연결된 리본 mesh 하나, 13,509 vertices, 고정된 재료 색상 구간으로 구성된다. 폭 0.85의 단면을 접거나 회전해 매듭·고리·꼬리를 표현한다. 각 팔의 재료 길이는 고리 축소에 따라 자유 꼬리로 이동하며, 중앙 감김은 자유 끝이 접근할 때까지 유지된다. 해제 이후에는 같은 길이 좌표로 처진 중심선을 다시 샘플링하고 단면을 회전해 깊이 방향 비틀림과 낙하 시차를 표현한다.
-
-이 동작은 재료 경로를 직접 작성한 것이며 접촉 제약을 푼 천 물리 시뮬레이션은 아니다. 목표 중심선 길이와 실제 샘플 중심선 길이, 단면 길이는 별도로 기록한다.
-
-## 카메라와 종이 배치
-
-작성 장면의 등록 기준은 고정된 revision-2 원본과 같다.
+## 제작 계약
 
 | 항목 | 값 |
 | --- | --- |
-| 프레임 | 0–45, 30fps |
-| 캔버스 | 960×640, 100% |
-| 리본 | `One locally sliding bow strip` |
-| 카메라 | `Fixed diagnostic camera`, 위치 `(0, -25, -0.65)`, 회전 `(π/2, 0, 0)` |
-| 작성 카메라 배율 | orthographic scale 15 |
-| 종이 | `Actual card back occlusion`, y=1.3, x 범위 ±7.2, z 범위 ±10 |
+| Blender | 4.5.13 LTS |
+| 프레임 | 0–74, 75장 |
+| 속도 | 30fps |
+| 캔버스 | 960×640 |
+| 리본 | 하나의 연결된 메시, 하나의 아이보리 새틴 재질 |
+| 토폴로지 | 360행, 단면 7열, 2,520 vertices |
+| 카메라 | 고정 orthographic, scale 15 |
+| 등록점 | `(0, 0, 0)` |
+| 공개 형식 | 투명 무손실 WebP |
 
-종이 면은 실제 종이 뒤의 연결부를 가리는 holdout이다. 앞 매듭의 교차를 감추기 위한 별도 마스크는 없다.
+증명본에서는 리본의 접촉과 명암을 확인하기 위한 아이보리 종이를 사용한다.
+공개 렌더에서는 그 종이를 제거하고 `film_transparent`를 켠다. 모든 프레임은
+동일한 카메라, 재질, 캔버스, 배율과 등록점을 사용하며 프레임별 자르기나
+정규화를 하지 않는다.
 
-최종 렌더에서는 `studio_render.py`가 모든 프레임에 동일한 카메라 배율 9.5, 아이보리 새틴, 조명과 그림자를 적용한다. 이 배율 변경을 이유로 작성 geometry를 다시 확대하지 않는다. `studio_render.py`와 `package_sequence.py`는 독립된 제작 단계다.
+## 동작 순서
+
+오른쪽 자유 꼬리가 먼저 당겨지고 오른쪽 고리와 왼쪽 고리가 차례로 줄어든다.
+매듭은 깊이 방향으로 열리며 같은 리본 띠가 느슨한 한 줄로 풀린 뒤 화면 오른쪽
+밖으로 완전히 나간다. 별도 밴드, 교차 페이드한 자세나 정지 리본을 겹치지 않는다.
+
+주요 진행 구간은 다음과 같다.
+
+- 오른쪽 고리 축소: 전체 진행률 0.06–0.38
+- 왼쪽 고리 축소: 전체 진행률 0.22–0.55
+- 매듭 해제: 전체 진행률 0.42–0.62
+- 느슨한 띠 퇴장: 전체 진행률 0.69–0.98
+- 마지막 프레임: 완전 투명
+
+공개 매니페스트는 첫 자세를 600ms 유지하고 프레임 31부터 매듭 해제 구간으로
+표시한다. 마지막 투명 프레임을 실제로 그린 뒤 300ms를 기다리고 종이 패널을
+1,200ms 동안 연다.
+
+## 실행
+
+아래 두 명령은 Blender 실행 파일로 호출한다. 각 출력 위치는 새 디렉터리이거나
+비어 있어야 하며 기존 증거를 덮어쓰지 않는다.
 
 ```powershell
-python scripts/ribbon/studio_render.py `
-  --source <new-source-directory>/ribbon.blend `
-  --out <new-studio-directory> --camera-scale 9.5
+blender --background --factory-startup `
+  --python scripts/ribbon/approved_motion.py -- `
+  --out <new-proof-directory>
+
+blender --background --factory-startup `
+  --python scripts/ribbon/render_approved_sequence.py -- `
+  --out <new-render-directory>
 ```
 
-프레임 변환, 압축 예산과 최종 재생 검증은 별도 단계에서 수행한다. 작성기 실행 성공이 시각 승인이나 공개 승격을 의미하지 않는다.
+동작 증명본을 정상 속도와 0.25배 속도로 확인한 뒤 투명 프레임을 패키징한다.
 
-## 재현 검증
+```powershell
+py -3.14 scripts/ribbon/package_sequence.py `
+  --input <new-render-directory> `
+  --out <new-sequence-directory> `
+  --count 75 --release-frame 31
+```
 
-고정된 revision-2 `.blend`의 SHA-256은 `e7ea7ce16272f8a2b06be518ad72ca75bacc36845aa9fbc2d7ba898b0f6649b8`이다. 작성기는 이 파일을 내장 스크립트 실행 없이 열어 0/12/20/27/31/35/38/45 프레임의 평가된 vertex와 polygon 연결 순서를 비교했다. 여덟 프레임 모두 topology가 같고 최대 vertex 오차는 0이었다. 허용 오차는 0.0001 scene units다.
+정식 패키징 도구 체인은 Windows x64의 Python 3.14.7, Pillow 11.3.0과
+Pillow 휠에 포함된 libwebp 1.5.0으로 고정한다. 새 가상 환경에서는
+`py -3.14 -m pip install --only-binary=:all: Pillow==11.3.0`으로 설치한다.
+`package_sequence.py`가 Python, Pillow와 libwebp 버전을 모두 검사하므로
+다른 환경은 출력 디렉터리를 만들기 전에 실패한다. 이 버전 고정은 같은 PNG가
+같은 WebP 바이트와 매니페스트 해시 이름으로 패키징되게 하는 공개 계약이다.
 
-카메라 행렬·배율, 종이 좌표·행렬·면, 프레임 범위·속도·캔버스도 완전히 일치했다. 생성한 Blender 파일의 주요 8프레임도 다시 열어 비교했다. 저장소 밖으로 복사한 작성기와 데이터 두 파일만으로 재작성하는 검증과 기존 출력 거부 검증을 수행했다. 기존 출력 거부 시 원래 `.blend` 해시가 유지됐다. 이 검증에서는 이미지를 다시 렌더하지 않았다.
+패키저는 완전 투명 픽셀의 보이지 않는 RGB만 0으로 정리한다. 나머지 알파와
+가시 RGB는 PNG와 동일한 무손실 WebP로 보존한다. 각 파일 이름에는 내용
+SHA-256의 앞 12자리를 넣고, 전체 공개 시퀀스는 4MiB 이하로 제한한다.
+`.blend`, PNG, 증명 영상, 검토 화면과 증거 JSON은 `public` 밖에 둔다.
 
-재현 판정은 vertex 좌표·topology·장면 등록값으로 한다. 파일 해시는 각 개별 산출물을 식별하는 데 사용하며 `authoring-evidence.json`에 작성기·제어점 데이터·Blender 파일 해시와 bpy 버전을 기록한다. 정상·저속 재생에서 보이는 관통, 순간 소멸, 이중 윤곽, 자유 끝의 경로와 완전 퇴장은 최종 studio 및 독립 시각 검증 범위다.
+## 검증
+
+`final-sequence-evidence.json`은 Blender 버전, 작성기 해시, 장면 계약,
+75개 PNG의 해시와 크기, 고리 축소와 매듭 해제 완료, 마지막 띠의 카메라 이탈을
+기록한다. `ribbon-sequence-encoding.json`은 WebP 왕복 동일성, 알파 경계,
+프레임별 해시와 압축 크기를 기록한다. 이 기계 검사는 자연스러운 동작의 시각
+승인을 대신하지 않는다.
+
+통합 뒤에는 다음을 확인한다.
+
+```powershell
+npm run check:ribbon
+node --test tests/pastel-intro.test.mjs tests/pastel-intro-browser.test.mjs
+npm run build
+npm run test:ui
+npm run test:sites
+```
+
+브라우저 검증은 360, 390, 430, 768, 1440px에서 모든 75프레임을 순서대로
+그리는지, 마지막 프레임이 투명한지, 종이 패널이 그 뒤에 열리는지 확인한다.
+400ms 지연, 프레임 실패와 시간 초과에서는 표지를 제거하고 초대장 접근과
+스크롤을 복구해야 한다. `capture=1`과 Quiet에는 표지를 장착하지 않는다.
+
+`author_ribbon.py`, `studio_render.py`, `source-knot.json`은 이전 46프레임
+경로의 보존 자료다. 현재 공개 리본을 재생성할 때는 사용하지 않는다.

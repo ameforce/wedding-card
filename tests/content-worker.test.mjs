@@ -183,6 +183,73 @@ function confirmedDocument() {
   return document;
 }
 
+function galleryPhoto(index) {
+  const mediaId = `00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}`;
+  const slot = `pastel-gallery-${index}`;
+  return {
+    src: `/api/media/invitation/${mediaId}/${slot}/480.webp`,
+    srcSet: `/api/media/invitation/${mediaId}/${slot}/480.webp 480w, /api/media/invitation/${mediaId}/${slot}/960.webp 960w`,
+    sizes: "(min-width: 768px) 430px, 100vw",
+    alt: `승인 사진 ${index + 1}`,
+    position: "50% 50%",
+  };
+}
+
+test("Worker accepts exactly four copy lines and dynamic galleries from one to twelve photos", () => {
+  for (const photoCount of [1, 4, 12]) {
+    const document = confirmedDocument();
+    document.photos.pastel.gallery = Array.from({ length: photoCount }, (_, index) => galleryPhoto(index));
+    assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
+  }
+});
+
+test("Worker rejects legacy copy counts, invalid gallery counts, duplicates, and invalid crops", () => {
+  for (const lineCount of [3, 5]) {
+    const document = confirmedDocument();
+    document.content.story = Array.from({ length: lineCount }, (_, index) => `이야기 ${index + 1}`);
+    assert.throws(() => __test.validateInvitationDocument(document, { write: true }), (error) => error.code === "INVALID_CONTENT");
+  }
+  for (const photoCount of [0, 13]) {
+    const document = confirmedDocument();
+    document.photos.pastel.gallery = Array.from({ length: photoCount }, (_, index) => galleryPhoto(index));
+    assert.throws(() => __test.validateInvitationDocument(document, { write: true }), (error) => error.code === "INVALID_CONTENT");
+  }
+  const duplicate = confirmedDocument();
+  duplicate.photos.pastel.gallery[1].src = duplicate.photos.pastel.gallery[0].src;
+  assert.throws(() => __test.validateInvitationDocument(duplicate, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const mismatchedVariants = confirmedDocument();
+  mismatchedVariants.photos.pastel.gallery[0].srcSet = mismatchedVariants.photos.pastel.gallery[1].srcSet;
+  assert.throws(() => __test.validateInvitationDocument(mismatchedVariants, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const duplicateVariant = confirmedDocument();
+  duplicateVariant.photos.pastel.gallery[1] = {
+    ...duplicateVariant.photos.pastel.gallery[0],
+    src: duplicateVariant.photos.pastel.gallery[0].src.replace("/480.webp", "/960.webp"),
+  };
+  assert.throws(() => __test.validateInvitationDocument(duplicateVariant, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const missingWidthSuffix = confirmedDocument();
+  missingWidthSuffix.photos.pastel.gallery[0] = {
+    ...missingWidthSuffix.photos.pastel.gallery[0],
+    src: "/assets/photos/sample.webp",
+    srcSet: "/assets/photos/sample.webp 480w, /assets/photos/sample.webp 960w",
+  };
+  assert.throws(() => __test.validateInvitationDocument(missingWidthSuffix, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const missingSrcSet = confirmedDocument();
+  delete missingSrcSet.photos.pastel.gallery[0].srcSet;
+  assert.throws(() => __test.validateInvitationDocument(missingSrcSet, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const largeDefault = confirmedDocument();
+  largeDefault.photos.pastel.gallery[0].src = largeDefault.photos.pastel.gallery[0].src.replace("-480.webp", "-960.webp");
+  assert.throws(() => __test.validateInvitationDocument(largeDefault, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const invalidCrop = confirmedDocument();
+  invalidCrop.photos.pastel.gallery[0].position = "50% 101%";
+  assert.throws(() => __test.validateInvitationDocument(invalidCrop, { write: true }), (error) => error.code === "INVALID_CONTENT");
+});
+
 function memoryMediaBucket() {
   const objects = new Map();
   return {
@@ -223,10 +290,11 @@ test("public content fails closed until an invitation revision is published", as
 test("public HTML atomically injects one published revision and preloads its hero", async () => {
   const db = invitationDatabase();
   const document = confirmedDocument();
+  const mediaId = "8a4af8cf-cb4c-48bc-b5ed-9ca0ab42695a";
   document.photos.pastel.hero = {
     ...document.photos.pastel.hero,
-    src: "/api/media/invitation/media-id/pastel-hero/480.webp",
-    srcSet: "/api/media/invitation/media-id/pastel-hero/480.webp 480w, /api/media/invitation/media-id/pastel-hero/960.webp 960w",
+    src: `/api/media/invitation/${mediaId}/pastel-hero/480.webp`,
+    srcSet: `/api/media/invitation/${mediaId}/pastel-hero/480.webp 480w, /api/media/invitation/${mediaId}/pastel-hero/960.webp 960w`,
     alt: "새로 공개한 대표 사진",
   };
   db.state.published_revision_id = "published-42";
@@ -260,7 +328,7 @@ test("public HTML atomically injects one published revision and preloads its her
   assert.equal(bootstrap.source, "cloudflare-published");
   assert.equal(bootstrap.revisionId, "published-42");
   assert.equal(bootstrap.document.photos.pastel.hero.alt, "새로 공개한 대표 사진");
-  assert.match(html, /href="\/api\/media\/invitation\/media-id\/pastel-hero\/480\.webp"/);
+  assert.match(html, new RegExp(`href="/api/media/invitation/${mediaId}/pastel-hero/480\\.webp"`));
   assert.match(html, /rel="preload"/);
   assert.equal(db.queries.filter((sql) => sql.includes("JOIN invitation_revisions AS revision")).length, 1);
   assert.equal(db.queries.filter((sql) => sql.includes("SELECT draft_revision_id, published_revision_id")).length, 0);
@@ -359,7 +427,7 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
     assert.equal(publicResponse.headers.get("x-robots-tag"), "noindex, nofollow, noarchive, nosnippet, noimageindex");
 
     const secondDocument = confirmedDocument();
-    secondDocument.content.message = ["두 번째 공개본"];
+    secondDocument.content.message = ["두 번째", "공개본을", "네 줄로", "저장합니다"];
     const secondDraft = await worker.fetch(request("/api/admin/content", {
       method: "PUT",
       headers,
@@ -486,6 +554,80 @@ test("content validation dual-reads schema v1, requires v2 writes, and validates
   });
 });
 
+test("schema v2 writes validate editable account fields while v1 reads stay compatible", () => {
+  const document = confirmedDocument();
+  document.content.accounts.groom.bank = "테스트은행";
+  document.content.accounts.groom.number = "000-111-2222";
+  document.content.accounts.groom.holder = "테스트 예금주";
+  assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
+
+  const invalidNumber = confirmedDocument();
+  invalidNumber.content.accounts.bride.number = "abc-123";
+  assert.throws(() => __test.validateInvitationDocument(invalidNumber, { write: true }), (error) => {
+    assert.equal(error.code, "INVALID_CONTENT");
+    assert.match(error.message, /content\.accounts\.bride\.number/);
+    return true;
+  });
+
+  const missing = confirmedDocument();
+  delete missing.content.accounts.groom;
+  assert.throws(() => __test.validateInvitationDocument(missing, { write: true }), (error) => {
+    assert.equal(error.code, "INVALID_CONTENT");
+    assert.match(error.message, /content\.accounts\.groom/);
+    return true;
+  });
+
+  const legacy = confirmedDocument();
+  legacy.schemaVersion = 1;
+  delete legacy.content.accounts;
+  assert.doesNotThrow(() => __test.validateInvitationDocument(legacy));
+});
+
+test("schema v2 writes accept extra accounts and reject malformed ones", () => {
+  const document = confirmedDocument();
+  document.content.accounts["extra-1"] = { key: "extra-1", side: "groom", bank: "추가은행", number: "1-2", holder: "추가 예금주" };
+  document.content.accounts["extra-2"] = { key: "extra-2", side: "bride", bank: "추가은행2", number: "3-4", holder: "추가 예금주2" };
+  assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
+
+  const badKey = confirmedDocument();
+  badKey.content.accounts["bad_key"] = { key: "bad_key", side: "groom", bank: "은행", number: "1", holder: "예금주" };
+  assert.throws(() => __test.validateInvitationDocument(badKey, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const noSide = confirmedDocument();
+  noSide.content.accounts["extra-1"] = { key: "extra-1", bank: "은행", number: "1", holder: "예금주" };
+  assert.throws(() => __test.validateInvitationDocument(noSide, { write: true }), (error) => {
+    assert.equal(error.code, "INVALID_CONTENT");
+    assert.match(error.message, /content\.accounts\.extra-1\.side/);
+    return true;
+  });
+
+  const badSide = confirmedDocument();
+  badSide.content.accounts["extra-1"] = { key: "extra-1", side: "elsewhere", bank: "은행", number: "1", holder: "예금주" };
+  assert.throws(() => __test.validateInvitationDocument(badSide, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const flippedCanonical = confirmedDocument();
+  flippedCanonical.content.accounts.groom.side = "bride";
+  assert.throws(() => __test.validateInvitationDocument(flippedCanonical, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const noBank = confirmedDocument();
+  noBank.content.accounts["extra-1"] = { key: "extra-1", side: "groom", bank: "", number: "1", holder: "예금주" };
+  assert.throws(() => __test.validateInvitationDocument(noBank, { write: true }), (error) => {
+    assert.equal(error.code, "INVALID_CONTENT");
+    assert.match(error.message, /content\.accounts\.extra-1\.bank/);
+    return true;
+  });
+
+  const mismatchedKey = confirmedDocument();
+  mismatchedKey.content.accounts["extra-1"] = { key: "other", side: "groom", bank: "은행", number: "1", holder: "예금주" };
+  assert.throws(() => __test.validateInvitationDocument(mismatchedKey, { write: true }), (error) => error.code === "INVALID_CONTENT");
+
+  const overflow = confirmedDocument();
+  for (let index = 1; index <= 7; index += 1) {
+    overflow.content.accounts[`extra-${index}`] = { key: `extra-${index}`, side: "groom", bank: "은행", number: "1", holder: "예금주" };
+  }
+  assert.throws(() => __test.validateInvitationDocument(overflow, { write: true }), (error) => error.code === "INVALID_CONTENT");
+});
+
 test("content publishing rejects unconfirmed or search-indexable documents", async () => {
   const db = invitationDatabase();
   const fixture = await accessFixture();
@@ -600,6 +742,87 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(usageResponse.status, 200);
     assert.equal((await usageResponse.json()).mediaSets, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("failed image variants settle before R2 cleanup and release the quota reservation only after cleanup", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const objects = new Map();
+  let settledWrites = 0;
+  let cleanupObservedSettledWrites = false;
+  const bucket = {
+    async put(key, value) {
+      try {
+        if (key.endsWith("/original.jpg")) throw new Error("simulated original write failure");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        objects.set(key, new Uint8Array(value));
+      } finally {
+        settledWrites += 1;
+      }
+    },
+    async delete(keys) {
+      cleanupObservedSettledWrites = settledWrites === 3;
+      for (const key of keys) objects.delete(key);
+    },
+    async get() { return null; },
+  };
+  const form = new FormData();
+  form.set("slot", "pastel-gallery-new");
+  form.set("alt", "실패 원자성 검증 사진");
+  form.set("position", "50% 50%");
+  form.set("original", new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }));
+  form.set("small", new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }));
+  form.set("large", new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: form,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 500);
+    assert.equal(cleanupObservedSettledWrites, true);
+    assert.equal(objects.size, 0);
+    assert.equal(db.mediaSets.size, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("failed R2 cleanup keeps the media quota reservation", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const bucket = {
+    async put(key) {
+      if (key.endsWith("/480.webp")) throw new Error("simulated variant write failure");
+    },
+    async delete() {
+      throw new Error("simulated cleanup failure");
+    },
+    async get() { return null; },
+  };
+  const form = new FormData();
+  form.set("slot", "pastel-gallery-new");
+  form.set("alt", "정리 실패 검증 사진");
+  form.set("position", "50% 50%");
+  form.set("original", new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }));
+  form.set("small", new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }));
+  form.set("large", new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: form,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 500);
+    assert.equal(db.mediaSets.size, 1);
+    assert.equal([...db.mediaSets.values()][0].status, "reserved");
   } finally {
     globalThis.fetch = originalFetch;
   }

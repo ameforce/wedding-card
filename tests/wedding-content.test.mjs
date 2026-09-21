@@ -6,6 +6,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { getCalendarMonth, WEDDING_PHOTOS, weddingContent } from "../src/content.js";
+import { pastelGalleryLayout } from "../src/gallery-layout.js";
+import { fallbackPhotoSource, findPhotoIndexBySource, movePhotoSource } from "../src/gallery-state.js";
 
 const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -130,7 +132,9 @@ test("confirmed account details are modeled once for initially collapsed Pastel-
   assert.match(app, /function AccountGroups/);
   assert.match(app, /<section className="account-groups" aria-labelledby="account-title">/);
   assert.match(app, /<h3 id="account-title">마음 전하실 곳<\/h3>/);
-  assert.match(app, /<details className=\{`contact-group account-group is-\$\{account\.key\}`\}/);
+  assert.match(app, /<details className=\{`contact-group account-group is-\$\{side\}`\} key=\{side\}>/);
+  assert.match(app, /list\.map\(\(account\) =>/);
+  assert.match(app, /account\.label \|\| account\.holder/);
   assert.match(app, /copyText\(account\.number\)/);
   assert.match(app, /<ContactSection pastel notify=\{notify\} \/>/);
   assert.match(app, /<ScrollReveal><ContactSection \/><\/ScrollReveal>/);
@@ -227,7 +231,9 @@ test("venue map keeps source metadata without a separate visible provider captio
 test("Pastel removes the redundant timeline and presents one full-width story", () => {
   assert.doesNotMatch(app, /weddingContent\.timeline|timeline-item|우리의 하루/);
   assert.match(app, /className="pastel-story section-pad"/);
-  assert.match(app, /content\.story\.join\(" "\)/);
+  assert.match(app, /className="pastel-story-lines"/);
+  assert.match(app, /content\.story\.map\(\(line, index\) => <p key=\{index\}>\{line\}<\/p>\)/);
+  assert.doesNotMatch(app, /content\.story\.join\(" "\)/);
 
   const pastelStory = css.match(/\.pastel-story\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.doesNotMatch(pastelStory, /grid-template-columns/);
@@ -237,7 +243,8 @@ test("Pastel removes the redundant timeline and presents one full-width story", 
 test("Pastel gallery uses portrait media and an accessible lightbox", () => {
   assert.match(app, /const photos = \[runtimePhotos\.pastel\.hero, \.\.\.runtimePhotos\.pastel\.gallery\]/);
   assert.match(app, /className="pastel-hero-photo is-inset-frame"/);
-  assert.match(app, /className="pastel-gallery-item"/);
+  assert.match(app, /className=\{`pastel-gallery-item \$\{layout\.className\}`\}/);
+  assert.match(app, /pastelGalleryLayout\(index, photos\.length\)/);
   assert.match(app, /role="dialog"/);
   assert.match(app, /aria-modal="true"/);
   assert.match(app, /aria-label="갤러리 닫기"/);
@@ -251,8 +258,41 @@ test("Pastel gallery uses portrait media and an accessible lightbox", () => {
   assert.match(app, /onPointerCancel=/);
   assert.match(app, /Math\.abs\(endX - startX\) < 48/);
 
+  const gallery = css.match(/\.pastel-gallery\s*\{([^}]+)\}/)?.[1] ?? "";
   const galleryItem = css.match(/\.pastel-gallery-item\s*\{([^}]+)\}/)?.[1] ?? "";
-  assert.match(galleryItem, /aspect-ratio:\s*3\s*\/\s*4/);
+  assert.match(gallery, /grid-template-columns:\s*repeat\(6,/);
+  assert.match(gallery, /gap:\s*4px/);
+  assert.match(galleryItem, /box-shadow:\s*none/);
+  assert.match(css, /\.pastel-gallery-item\.is-small\s*\{[^}]*grid-column:\s*span 2/);
+  assert.match(css, /\.pastel-gallery-item\.is-large\s*\{[^}]*grid-column:\s*span 3/);
+  assert.match(css, /\.pastel-gallery-item\.is-full\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
+});
+
+test("Pastel gallery assigns complete deterministic rows for every supported photo count", () => {
+  const spans = { "is-small": 2, "is-large": 3, "is-full": 6 };
+  for (let count = 1; count <= 12; count += 1) {
+    const layout = Array.from({ length: count }, (_, index) => pastelGalleryLayout(index, count));
+    assert.equal(layout.every(({ className, sizes }) => spans[className] && sizes.includes("min-width: 768px")), true);
+    let row = 0;
+    for (const item of layout) {
+      row += spans[item.className];
+      assert.ok(row <= 6, `count ${count} overflows a six-column row`);
+      if (row === 6) row = 0;
+    }
+    assert.equal(row, 0, `count ${count} leaves an incomplete row`);
+  }
+  assert.deepEqual(Array.from({ length: 11 }, (_, index) => pastelGalleryLayout(index, 11).className), [
+    "is-small", "is-small", "is-small", "is-large", "is-large",
+    "is-small", "is-small", "is-small", "is-small", "is-small", "is-small",
+  ]);
+});
+
+test("music control stays in document flow and is omitted from capture mode", () => {
+  assert.match(app, /className="music-control-slot"/);
+  assert.match(app, /showMusic=\{!captureMode\}/);
+  assert.doesNotMatch(app, /!captureMode && <MusicControl/);
+  assert.match(css, /\.music-control\s*\{[^}]*position:\s*static/);
+  assert.doesNotMatch(css, /\.music-control\s*\{[^}]*position:\s*fixed/);
 });
 
 test("Pastel hero uses a breathing-room inset photo frame without a heavy treatment", () => {
@@ -395,4 +435,14 @@ test("Quiet photos use the same accessible lightbox contract", () => {
   assert.match(app, /<PhotoLightbox photos=\{photos\} gallery=\{gallery\} tone="quiet"/);
   assert.match(css, /\.gallery-lightbox\.is-pastel/);
   assert.doesNotMatch(css, /background:\s*rgba\(18,\s*27,\s*38/);
+});
+
+test("lightbox navigation follows stable photo identity through reorder and removal", () => {
+  const photos = [{ src: "a" }, { src: "b" }, { src: "c" }];
+  assert.equal(findPhotoIndexBySource(photos, "b"), 1);
+  assert.equal(findPhotoIndexBySource([photos[2], photos[0], photos[1]], "b"), 2);
+  assert.equal(movePhotoSource([photos[2], photos[0], photos[1]], "b", 1), "c");
+  assert.equal(fallbackPhotoSource([photos[0], photos[2]], 1), "c");
+  assert.match(app, /triggerRefs = useRef\(new Map\(\)\)/);
+  assert.match(app, /registerTrigger\(photo\.src, node\)/);
 });

@@ -8,25 +8,51 @@ import hashlib
 import html
 import json
 from pathlib import Path
+import sys
 
-from PIL import Image, ImageDraw
+import PIL
+from PIL import Image, ImageDraw, features
+
+APPROVED_FRAME_COUNT = 75
+APPROVED_RELEASE_FRAME = 31
+APPROVED_CANVAS = (960, 640)
+APPROVED_PYTHON = (3, 14, 7)
+APPROVED_PILLOW = '11.3.0'
+APPROVED_LIBWEBP = '1.5.0'
+
+
+def validate_packaging_environment():
+    actual_python = sys.version_info[:3]
+    actual_webp = features.version('webp')
+    if actual_python != APPROVED_PYTHON:
+        raise RuntimeError(
+            f'Packaging requires Python {".".join(map(str, APPROVED_PYTHON))}; '
+            f'found {".".join(map(str, actual_python))}.')
+    if PIL.__version__ != APPROVED_PILLOW or actual_webp != APPROVED_LIBWEBP:
+        raise RuntimeError(
+            f'Packaging requires Pillow {APPROVED_PILLOW} with libwebp '
+            f'{APPROVED_LIBWEBP}; found Pillow {PIL.__version__} with '
+            f'libwebp {actual_webp or "unavailable"}.')
 
 
 def main():
+    validate_packaging_environment()
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', required=True)
     parser.add_argument('--out', required=True)
-    parser.add_argument('--count', type=int, default=46)
+    parser.add_argument('--count', type=int, default=75)
     parser.add_argument('--release-frame', type=int, required=True)
     parser.add_argument('--label', default='리본 연속 동작 검토')
     args = parser.parse_args()
     source, output = Path(args.input).resolve(), Path(args.out).resolve()
-    if not 2 <= args.count <= 300 or not 0 <= args.release_frame < args.count:
-        parser.error('Invalid frame count or release frame.')
+    if args.count != APPROVED_FRAME_COUNT or args.release_frame != APPROVED_RELEASE_FRAME:
+        parser.error('The approved public sequence requires exactly 75 frames and release frame 31.')
     if output.exists() and any(output.iterdir()):
         parser.error('Output must be new or empty; never overwrite a reviewed sequence.')
     output.mkdir(parents=True, exist_ok=True)
     width, height = Image.open(source / 'frame-000.png').size
+    if (width, height) != APPROVED_CANVAS:
+        raise ValueError('The approved public sequence requires a 960x640 canvas.')
     if width * height * 4 * 7 > 32 * 1024 * 1024:
         raise ValueError('Decoded surfaces exceed the 32 MiB budget.')
     evidence = []

@@ -10,7 +10,35 @@ const MAX_LENGTH = {
   photoAlt: 300,
   photoUrl: 2048,
   url: 2048,
+  accountNumber: 40,
 };
+
+export const ACCOUNT_SIDES = Object.freeze(["groom", "bride"]);
+export const ACCOUNT_SIDE_LABELS = Object.freeze({ groom: "신랑 측", bride: "신부 측" });
+export const MAX_ACCOUNT_ENTRIES = 8;
+export const REQUIRED_COPY_LINES = 4;
+export const MIN_GALLERY_PHOTOS = 1;
+export const MAX_GALLERY_PHOTOS = 12;
+const ACCOUNT_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{0,30}$/;
+
+export function updateRequiredCopyLine(lines, index, value) {
+  const next = Array.isArray(lines) ? [...lines] : [];
+  if (!Number.isInteger(index) || index < 0 || index >= REQUIRED_COPY_LINES) return next;
+  if (index < next.length) {
+    next[index] = value;
+  } else if (value !== "") {
+    while (next.length < index) next.push("");
+    next.push(value);
+  }
+  return next;
+}
+
+export function removeEditableCopyLine(lines, index) {
+  if (!Array.isArray(lines) || !Number.isInteger(index) || index < 0 || index >= lines.length) {
+    return Array.isArray(lines) ? [...lines] : [];
+  }
+  return lines.filter((_, lineIndex) => lineIndex !== index);
+}
 
 const DAY_LABELS = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 export const EVENT_TIMEZONE = Object.freeze({ iana: "Asia/Seoul", utcOffset: "+09:00" });
@@ -62,6 +90,11 @@ function text(value, fallback, maxLength = MAX_LENGTH.copy) {
 function textLines(value, fallback, maxLines, maxLength = MAX_LENGTH.copy) {
   if (!Array.isArray(value) || value.length !== maxLines) return [...fallback];
   return value.map((line, index) => text(line, fallback[index], maxLength));
+}
+
+function editableTextLines(value, fallback) {
+  if (!Array.isArray(value)) return [...fallback];
+  return value.map((line) => typeof line === "string" ? line.trim() : line);
 }
 
 function date(value, fallback) {
@@ -119,9 +152,18 @@ function displayDiffValue(value, counterpart, current) {
     if (typeof value.alt === "string") {
       return [value.alt, mediaLabel(value.src, counterpart?.src, current), value.position].filter(Boolean).join(" · ");
     }
+    if (typeof value.bank === "string" || typeof value.number === "string") {
+      return [`${value.bank ?? ""} ${value.number ?? ""}`.trim(), value.holder && `예금주 ${value.holder}`].filter(Boolean).join(" · ");
+    }
     return JSON.stringify(value);
   }
   return String(value ?? "");
+}
+
+function accountDiffLabel(key, entry) {
+  if (ACCOUNT_SIDE_LABELS[key]) return `${ACCOUNT_SIDE_LABELS[key]} 계좌`;
+  const side = ACCOUNT_SIDE_LABELS[entry?.side] ?? "";
+  return `${side ? `${side} ` : ""}${entry?.label || entry?.holder || key} 계좌`;
 }
 
 export function buildPublishDiff(currentDocument, publishedDocument) {
@@ -136,6 +178,21 @@ export function buildPublishDiff(currentDocument, publishedDocument) {
       published: displayDiffValue(published, current, false),
     }];
   });
+  const currentAccounts = currentDocument?.content?.accounts ?? {};
+  const publishedAccounts = publishedDocument?.content?.accounts ?? {};
+  const accountKeys = [...new Set([...Object.keys(currentAccounts), ...Object.keys(publishedAccounts)])];
+  for (const key of accountKeys) {
+    const current = currentAccounts[key];
+    const published = publishedAccounts[key];
+    if (JSON.stringify(current) === JSON.stringify(published)) continue;
+    const suffix = !published ? " 추가" : !current ? " 삭제" : "";
+    changes.push({
+      section: "계좌 정보",
+      label: `${accountDiffLabel(key, current ?? published)}${suffix}`,
+      current: displayDiffValue(current, published, true),
+      published: displayDiffValue(published, current, false),
+    });
+  }
   return {
     changes,
     sections: [...new Set(changes.map((change) => change.section))],
@@ -165,18 +222,62 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
   required(document?.content?.venue?.floor, "층", MAX_LENGTH.short);
   required(document?.content?.venue?.address, "주소");
   for (const [value, label] of [[document?.content?.message, "인사말"], [document?.content?.story, "우리의 이야기"]]) {
-    if (!Array.isArray(value) || value.length < 1 || value.some((line) => typeof line !== "string" || !line.trim() || line.length > MAX_LENGTH.copy)) {
-      errors[label] = `${label}의 모든 줄을 입력해 주세요.`;
+    if (!Array.isArray(value) || value.length !== REQUIRED_COPY_LINES || value.some((line) => typeof line !== "string" || !line.trim() || line.length > MAX_LENGTH.copy)) {
+      errors[label] = `${label}은 1번째 줄부터 ${REQUIRED_COPY_LINES}번째 줄까지 모두 입력해 주세요.`;
     }
   }
-  Object.assign(errors, validateMusicContent(document?.content?.music, { allowLocalPreview }));
-  const photos = [document?.photos?.pastel?.hero, ...(document?.photos?.pastel?.gallery || [])];
-  if (photos.length !== 5) {
-    errors["사진"] = "모든 사진의 파일, 대체 텍스트, 초점 위치를 확인해 주세요.";
+  const allAccounts = document?.content?.accounts && typeof document.content.accounts === "object" && !Array.isArray(document.content.accounts)
+    ? document.content.accounts
+    : {};
+  const accountNumberError = (label) => `${label} 계좌번호는 숫자와 하이픈(-)만 ${MAX_LENGTH.accountNumber}자 이내로 입력해 주세요.`;
+  for (const side of ACCOUNT_SIDES) {
+    const account = allAccounts[side];
+    const sideLabel = ACCOUNT_SIDE_LABELS[side];
+    required(account?.bank, `${sideLabel} 은행`, MAX_LENGTH.short);
+    required(account?.holder, `${sideLabel} 예금주`, MAX_LENGTH.name);
+    if (normalizeAccountNumber(account?.number) === null) errors[`${sideLabel} 계좌번호`] = accountNumberError(sideLabel);
   }
+  const extraAccounts = Object.keys(allAccounts).filter((key) => !ACCOUNT_SIDES.includes(key));
+  const perSideCount = { groom: 0, bride: 0 };
+  extraAccounts.forEach((key) => {
+    const account = allAccounts[key];
+    const sideValid = ACCOUNT_SIDES.includes(account?.side);
+    const side = sideValid ? account.side : "groom";
+    perSideCount[side] += 1;
+    const label = `${ACCOUNT_SIDE_LABELS[side]} 추가 계좌 ${perSideCount[side]}`;
+    if (!sideValid) errors[`${label} 소속`] = `${label}의 소속(신랑 측/신부 측)을 확인해 주세요.`;
+    if (!ACCOUNT_KEY_PATTERN.test(key) || account?.key !== key) {
+      errors[`${label} 항목`] = `${label} 항목 키가 올바르지 않습니다.`;
+    }
+    required(account?.bank, `${label} 은행`, MAX_LENGTH.short);
+    required(account?.holder, `${label} 예금주`, MAX_LENGTH.name);
+    if (normalizeAccountNumber(account?.number) === null) errors[`${label} 계좌번호`] = accountNumberError(label);
+  });
+  if (Object.keys(allAccounts).length > MAX_ACCOUNT_ENTRIES) {
+    errors["계좌 정보"] = `계좌는 최대 ${MAX_ACCOUNT_ENTRIES}개까지 추가할 수 있습니다.`;
+  }
+  Object.assign(errors, validateMusicContent(document?.content?.music, { allowLocalPreview }));
+  const gallery = document?.photos?.pastel?.gallery;
+  const galleryValid = Array.isArray(gallery) && gallery.length >= MIN_GALLERY_PHOTOS && gallery.length <= MAX_GALLERY_PHOTOS;
+  if (!galleryValid) {
+    errors["사진"] = `갤러리 사진은 ${MIN_GALLERY_PHOTOS}장부터 ${MAX_GALLERY_PHOTOS}장까지 사용할 수 있습니다.`;
+  }
+  const photos = [document?.photos?.pastel?.hero, ...(Array.isArray(gallery) ? gallery : [])];
+  const seenSources = new Set();
   photos.forEach((photo, index) => {
     const label = index === 0 ? "상단 대표 사진" : `갤러리 ${index}`;
-    if (!photoUrl(photo?.src, allowLocalPreview)) errors[`${label} 파일`] = `${label} 파일을 확인해 주세요.`;
+    const normalizedSource = photoUrl(photo?.src, allowLocalPreview);
+    const sourceDescriptor = photoMediaDescriptor(photo?.src, allowLocalPreview);
+    const ephemeralPreviewPhoto = allowLocalPreview && /^(?:data:image\/(?:jpeg|png|webp);base64,|blob:)/i.test(photo?.src || "");
+    if (!normalizedSource) errors[`${label} 파일`] = `${label} 파일을 확인해 주세요.`;
+    else if (!ephemeralPreviewPhoto && sourceDescriptor.width !== "480") errors[`${label} 파일`] = `${label} 기본 파일은 480px 파생본이어야 합니다.`;
+    else if (seenSources.has(sourceDescriptor.identity)) errors[`${label} 파일`] = "같은 사진 파일을 갤러리에 중복해서 사용할 수 없습니다.";
+    else seenSources.add(sourceDescriptor.identity);
+    if ((!ephemeralPreviewPhoto && photo?.srcSet === undefined)
+      || (photo?.srcSet !== undefined && !photoSrcSet(photo.srcSet, allowLocalPreview, sourceDescriptor?.identity))) {
+      errors[`${label} 반응형 파일`] = `${label} 480px 및 960px 반응형 파일을 확인해 주세요.`;
+    }
+    if (photo?.sizes !== undefined && !photoSizes(photo.sizes)) errors[`${label} 표시 크기`] = `${label} 표시 크기를 확인해 주세요.`;
     if (!photo?.alt?.trim() || photo.alt.length > MAX_LENGTH.photoAlt) errors[`${label} 대체 텍스트`] = `${label} 대체 텍스트를 확인해 주세요.`;
     if (!cropPosition(photo?.position, "")) errors[`${label} 초점 위치`] = `${label} 초점 위치를 백분율 두 개로 입력해 주세요. 예: 50% 58%`;
   });
@@ -200,7 +301,37 @@ export function serializeContentDocument(document, { allowLocalPreview = false }
 }
 
 function cropPosition(value, fallback) {
-  return /^\d{1,3}%\s+\d{1,3}%$/.test(value) ? value : fallback;
+  if (typeof value !== "string") return fallback;
+  const match = value.trim().match(/^(\d{1,3})%\s+(\d{1,3})%$/);
+  if (!match || Number(match[1]) > 100 || Number(match[2]) > 100) return fallback;
+  return `${Number(match[1])}% ${Number(match[2])}%`;
+}
+
+function normalizeAccountNumber(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, "");
+  return normalized.length <= MAX_LENGTH.accountNumber && /^\d+(?:-\d+)*$/.test(normalized) ? normalized : null;
+}
+
+function normalizeAccount(value, fallback) {
+  return {
+    ...fallback,
+    bank: text(value?.bank, fallback.bank, MAX_LENGTH.short),
+    holder: text(value?.holder, fallback.holder, MAX_LENGTH.name),
+    number: normalizeAccountNumber(value?.number) ?? fallback.number,
+  };
+}
+
+function normalizeExtraAccount(key, value) {
+  if (!ACCOUNT_KEY_PATTERN.test(key)) return null;
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    key,
+    side: ACCOUNT_SIDES.includes(source.side) ? source.side : "groom",
+    bank: text(source.bank, "", MAX_LENGTH.short),
+    number: normalizeAccountNumber(source.number) ?? "",
+    holder: text(source.holder, "", MAX_LENGTH.name),
+  };
 }
 
 function photoUrl(value, allowLocalPreview) {
@@ -208,12 +339,34 @@ function photoUrl(value, allowLocalPreview) {
   if (allowLocalPreview && value.length <= 2_000_000 && /^data:image\/(?:jpeg|png|webp);base64,/i.test(value)) return value;
   if (value.length > MAX_LENGTH.photoUrl) return null;
   if (/^blob:/i.test(value)) return allowLocalPreview ? value : null;
-  return /^(?:\/|https:\/\/)/i.test(value) ? value : null;
+  return /^(?:\/assets\/photos\/[a-z0-9._-]+\.webp|\/api\/media\/invitation\/[a-f0-9-]{36}\/[a-z0-9-]{1,40}\/(?:480|960)\.webp)$/i.test(value) ? value : null;
 }
 
-function photoSrcSet(value) {
+function photoMediaDescriptor(value, allowLocalPreview = false) {
+  if (!photoUrl(value, allowLocalPreview)) return null;
+  const asset = value.match(/^\/assets\/photos\/(.+?)(?:-(480|960))?\.webp$/i);
+  if (asset) return { identity: `asset:${asset[1].toLowerCase()}`, width: asset[2] || null };
+  const uploaded = value.match(/^\/api\/media\/invitation\/([a-f0-9-]{36})\/([a-z0-9-]{1,40})\/(480|960)\.webp$/i);
+  if (uploaded) return { identity: `upload:${uploaded[1].toLowerCase()}/${uploaded[2].toLowerCase()}`, width: uploaded[3] };
+  return { identity: value, width: null };
+}
+
+function photoSrcSet(value, allowLocalPreview = false, sourceIdentity = null) {
   if (typeof value !== "string" || value.length === 0 || value.length > MAX_LENGTH.photoUrl) return null;
-  return /^(?!.*(?:javascript:|data:|<))/i.test(value) ? value : null;
+  const candidates = value.split(",").map((candidate) => candidate.trim().match(/^(\S+)\s+(480|960)w$/));
+  if (candidates.length !== 2 || candidates.some((candidate) => !candidate)) return null;
+  if (candidates[0][2] !== "480" || candidates[1][2] !== "960") return null;
+  const descriptors = candidates.map((candidate) => photoMediaDescriptor(candidate[1], allowLocalPreview));
+  if (descriptors.some((descriptor) => !descriptor)) return null;
+  if (descriptors.some((descriptor, index) => descriptor.width !== candidates[index][2])) return null;
+  const identity = descriptors[0].identity;
+  if (descriptors.some((descriptor) => descriptor.identity !== identity) || (sourceIdentity && identity !== sourceIdentity)) return null;
+  return value;
+}
+
+function photoSizes(value) {
+  if (typeof value !== "string" || value.length < 1 || value.length > 300) return null;
+  return /^(?!.*(?:javascript:|data:|<|>))[(),:\w\s.%-]+$/i.test(value) ? value : null;
 }
 
 function httpsUrl(value) {
@@ -258,20 +411,12 @@ function normalizeMusic(value, fallback, { allowLocalPreview = false } = {}) {
   };
 }
 
-function normalizePhoto(value, fallback, { allowLocalPreview = false } = {}) {
-  const normalized = {
-    ...fallback,
-    alt: text(value?.alt, fallback.alt, MAX_LENGTH.photoAlt),
-    position: cropPosition(value?.position, fallback.position),
-  };
-  const src = photoUrl(value?.src, allowLocalPreview);
-  const srcSet = photoSrcSet(value?.srcSet);
-  const sizes = typeof value?.sizes === "string" && value.sizes.length <= 300 ? value.sizes : null;
-
-  if (src) normalized.src = src;
-  if (src?.startsWith("blob:") || src?.startsWith("data:")) delete normalized.srcSet;
-  else if (srcSet) normalized.srcSet = srcSet;
-  if (sizes) normalized.sizes = sizes;
+function normalizeEditablePhoto(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const normalized = { ...value };
+  for (const key of ["src", "srcSet", "sizes", "alt", "position"]) {
+    if (typeof normalized[key] === "string") normalized[key] = normalized[key].trim();
+  }
   return normalized;
 }
 
@@ -296,11 +441,13 @@ export function createContentDocument(content) {
 
 export function normalizeContentDocument(document, fallbackContent, options = {}) {
   const fallback = createContentDocument(fallbackContent);
-  const source = SUPPORTED_CONTENT_SCHEMA_VERSIONS.has(document?.schemaVersion) ? document : {};
+  const hasSupportedDocument = SUPPORTED_CONTENT_SCHEMA_VERSIONS.has(document?.schemaVersion);
+  const source = hasSupportedDocument ? document : {};
   const sourceContent = source.content ?? {};
   const event = sourceContent.event ?? {};
   const venue = sourceContent.venue ?? {};
   const transit = sourceContent.transit ?? {};
+  const accounts = sourceContent.accounts ?? {};
   const sourcePhotos = source.photos ?? {};
   const content = clone(fallback.content);
   const photos = clone(fallback.photos);
@@ -328,8 +475,8 @@ export function normalizeContentDocument(document, fallbackContent, options = {}
     floor: text(venue.floor, content.venue.floor, MAX_LENGTH.short),
     address: text(venue.address, content.venue.address, MAX_LENGTH.copy),
   };
-  content.message = textLines(sourceContent.message, content.message, content.message.length);
-  content.story = textLines(sourceContent.story, content.story, content.story.length);
+  content.message = editableTextLines(sourceContent.message, content.message);
+  content.story = editableTextLines(sourceContent.story, content.story);
   content.transit = {
     ...content.transit,
     subway: text(transit.subway, content.transit.subway),
@@ -338,11 +485,23 @@ export function normalizeContentDocument(document, fallbackContent, options = {}
     parkingRegistrationLocation: text(transit.parkingRegistrationLocation, content.transit.parkingRegistrationLocation),
     parkingRegistration: text(transit.parkingRegistration, content.transit.parkingRegistration),
   };
+  content.accounts = {
+    groom: normalizeAccount(accounts.groom, content.accounts.groom),
+    bride: normalizeAccount(accounts.bride, content.accounts.bride),
+  };
+  for (const key of Object.keys(accounts)) {
+    if (ACCOUNT_SIDES.includes(key)) continue;
+    const extra = normalizeExtraAccount(key, accounts[key]);
+    if (extra) content.accounts[key] = extra;
+  }
   content.music = normalizeMusic(source.schemaVersion === CONTENT_SCHEMA_VERSION ? sourceContent.music : undefined, content.music, options);
+  const sourceGallery = sourcePhotos.pastel?.gallery;
   photos.pastel = {
     ...photos.pastel,
-    hero: normalizePhoto(sourcePhotos.pastel?.hero, photos.pastel.hero, options),
-    gallery: photos.pastel.gallery.map((photo, index) => normalizePhoto(sourcePhotos.pastel?.gallery?.[index], photo, options)),
+    hero: hasSupportedDocument ? (normalizeEditablePhoto(sourcePhotos.pastel?.hero) ?? {}) : photos.pastel.hero,
+    gallery: hasSupportedDocument
+      ? (Array.isArray(sourceGallery) ? sourceGallery.map(normalizeEditablePhoto) : [])
+      : photos.pastel.gallery,
   };
 
   return { schemaVersion: CONTENT_SCHEMA_VERSION, content, photos };
