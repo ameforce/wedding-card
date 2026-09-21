@@ -1,0 +1,22 @@
+{
+  "kind": "independent-blender-cloth",
+  "reference": "Accepted straight-wings-final-61 rendered image only; no Houdini geometry, cache or motion was imported.",
+  "restModel": "Original authored three-dimensional rest surface; flat coordinates are diagnostic.",
+  "simulation": "Fixed rest lengths, endpoint forces, adaptive implicit timesteps and continuous collision checks.",
+  "rendering": "Collision-constrained fixed-topology surface refinement and one fixed Blender camera; 2.5x time, 30fps.",
+  "files": {
+    "certified_surface.py": "86ab9a00cfaea5ba56f811c4e1c524c1d61d841547fd554f323123daf2d09580",
+    "README.md": "c13b5b7f71306f575236b26b632e3ff29b9cd3a025b6b05f46971b33bb6cae7c",
+    "refine.py": "ffa5b0c7d831f1ad33a237d749663057cfb15009a544e2243fa44e12355853b2",
+    "render-scene.blend": "7c9d2ccb239b6fda678e3a03e50516bb50aab631576bdb12bfa27181d4d8ce65",
+    "render.py": "54083e52a964f73b205814078a9f55f201ddcad450facb82902c381a70c77172",
+    "requirements-physics.txt": "7c58924a2210b7e53efd4846636b30fff59d6d1635f8cd2ae27ffc9604fce639",
+    "requirements-render.txt": "c93a947a57ebad78563f544c8e099c4dd722b1f1825cbe22c9247cfd4e5db922",
+    "simulate.py": "12c2969996aa1572da9a921972a1e0fc00ea5a3f6ce983085c41c96b4f8ad87c",
+    "source-rest.npz": "22e5650d704e5a462f94d4d5c64156a501bad45a5c2663ef1d8f48fbcf14ee72",
+    "surface_refinement.py": "8e9046f99a5fea15be627bcbedf64cd55e93f775699730ee34335471a1dcc76a",
+    "test_certified_surface.py": "7f332f038dc8e31a1dd25e34f1f159f34fbb62affa20104c8e64d9bcfa8b9e0b",
+    "verify_physics.py": "f03b0de8dbd3fcff57522fceabf8c69f9df48eeceb2118411ce57a291a05ee32",
+    "verify_surface.py": "622b3550353463affc7f5ac01ec764b953ff308bfbc9b0b3245b926159aa4c41"
+  }
+}
