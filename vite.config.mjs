@@ -1,5 +1,21 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { createEarlyPosterMarkup } from "./scripts/intro/early-poster.mjs";
+
+function pastelIntroEarlyPoster() {
+  let markup;
+  return {
+    name: "pastel-intro-early-poster",
+    configResolved() {
+      markup = createEarlyPosterMarkup();
+    },
+    transformIndexHtml(html) {
+      return html
+        .replace("<!-- PASTEL_INTRO_EARLY_HEAD -->", markup.styles)
+        .replace("<!-- PASTEL_INTRO_EARLY_POSTER -->", markup.posterNode);
+    },
+  };
+}
 
 export default defineConfig({
   build: {
@@ -17,5 +33,5 @@ export default defineConfig({
       clientFiles: ["./src/main.jsx"],
     },
   },
-  plugins: [react()],
+  plugins: [pastelIntroEarlyPoster(), react()],
 });

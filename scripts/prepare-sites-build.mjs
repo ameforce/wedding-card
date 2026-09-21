@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +14,17 @@ const migrations = path.join(root, "migrations");
 for (const file of [index, worker, hosting]) {
   if (!existsSync(file)) throw new Error("Missing Sites build input: " + file);
 }
+
+const earlyScript = readFileSync(index, "utf8").match(/<script id="pastel-intro-early-boot">([\s\S]*?)<\/script>/u)?.[1];
+if (!earlyScript) throw new Error("Missing inline early-cover controller.");
+const scriptDirective = `script-src 'self' 'sha256-${createHash("sha256").update(earlyScript).digest("base64")}'`;
+if (!readFileSync(worker, "utf8").includes(scriptDirective)) {
+  throw new Error("Worker CSP must allow only the exact built early-cover controller hash.");
+}
+const headersPath = path.join(dist, "client", "_headers");
+const headers = readFileSync(headersPath, "utf8");
+if (!headers.includes("script-src 'self';")) throw new Error("Unexpected Static Assets script policy.");
+writeFileSync(headersPath, headers.replace("script-src 'self';", `${scriptDirective};`));
 
 mkdirSync(path.join(dist, "server"), { recursive: true });
 mkdirSync(path.join(dist, ".openai"), { recursive: true });

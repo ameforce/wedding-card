@@ -6,3 +6,5 @@ dist/
 !.dev.vars.example
 artifacts/source-assets/
 *.log
+__pycache__/
+*.py[cod]
