@@ -244,6 +244,7 @@ function localPublishedWorkerPlugin(document) {
         response.setHeader("x-wedding-revision", "local-published-42");
         response.setHeader("x-wedding-worker-tag", TARGET_SHA);
         response.setHeader("x-wedding-worker-version", TARGET_VERSION);
+        response.setHeader("content-security-policy", "connect-src 'self'");
         const path = request.url?.split("?", 1)[0] || "";
         if (!path.startsWith(heroPrefix)) return next();
         const asset = path.endsWith("/960.webp") ? "pastel-hero-960.webp" : "pastel-hero-480.webp";
@@ -260,7 +261,7 @@ function localPublishedWorkerPlugin(document) {
   };
 }
 
-test("local published Worker canary proves every hash and excludes first-navigation ribbon records from warm evidence", { timeout: 60_000 }, async (t) => {
+test("local published Worker canary proves every hash under production connect-src policy and isolates warm evidence", { timeout: 60_000 }, async (t) => {
   const document = createContentDocument(weddingContent);
   document.photos.pastel.hero = {
     ...document.photos.pastel.hero,

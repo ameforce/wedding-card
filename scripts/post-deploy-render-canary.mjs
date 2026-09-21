@@ -623,6 +623,16 @@ async function installIntroObserver(page) {
       const hash = await crypto.subtle.digest("SHA-256", bytes);
       return [...new Uint8Array(hash)].map((value) => value.toString(16).padStart(2, "0")).join("");
     };
+    const readPosterBytes = async (source) => {
+      if (source.startsWith("data:")) {
+        const match = /^data:image\/webp;base64,([A-Za-z0-9+/]*={0,2})$/u.exec(source);
+        if (!match) throw new Error("Unsupported inline ribbon poster encoding.");
+        // Embedded bytes are not a network connection under connect-src 'self'.
+        return Uint8Array.from(atob(match[1]), (character) => character.charCodeAt(0));
+      }
+      const response = await fetch(source);
+      return response.arrayBuffer();
+    };
     const recordEarlyPoster = (image) => {
       if (!image || evidence.earlyPoster.present) return;
       evidence.earlyPoster = {
@@ -630,7 +640,7 @@ async function installIntroObserver(page) {
         observedBeforeMain: !document.querySelector(".pastel-intro-cover"),
         sha256: "",
       };
-      void fetch(image.currentSrc || image.src).then((response) => response.arrayBuffer()).then(digest)
+      void readPosterBytes(image.currentSrc || image.src).then(digest)
         .then((hash) => { evidence.earlyPoster.sha256 = hash; })
         .catch((error) => { evidence.earlyPoster.error = error.message; });
     };
