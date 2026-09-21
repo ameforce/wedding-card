@@ -4,6 +4,7 @@ const MAX_DECODED_FRAMES = 4;
 const MAX_INFLIGHT_DECODES = 2;
 const MAX_MANAGED_PIXEL_BYTES = 32 * 1024 * 1024;
 const V2_DEFAULT_CANVAS = Object.freeze({ width: 960, height: 640, fps: 30 });
+export const INVITATION_MAX_WIDTH = 430;
 
 function abortError() {
   return new DOMException("Ribbon sequence loading was cancelled.", "AbortError");
@@ -109,17 +110,32 @@ function validateV2Manifest(value, resolvedManifest) {
   exactKeys(value, [
     "schemaVersion", "fps", "width", "height", "frames", "holdMs", "panelDelayMs", "panelDurationMs",
     "releaseCompleteFrame", "registration", "rootYPx", "poster", "panelCurve",
+    ...(Object.hasOwn(value, "framePack") ? ["framePack"] : []),
   ], "v2");
   const width = finiteInteger(value.width, 480, V2_DEFAULT_CANVAS.width, "width");
-  const height = finiteInteger(value.height, 320, V2_DEFAULT_CANVAS.height, "height");
-  if (value.fps !== V2_DEFAULT_CANVAS.fps || width % 3 !== 0 || height * 3 !== width * 2) {
-    throw new TypeError("Ribbon v2 requires the default 960x640 canvas or one uniformly downscaled 3:2 canvas at 30 fps.");
+  const height = finiteInteger(value.height, 320, 1920, "height");
+  const canvasSupported = (width % 3 === 0 && height * 3 === width * 2) || (width === 480 && height === 1920);
+  if (value.fps !== V2_DEFAULT_CANVAS.fps || !canvasSupported) {
+    throw new TypeError("Ribbon v2 requires a bounded 3:2 canvas or the fixed 480x1920 release canvas at 30 fps.");
   }
   if (value.holdMs !== 800 || value.panelDelayMs !== 600 || value.panelDurationMs !== 1400) {
     throw new TypeError("Ribbon v2 requires the approved hold and measured panel timings.");
   }
   const frames = validateFrames(value.frames, resolvedManifest);
   const releaseCompleteFrame = finiteInteger(value.releaseCompleteFrame, 0, frames.length - 2, "releaseCompleteFrame");
+  let framePack;
+  if (Object.hasOwn(value, "framePack")) {
+    const pack = value.framePack;
+    if (!pack || typeof pack !== "object" || Array.isArray(pack)) throw new TypeError("Invalid ribbon frame pack.");
+    exactKeys(pack, ["file", "sha256", "lengths"], "framePack");
+    if (typeof pack.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pack.sha256)
+      || pack.file !== `sequence-${pack.sha256.slice(0, 12)}.bin`) throw new TypeError("Invalid ribbon frame pack identity.");
+    if (!Array.isArray(pack.lengths) || pack.lengths.length !== frames.length) throw new TypeError("Ribbon frame pack count mismatch.");
+    const lengths = pack.lengths.map((length) => finiteInteger(length, 20, MAX_PREFETCH_BYTES, "frame pack length"));
+    const totalBytes = lengths.reduce((sum, length) => sum + length, 0);
+    if (totalBytes > MAX_PREFETCH_BYTES) throw new RangeError("Ribbon frame pack exceeds its compressed budget.");
+    framePack = Object.freeze({ url: resolveSequenceUrl(new URL(pack.file, resolvedManifest).toString(), resolvedManifest).toString(), sha256: pack.sha256, lengths: Object.freeze(lengths), totalBytes });
+  }
   if (!value.registration || typeof value.registration !== "object" || Array.isArray(value.registration)) throw new TypeError("Invalid ribbon manifest registration.");
   exactKeys(value.registration, ["x", "y"], "registration");
   const registration = Object.freeze({
@@ -150,6 +166,7 @@ function validateV2Manifest(value, resolvedManifest) {
     schemaVersion: 2, fps: V2_DEFAULT_CANVAS.fps, width, height,
     frames: Object.freeze(frames), holdMs: 800, panelDelayMs: 600, panelDurationMs: 1400,
     releaseCompleteFrame, registration, rootYPx: Object.freeze(rootYPx), poster, panelCurve: validatePanelCurve(value.panelCurve),
+    ...(framePack ? { framePack } : {}),
   });
 }
 
@@ -231,11 +248,13 @@ function v2ViewportGeometry(manifest, { width, height }) {
   if (manifest?.schemaVersion !== 2) throw new TypeError("Ribbon root motion requires a v2 manifest.");
   const actualWidth = finiteNumber(width, 1, 20_000, "viewport width");
   const actualHeight = finiteNumber(height, 1, 20_000, "viewport height");
+  const ribbonWidth = Math.min(actualWidth, INVITATION_MAX_WIDTH);
   return {
     width: actualWidth,
     height: actualHeight,
-    scale: actualWidth / manifest.width,
-    canvasTop: actualHeight / 2 - manifest.registration.y * (actualWidth / manifest.width),
+    ribbonWidth,
+    scale: ribbonWidth / manifest.width,
+    canvasTop: actualHeight / 2 - manifest.registration.y * (ribbonWidth / manifest.width),
   };
 }
 
@@ -535,6 +554,30 @@ export function createRibbonFrameLoader(manifest, {
   };
   const prefetch = () => {
     if (prefetchPromise) return prefetchPromise;
+    if (manifest.framePack) {
+      prefetchPromise = (async () => {
+        checkLive();
+        const pack = manifest.framePack;
+        const packed = await fetchFrame(pack.url, controller.signal);
+        checkLive();
+        if (!(packed instanceof ArrayBuffer) || packed.byteLength !== pack.totalBytes || packed.byteLength > maxPrefetchBytes) {
+          throw new RangeError("Ribbon frame pack size mismatch.");
+        }
+        const digest = await globalThis.crypto.subtle.digest("SHA-256", packed);
+        checkLive();
+        const actual = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+        if (actual !== pack.sha256) throw new Error("Ribbon frame pack integrity mismatch.");
+        let offset = 0;
+        for (const [index, length] of pack.lengths.entries()) {
+          // Views share one bounded compressed buffer; only the active frames
+          // are decoded, preserving the existing pixel-memory limit.
+          bytes.set(index, new Uint8Array(packed, offset, length));
+          offset += length;
+        }
+        byteCount = packed.byteLength;
+      })();
+      return prefetchPromise;
+    }
     let cursor = 0;
     const worker = async () => {
       while (true) {

@@ -9,6 +9,7 @@ import { validateRibbonManifest } from "../../src/intro/ribbon-player.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".mp3": "audio/mpeg", ".mp4": "video/mp4", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".ics": "text/calendar; charset=utf-8" };
+mime[".bin"] = "application/octet-stream";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export function parseByteRange(value, size) {
@@ -45,6 +46,12 @@ export async function createVisualReview({ build, reference, referenceStart = 0 
     if (!files.has(route)) throw new Error(`Missing built frame: ${route}`);
   }
   if (sha256(files.get(new URL(manifest.frames[0]).pathname)) !== manifest.poster.sha256) throw new Error("The built poster hash does not match the manifest.");
+  if (manifest.framePack) {
+    const packed = files.get(new URL(manifest.framePack.url).pathname);
+    if (!packed || packed.length !== manifest.framePack.totalBytes || sha256(packed) !== manifest.framePack.sha256) throw new Error("The built frame pack does not match the manifest.");
+    const expected = Buffer.concat(manifest.frames.map((url) => files.get(new URL(url).pathname)));
+    if (!packed.equals(expected)) throw new Error("The built frame pack differs from the individual frames.");
+  }
   const referencePath = await realpath(reference);
   if (path.extname(referencePath).toLowerCase() !== ".mp4") throw new Error("The original MP4 reference is required.");
   files.set("/__review/reference.mp4", await readFile(referencePath));

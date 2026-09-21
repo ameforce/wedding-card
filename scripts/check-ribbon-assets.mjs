@@ -8,23 +8,25 @@ import { ribbonFrameExitedViewport, validateRibbonManifest } from "../src/intro/
 const directory = new URL("../public/assets/design/ribbon-sequence/", import.meta.url);
 const manifest = JSON.parse(await readFile(new URL("manifest.json", directory), "utf8"));
 validateRibbonManifest(manifest);
-assert.equal(manifest.schemaVersion, 1, "The approved ribbon manifest uses schema version 1.");
+assert.ok([1, 2].includes(manifest.schemaVersion), "Only the transitional v1 and physical-release v2 ribbon manifests are supported.");
 assert.equal(manifest.fps, 30, "The approved ribbon motion uses 30 fps.");
-assert.equal(manifest.width, 960, "The approved ribbon canvas width is 960px.");
-assert.equal(manifest.height, 640, "The approved ribbon canvas height is 640px.");
-assert.equal(manifest.frames.length, 75, "The approved ribbon sequence contains exactly 75 frames.");
-assert.equal(manifest.releaseFrame, 31, "The approved ribbon releases at frame 31.");
-assert.equal(manifest.holdMs, 600, "The approved tied-frame hold is 600ms.");
-assert.equal(manifest.panelDelayMs, 300, "The approved paper-panel delay is 300ms.");
-assert.equal(manifest.panelDurationMs, 1200, "The approved paper-panel duration is 1200ms.");
+const isV2 = manifest.schemaVersion === 2;
+if (!isV2) {
+  assert.equal(manifest.width, 960, "The transitional v1 ribbon canvas width is 960px.");
+  assert.equal(manifest.height, 640, "The transitional v1 ribbon canvas height is 640px.");
+  assert.equal(manifest.frames.length, 75, "The transitional v1 ribbon sequence contains exactly 75 frames.");
+  assert.equal(manifest.releaseFrame, 31, "The transitional v1 ribbon releases at frame 31.");
+  assert.equal(manifest.holdMs, 600, "The transitional v1 tied-frame hold is 600ms.");
+  assert.equal(manifest.panelDelayMs, 300, "The transitional v1 paper-panel delay is 300ms.");
+  assert.equal(manifest.panelDurationMs, 1200, "The transitional v1 paper-panel duration is 1200ms.");
+}
 const maximumFrameSurfaces = 4 + 2 + 1; // cached frames, in-flight decodes, canvas backing store
 assert.ok(manifest.width * manifest.height * 4 * maximumFrameSurfaces <= 32 * 1024 * 1024, "Frame surfaces must fit within 32 MiB (browser overhead excluded).");
-const isV2 = manifest.schemaVersion === 2;
 if (isV2) {
   assert.deepEqual(
-    { aspect: manifest.height * 3 === manifest.width * 2, bounded: manifest.width >= 480 && manifest.width <= 960, fps: manifest.fps },
+    { aspect: manifest.height * 3 === manifest.width * 2 || (manifest.width === 480 && manifest.height === 1920), bounded: manifest.width >= 480 && manifest.width <= 960, fps: manifest.fps },
     { aspect: true, bounded: true, fps: 30 },
-    "v2 must use the default canvas or one uniformly downscaled 3:2 canvas.",
+    "v2 must use a bounded 3:2 canvas or the fixed portrait release canvas.",
   );
   assert.equal(manifest.holdMs, 800, "v2 must retain the 800 ms tied hold.");
   assert.equal(manifest.panelDelayMs, 600, "v2 must wait 600 ms after release before panels move.");
@@ -35,9 +37,21 @@ assert.equal(new Set(manifest.frames).size, manifest.frames.length, "Frame names
 const names = await readdir(directory);
 assert.deepEqual(
   names.toSorted(),
-  ["manifest.json", ...manifest.frames].toSorted(),
-  "The published directory must contain exactly the manifest and its declared WebP frames.",
+  ["manifest.json", ...manifest.frames, ...(manifest.framePack ? [manifest.framePack.file] : [])].toSorted(),
+  "The published directory must contain exactly the manifest and its declared assets.",
 );
+if (manifest.framePack) {
+  const packed = await readFile(new URL(manifest.framePack.file, directory));
+  assert.equal(createHash("sha256").update(packed).digest("hex"), manifest.framePack.sha256, "Frame pack hash mismatch.");
+  let offset = 0;
+  for (const [index, name] of manifest.frames.entries()) {
+    const frame = await readFile(new URL(name, directory));
+    assert.equal(frame.length, manifest.framePack.lengths[index], "Frame pack length mismatch.");
+    assert.deepEqual(packed.subarray(offset, offset + frame.length), frame, "Frame pack must contain the exact standalone WebP bytes.");
+    offset += frame.length;
+  }
+  assert.equal(offset, packed.length, "Frame pack must have no trailing data.");
+}
 
 let bytes = 0;
 const occupancy = [];

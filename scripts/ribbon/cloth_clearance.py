@@ -46,8 +46,9 @@ def triangle_distance(a,b):
 def main():
     p=argparse.ArgumentParser();p.add_argument('--input',type=Path,required=True);p.add_argument('--out',type=Path,required=True)
     p.add_argument('--margin',type=float,default=.004);args=p.parse_args()
-    data=np.load(args.input);v=data['vertices'];f=data['faces'];across=int(data['across'])
-    if intersections(v,f.tolist(),across):
+    data=np.load(args.input);v=data['vertices'];f=data['faces']
+    coordinates=data['materialCoordinates'] if 'materialCoordinates' in data else data['flatRest'][:,:2]
+    if intersections(v,f.tolist(),None):
         p.error('Distance-only analysis requires a surface that first passes exact intersection checks.')
     sets=[set(face) for face in f]
     # BVHTree.overlap performs triangle overlap rather than a reliable distance
@@ -60,14 +61,19 @@ def main():
     close=[]
     for a,b in pairs:
         qa,qb=v[f[a]],v[f[b]]
-        distance=min(triangle_distance(qa[list(i)],qb[list(j)]) for i in [(0,1,2),(0,2,3)] for j in [(0,1,2),(0,2,3)])
+        triangles_a=[qa] if len(qa)==3 else [qa[list(i)] for i in [(0,1,2),(0,2,3)]]
+        triangles_b=[qb] if len(qb)==3 else [qb[list(i)] for i in [(0,1,2),(0,2,3)]]
+        distance=min(triangle_distance(first,second) for first in triangles_a for second in triangles_b)
         if distance<args.margin:
-            close.append({'faces':[a,b],'materialRows':[int(min(f[a])//across),int(min(f[b])//across)],'distance':float(distance),
+            close.append({'faces':[a,b],
+                          'materialStations':[float(coordinates[f[a],0].mean()),float(coordinates[f[b],0].mean())],
+                          'distance':float(distance),
                           'centers':[qa.mean(axis=0).tolist(),qb.mean(axis=0).tolist()]})
     close.sort(key=lambda x:x['distance'])
     args.out.parent.mkdir(parents=True,exist_ok=True)
     args.out.write_text(json.dumps({'input':str(args.input),'margin':args.margin,'broadPhasePairs':len(pairs),
-        'pairsBelowMargin':len(close),'closestPairs':close[:100],'scope':'Non-shared-vertex quads; face tessellation into two triangles. No visual admission.'},indent=2))
+        'pairsBelowMargin':len(close),'closestPairs':close[:100],
+        'scope':'All non-shared-vertex material faces, with quads tessellated when present. No visual admission.'},indent=2))
     print(json.dumps({'pairsBelowMargin':len(close),'minimum':close[0] if close else None}))
 
 

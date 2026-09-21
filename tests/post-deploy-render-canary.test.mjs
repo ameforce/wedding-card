@@ -190,6 +190,21 @@ function hashBytes(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+test("packed ribbon canary binds the one observed download to the exact build bytes", () => {
+  const manifest = { ...ribbonV2Expectation, fps: 30, width: 480, height: 1920,
+    framePack: { file: `sequence-${HASH_B.slice(0, 12)}.bin`, sha256: HASH_B, lengths: [20, 21, 22] } };
+  const options = { manifestHash: HASH_A, frameHashes: ribbonV2Expectation.frameHashes, packHash: HASH_B };
+  const packed = createRibbonExpectation(manifest, options);
+  assert.throws(() => createRibbonExpectation(manifest, { ...options, packHash: HASH_A }), /SHA-256/);
+  const ribbonResponses = [
+    { url: `${BASE}assets/design/ribbon-sequence/manifest.json`, status: 200, contentType: "application/json", sha256: HASH_A },
+    { url: `${BASE}assets/design/ribbon-sequence/${manifest.framePack.file}`, status: 200, contentType: "application/octet-stream", sha256: HASH_B },
+  ];
+  assert.equal(validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({ ribbonExpectation: packed, ribbonResponses })), true);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({ ribbonExpectation: packed, ribbonResponses: [ribbonResponses[0]] })), /응답이 없습니다/);
+  assert.throws(() => validateRibbonPlaybackEvidence(ribbonV2PlaybackEvidence({ ribbonExpectation: packed, ribbonResponses: [ribbonResponses[0], { ...ribbonResponses[1], sha256: HASH_A }] })), /SHA-256/);
+});
+
 async function localRibbonExpectation() {
   const directory = new URL("../public/assets/design/ribbon-sequence/", import.meta.url);
   const manifestBytes = await readFile(new URL("manifest.json", directory));
@@ -198,7 +213,8 @@ async function localRibbonExpectation() {
     frame,
     hashBytes(await readFile(new URL(frame, directory))),
   ])));
-  return createRibbonExpectation(manifest, { manifestHash: hashBytes(manifestBytes), frameHashes });
+  const packHash = manifest.framePack ? hashBytes(await readFile(new URL(manifest.framePack.file, directory))) : undefined;
+  return createRibbonExpectation(manifest, { manifestHash: hashBytes(manifestBytes), frameHashes, packHash });
 }
 
 function localPublishedWorkerPlugin(document) {
@@ -279,7 +295,7 @@ test("local published Worker canary proves every hash and excludes first-navigat
     ribbonExpectation: ribbon,
   });
 
-  assert.equal(result.ribbonResponses.length, ribbon.frames.length + 1, "Warm scenario must discard initial-navigation ribbon responses.");
+  assert.equal(result.ribbonResponses.length, ribbon.framePack ? 2 : ribbon.frames.length + 1, "Warm scenario must discard initial-navigation ribbon responses.");
   assert.ok(result.ribbonResponses.every((response) => response.status === 200));
   assert.equal(result.intro.panelConfig?.schemaVersion, ribbon.schemaVersion, "The installed observer must capture the manifest read through Response.text().");
   assert.equal(validateRenderScenario({

@@ -42,7 +42,7 @@ async function fixture(t) {
   await writeFile(path.join(build, "index.html"), index);
   await writeFile(path.join(build, sequence, "manifest.json"), JSON.stringify(manifest));
   for (const [i, name] of manifest.frames.entries()) {
-    await writeFile(path.join(build, sequence, name), i === 0 ? frame0 : Buffer.from(`diagnostic frame ${i}`));
+    await writeFile(path.join(build, sequence, name), i === 0 ? frame0 : Buffer.from(`diagnostic WebP frame ${i}`));
   }
   const reference = path.join(directory, "private-original.mp4");
   await writeFile(reference, video);
@@ -93,6 +93,24 @@ test("review freezes build, reference and local player bytes with independently 
   assert.equal(binding.files.filter(({ route }) => route.endsWith(".mp4")).length, 1);
   assert.equal((await request("/private-original.mp4")).status, 404);
   assert.equal((await request("/__review/binding.json")).status, 404);
+});
+
+test("review serves the verified binary frame pack and rejects stale bytes", async (t) => {
+  const f = await fixture(t);
+  const frames = await Promise.all(f.manifest.frames.map((name) => readFile(path.join(f.build, sequence, name))));
+  const packed = Buffer.concat(frames);
+  const digest = hash(packed);
+  const file = `sequence-${digest.slice(0, 12)}.bin`;
+  f.manifest.framePack = { file, sha256: digest, lengths: frames.map((frame) => frame.length) };
+  await writeFile(path.join(f.build, sequence, file), packed);
+  await writeFile(path.join(f.build, sequence, "manifest.json"), JSON.stringify(f.manifest));
+  const { request } = await listen(t, f);
+  const result = await request(`${sequence}${file}`);
+  assert.equal(result.status, 200);
+  assert.equal(result.headers["content-type"], "application/octet-stream");
+  assert.deepEqual(result.bytes, packed);
+  await writeFile(path.join(f.build, sequence, file), Buffer.alloc(packed.length));
+  await assert.rejects(createVisualReview(f), /frame pack does not match/);
 });
 
 test("review MP4 supports exact GET, HEAD and single byte ranges for native video clients", async (t) => {

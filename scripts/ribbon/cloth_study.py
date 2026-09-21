@@ -71,7 +71,19 @@ def initial(source, stride, depth, repair=False):
         v, f, across = data['vertices'], data['faces'].tolist(), int(data['across'])
         if repair:
             v = separate_initial_layers(v, f, across)
-        return v, f, data['flatRest'], across
+        flat = data['flatRest']
+        coordinates = data['materialCoordinates'] if 'materialCoordinates' in data else flat[:, :2]
+        stations = np.unique(np.round(coordinates[:, 0], 10))
+        groups = [np.where(np.isclose(coordinates[:, 0], station, atol=1e-9))[0] for station in stations]
+        left = np.where(np.isclose(coordinates[:, 0], stations[0], atol=1e-9))[0].tolist()
+        right = np.where(np.isclose(coordinates[:, 0], stations[-1], atol=1e-9))[0].tolist()
+        structured = (len(v) % across == 0 and all(len(face) == 4 for face in f))
+        pitch = float(np.median(np.diff(stations))) if len(stations) > 1 else 1.
+        material = {'structured': structured, 'coordinates': coordinates,
+                    'centerlineGroups': groups, 'tipIndices': {'left': left, 'right': right},
+                    'faceStations': np.asarray([coordinates[np.asarray(face), 0].mean() for face in f]),
+                    'pitch': pitch}
+        return v, f, flat, across, material
     spec = importlib.util.spec_from_file_location('initial_evidence', source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -94,7 +106,14 @@ def initial(source, stride, depth, repair=False):
     s = np.r_[0., np.linalg.norm(np.diff(c, axis=0), axis=1).cumsum()]
     flat = np.array([(x, (j/(across-1)-.5)*module.WIDTH, 0.)
                      for x in s for j in range(across)])
-    return v, faces, flat, across
+    coordinates = flat[:, :2]
+    material = {'structured': True, 'coordinates': coordinates,
+                'centerlineGroups': [np.arange(i * across, (i + 1) * across) for i in range(len(rows))],
+                'tipIndices': {'left': list(range(across * 2)),
+                               'right': list(range(len(v) - across * 2, len(v)))},
+                'faceStations': np.asarray([coordinates[np.asarray(face), 0].mean() for face in faces]),
+                'pitch': float(np.median(np.diff(np.unique(coordinates[:, 0]))))}
+    return v, faces, flat, across, material
 
 
 def separate_initial_layers(vertices, faces, across):
@@ -192,16 +211,25 @@ def main():
     parser.add_argument('--collision-quality', type=int, default=6)
     parser.add_argument('--bending-stiffness',type=float,default=.015)
     parser.add_argument('--bending-damping',type=float,default=.5)
+    parser.add_argument('--tension-stiffness',type=float,default=65.)
+    parser.add_argument('--compression-stiffness',type=float,default=65.)
+    parser.add_argument('--shear-stiffness',type=float,default=30.)
+    parser.add_argument('--material-damping',type=float,default=8.)
+    parser.add_argument('--self-distance-min',type=float,default=.004)
     parser.add_argument('--pin-center-only',action='store_true',help='Pin only the center vertex of each of two free-tip rows')
     parser.add_argument('--initial-only', action='store_true')
     parser.add_argument('--evaluate-through',type=int,help='Evaluate only this many sequential frames without shortening authored motion')
     parser.add_argument('--allow-invalid-initial-for-diagnostics', action='store_true')
     parser.add_argument('--single-tail',action='store_true')
+    parser.add_argument('--pull-side',choices=['left','right'],default='left',
+                        help='Material endpoint driven by --pull-path-file; the opposite endpoint is released')
     parser.add_argument('--release-opposite-frame',type=int,default=13)
     parser.add_argument('--release-pull-frame',type=int)
-    parser.add_argument('--pull-path-file',type=Path,help='Explicit frame/XYZ offsets for the left free-tip hook only')
+    parser.add_argument('--pull-path-file',type=Path,help='Explicit frame/XYZ offsets for --pull-side only')
     parser.add_argument('--consume-rest-at-start',action='store_true',help='Always-active non-pin VWM, matching the isolated v6 runtime probe')
     args = parser.parse_args()
+    if min(args.tension_stiffness,args.compression_stiffness,args.shear_stiffness,args.material_damping)<=0:
+        parser.error('Material stiffness and damping values must be positive')
     try:
         authored_end,evaluation_end=validate_timeline(args)
         explicit_path=json.loads(args.pull_path_file.read_text(encoding='utf-8-sig')) if args.pull_path_file else None
@@ -217,7 +245,7 @@ def main():
     scene.render.fps = 60
     scene.frame_start, scene.frame_end = 1, authored_end
     scene.gravity = (0, 0, args.gravity)
-    vertices, faces, flat, across = initial(args.initial_source, args.stride, args.depth, args.separate_layers)
+    vertices, faces, flat, across, material = initial(args.initial_source, args.stride, args.depth, args.separate_layers)
     core_rows=None
     if args.initial_source.suffix=='.npz':
         with np.load(args.initial_source) as source_data:
@@ -231,10 +259,10 @@ def main():
     rest.data.foreach_set('co', flat.ravel())
     rest.value = 0
     pins = ribbon.vertex_groups.new(name='Only two free-tail tips')
-    tip_indices={'left':list(range(across*2)), 'right':list(range(len(vertices)-across*2,len(vertices)))}
+    tip_indices={side:list(indices) for side,indices in material['tipIndices'].items()}
     if args.pin_center_only:
-        tip_indices={'left':[across//2,across+across//2],
-                     'right':[len(vertices)-2*across+across//2,len(vertices)-across+across//2]}
+        tip_indices={side:[min(indices,key=lambda index:abs(material['coordinates'][index,1]))]
+                     for side,indices in tip_indices.items()}
     for side, indices in tip_indices.items():
         pins.add(indices, 1., 'REPLACE')
         group = ribbon.vertex_groups.new(name=f'{side} tiny tip')
@@ -248,7 +276,7 @@ def main():
         hook.keyframe_insert(data_path='location', frame=1)
         hook.keyframe_insert(data_path='location', frame=args.settle)
         hook.location = ((-1 if side == 'left' else 1)*args.pull, -1.2, 2.0)
-        if args.single_tail and side=='right':
+        if args.single_tail and side!=args.pull_side:
             hook.location=(.35,-.05,.1)
         hook.keyframe_insert(data_path='location', frame=args.fall_after or authored_end)
         if args.fall_after:
@@ -257,7 +285,7 @@ def main():
         for curve in hook.animation_data.action.fcurves:
             for key in curve.keyframe_points:
                 key.interpolation = 'LINEAR'
-        if args.pull_path_file and side=='left':
+        if args.pull_path_file and side==args.pull_side:
             hook.animation_data_clear()
             for point in explicit_path:
                 hook.location=point['offset']
@@ -267,8 +295,9 @@ def main():
         if any(abs(curve.evaluate(1))>1e-8 for curve in hook.animation_data.action.fcurves):
             raise ValueError('Frame 1 hook offset must remain zero before Cloth evaluation')
     if args.single_tail:
-        release_specs=[('right',args.release_opposite_frame)]
-        if args.release_pull_frame:release_specs.append(('left',args.release_pull_frame))
+        opposite_side='right' if args.pull_side=='left' else 'left'
+        release_specs=[(opposite_side,args.release_opposite_frame)]
+        if args.release_pull_frame:release_specs.append((args.pull_side,args.release_pull_frame))
         for side,release_frame in release_specs:
             release=ribbon.modifiers.new(f'Release only {side} free-tip pin','VERTEX_WEIGHT_MIX')
             release.vertex_group_a=pins.name
@@ -305,13 +334,13 @@ def main():
     settings.quality = args.quality
     settings.mass = .12
     settings.air_damping = 2
-    settings.tension_stiffness = 65
-    settings.compression_stiffness = 65
-    settings.shear_stiffness = 30
+    settings.tension_stiffness = args.tension_stiffness
+    settings.compression_stiffness = args.compression_stiffness
+    settings.shear_stiffness = args.shear_stiffness
     settings.bending_stiffness = args.bending_stiffness
-    settings.tension_damping = 8
-    settings.compression_damping = 8
-    settings.shear_damping = 8
+    settings.tension_damping = args.material_damping
+    settings.compression_damping = args.material_damping
+    settings.shear_damping = args.material_damping
     settings.bending_damping = args.bending_damping
     settings.vertex_group_mass = pins.name
     settings.pin_stiffness = 1
@@ -322,7 +351,7 @@ def main():
     collision.use_self_collision = True
     collision.collision_quality = args.collision_quality
     collision.distance_min = .012
-    collision.self_distance_min = .004
+    collision.self_distance_min = args.self_distance_min
     collision.self_friction = 1
     cloth.point_cache.frame_start, cloth.point_cache.frame_end = 1, authored_end
     # The ribbon wraps around this finite card; geometry and collision agree.
@@ -342,6 +371,11 @@ def main():
     holdout.node_tree.links.new(h.outputs[0], o.inputs[0])
     paper.data.materials.append(holdout)
     render_setup(scene, ribbon, across)
+    if not material['structured']:
+        for polygon in mesh.polygons:
+            station=float(flat[list(polygon.vertices),0].mean())
+            stripe=int(station/.85)
+            polygon.material_index=0 if station/.85-stripe>.18 else 1+stripe%3
     edges = np.array([e.vertices[:] for e in mesh.edges])
     rest_lengths = np.linalg.norm(flat[edges[:, 0]]-flat[edges[:, 1]], axis=1)
     pairs = intersections(vertices, faces, across)
@@ -356,7 +390,9 @@ def main():
               'initialSourceSha256':hashlib.sha256(args.initial_source.read_bytes()).hexdigest(),
               'dynamicMesh': settings.use_dynamic_mesh, 'restShape': rest.name,
               'pinVertices':sum(len(v) for v in tip_indices.values()),'pinVertexIndices':tip_indices,
-              'widthSamples':across,'totalVertices': len(vertices),
+              'widthSamples':across if material['structured'] else None,
+              'materialTopology':'structured_rows' if material['structured'] else 'triangulated_material_coordinates',
+              'materialStationCount':len(material['centerlineGroups']),'totalVertices': len(vertices),
               'coreMaterialRows':sorted(core_rows) if core_rows is not None else None,
               'authoredFrameEnd':authored_end,'evaluationFrameEnd':evaluation_end,
               'beforeCloth':before_cloth,'freshCacheBaked':cloth.point_cache.is_baked,
@@ -395,30 +431,32 @@ def main():
             raise ValueError(f'Cloth produced non-finite coordinates at frame {frame}; diagnostic run stopped.')
         snapshots.append(xyz.copy())
         ratios = np.linalg.norm(xyz[edges[:,0]]-xyz[edges[:,1]], axis=1)/rest_lengths
+        centerline=np.asarray([xyz[indices].mean(axis=0) for indices in material['centerlineGroups']])
         row = {'frame': frame, 'seconds': round(time.monotonic()-started, 3),
                'edgeRatioMin': float(ratios.min()), 'edgeRatioMax': float(ratios.max()),
                'edgeRatioMedian': float(np.median(ratios)),
-               'centerlineLength': float(np.linalg.norm(np.diff(xyz.reshape(-1, across, 3)[:,across//2], axis=0), axis=1).sum()),
+               'centerlineLength': float(np.linalg.norm(np.diff(centerline, axis=0), axis=1).sum()),
                'minimum': xyz.min(axis=0).tolist(), 'maximum': xyz.max(axis=0).tolist()}
         row['pinGroupAttributeAvailable']=pin_attribute_available
         row['effectivePinnedVertices']=sum(w>.999 for w in pin_weights) if pin_attribute_available else None
         row['effectiveLeftTipPinWeight']=float(np.mean([pin_weights[i] for i in tip_indices['left']])) if pin_attribute_available else None
         row['effectiveRightTipPinWeight']=float(np.mean([pin_weights[i] for i in tip_indices['right']])) if pin_attribute_available else None
         row['pinPositions']={side:xyz[indices].tolist() for side,indices in tip_indices.items()}
-        row['leftTipPosition']=xyz[:across*2].mean(axis=0).tolist()
-        row['rightTipPosition']=xyz[-across*2:].mean(axis=0).tolist()
+        row['leftTipPosition']=xyz[tip_indices['left']].mean(axis=0).tolist()
+        row['rightTipPosition']=xyz[tip_indices['right']].mean(axis=0).tolist()
         if frame==1:
             displacement=xyz-vertices
             row['inputDisplacementMax']=float(np.linalg.norm(displacement,axis=1).max())
             row['inputDisplacementRms']=float(np.sqrt(np.mean(displacement**2)))
             row['hooks']=hook_readback()
-            row['initialLeftTipDelta']=(xyz[:across*2]-vertices[:across*2]).mean(axis=0).tolist()
-            row['initialRightTipDelta']=(xyz[-across*2:]-vertices[-across*2:]).mean(axis=0).tolist()
+            row['initialLeftTipDelta']=(xyz[tip_indices['left']]-vertices[tip_indices['left']]).mean(axis=0).tolist()
+            row['initialRightTipDelta']=(xyz[tip_indices['right']]-vertices[tip_indices['right']]).mean(axis=0).tolist()
         face_pairs=intersections(xyz, faces, across)
         row['nonAdjacentFaceIntersections'] = len(face_pairs)
         # Local fold pairs remain genuine intersections; this distinction never
         # exempts them. Remote material pairs may change knot passage topology.
-        material_pairs=[(min(faces[a])//across,min(faces[b])//across) for a,b in face_pairs]
+        material_pairs=[(int(round(material['faceStations'][a]/material['pitch'])),
+                         int(round(material['faceStations'][b]/material['pitch']))) for a,b in face_pairs]
         row['localFoldFaceIntersections']=sum(abs(a-b)<=2 for a,b in material_pairs)
         row['remoteMaterialFaceIntersections']=sum(abs(a-b)>2 for a,b in material_pairs)
         row['coreInvolvedFaceIntersections']=sum(a in core_rows or b in core_rows for a,b in material_pairs) if core_rows is not None else None
@@ -434,12 +472,16 @@ def main():
             print(json.dumps(row), flush=True)
             # Keep exact physical progress recoverable if the host turn ends.
             temporary=out/'checkpoint-writing.npz'
-            np.savez_compressed(temporary,vertices=np.array(snapshots),faces=np.array(faces),flatRest=flat,across=across)
+            np.savez_compressed(temporary,vertices=np.array(snapshots),faces=np.array(faces),flatRest=flat,
+                                materialCoordinates=material['coordinates'],
+                                across=across if material['structured'] else 0)
             temporary.replace(out/'checkpoint-vertices.npz')
         report['frames'].append(row)
         if frame % 10 == 0:
             (out/'progress.json').write_text(json.dumps(row, indent=2))
-    np.savez_compressed(out/'simulated-vertices.npz', vertices=np.array(snapshots), faces=np.array(faces), flatRest=flat)
+    np.savez_compressed(out/'simulated-vertices.npz', vertices=np.array(snapshots), faces=np.array(faces), flatRest=flat,
+                        materialCoordinates=material['coordinates'],
+                        across=across if material['structured'] else 0)
     (out/'simulation-evidence.json').write_text(json.dumps(report, indent=2))
     print('CLOTH_STUDY_COMPLETE', flush=True)
 

@@ -1,7 +1,8 @@
 (function installPastelIntroEarlyBoot() {
   var query = new URLSearchParams(window.location.search);
-  var isPublicPastel = window.location.pathname === "/" && query.get("variant") !== "quiet";
-  var eligible = isPublicPastel && query.get("capture") !== "1" && query.get("contentPreview") !== "draft";
+  var isAdminPath = /^\/admin(?:\/|$)/.test(window.location.pathname);
+  var isPublicPastel = !isAdminPath && query.get("variant") !== "quiet";
+  var eligible = isPublicPastel && query.get("capture") !== "1";
   var state = {
     eligible: eligible,
     status: eligible ? "poster" : "consumed",

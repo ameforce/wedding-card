@@ -123,25 +123,36 @@ def render_pass(scene,path):
     return {'path':path.name,'sha256':sha(path),**alpha_readback(path)}
 
 
-def shadow_compositor(scene,receiver_path):
-    """Explicit Cycles multiplicative shadow pass -> transparent dark matte.
+def shadow_pass_compositor(scene):
+    """Write the unmodified Cycles Shadow Catcher pass.
 
-    The paper's separately rendered alpha is a receiver-domain mask, never a
-    reused shadow. Actual caster geometry and light interaction run every frame.
+    A shadow-catcher pass is multiplicative footage, not a black-alpha matte.
+    Converting its display-referred luminance with ``1 - luminance`` leaves a
+    visible rectangle whenever the unoccluded receiver is not encoded as pure
+    white.  Keep the pass intact here and compare it with a no-caster baseline
+    after rendering instead.
     """
     scene.use_nodes=True;tree=scene.node_tree;tree.nodes.clear()
     layers=tree.nodes.new('CompositorNodeRLayers')
     if layers.outputs.get('Shadow Catcher') is None:raise ValueError('Cycles Shadow Catcher pass is unavailable')
-    luminance=tree.nodes.new('CompositorNodeRGBToBW')
-    tree.links.new(layers.outputs['Shadow Catcher'],luminance.inputs['Image'])
-    loss=tree.nodes.new('CompositorNodeMath');loss.operation='SUBTRACT';loss.inputs[0].default_value=1.;loss.use_clamp=True
-    tree.links.new(luminance.outputs[0],loss.inputs[1])
-    receiver=tree.nodes.new('CompositorNodeImage');receiver.image=bpy.data.images.load(str(receiver_path),check_existing=False)
-    multiply=tree.nodes.new('CompositorNodeMath');multiply.operation='MULTIPLY';multiply.use_clamp=True
-    tree.links.new(loss.outputs[0],multiply.inputs[0]);tree.links.new(receiver.outputs['Alpha'],multiply.inputs[1])
-    alpha=tree.nodes.new('CompositorNodeSetAlpha');alpha.inputs['Image'].default_value=(0.,0.,0.,1.)
-    tree.links.new(multiply.outputs[0],alpha.inputs['Alpha'])
-    output=tree.nodes.new('CompositorNodeComposite');tree.links.new(alpha.outputs['Image'],output.inputs['Image'])
+    output=tree.nodes.new('CompositorNodeComposite')
+    tree.links.new(layers.outputs['Shadow Catcher'],output.inputs['Image'])
+
+
+def shadow_matte(baseline_path, shadow_path, receiver_path, output_path):
+    """Convert a catcher ratio relative to its no-caster baseline into alpha."""
+    baseline=np.asarray(Image.open(baseline_path).convert('RGBA'),dtype=np.float32)/255.
+    shadow=np.asarray(Image.open(shadow_path).convert('RGBA'),dtype=np.float32)/255.
+    receiver=np.asarray(Image.open(receiver_path).convert('RGBA'),dtype=np.float32)/255.
+    weights=np.array([.2126,.7152,.0722],dtype=np.float32)
+    baseline_luma=baseline[:,:,:3]@weights
+    shadow_luma=shadow[:,:,:3]@weights
+    ratio=np.divide(shadow_luma,baseline_luma,out=np.ones_like(shadow_luma),where=baseline_luma>1/255)
+    loss=np.clip(1-ratio,0,1)*receiver[:,:,3]
+    rgba=np.zeros((*loss.shape,4),dtype=np.uint8)
+    rgba[:,:,3]=np.rint(loss*255).astype(np.uint8)
+    Image.fromarray(rgba,'RGBA').save(output_path)
+    return {'maximumAlpha':int(rgba[:,:,3].max()),'nonzeroAlphaPixels':int(np.count_nonzero(rgba[:,:,3]))}
 
 
 def main():
@@ -157,6 +168,8 @@ def main():
     parser.add_argument('--paper-object',help='Exact source object name; default finds the Paper contact collider')
     parser.add_argument('--paper-mode',choices=['shadow','holdout','source-hidden'],default='shadow',
                         help='source-hidden is a diagnostic control only')
+    parser.add_argument('--append-transparent-terminal',action='store_true',
+                        help='Append one fixed-canvas fully transparent PNG after every mapped visible frame')
     args=parser.parse_args()
     if args.samples<1:parser.error('Positive Cycles samples required')
     if args.out.exists() and any(args.out.iterdir()):parser.error('Output must be new or empty')
@@ -174,8 +187,8 @@ def main():
     bpy.context.preferences.filepaths.use_scripts_auto_execute=False
     bpy.ops.wm.open_mainfile(filepath=str(args.source.resolve()),load_ui=False,use_scripts=False)
     scene=bpy.context.scene
-    ribbon=bpy.data.objects.get('One physical ribbon')
-    if ribbon is None or ribbon.type!='MESH':raise ValueError('Source object One physical ribbon is required')
+    ribbon=bpy.data.objects.get('One physical ribbon') or bpy.data.objects.get('One locally sliding bow strip')
+    if ribbon is None or ribbon.type!='MESH':raise ValueError('A recognized single physical ribbon mesh is required')
     original_faces=np.array([p.vertices[:] for p in ribbon.data.polygons])
     if not np.array_equal(original_faces,faces):raise ValueError('Source and cache explicit triangles differ')
     if len(ribbon.data.vertices)!=len(flat):raise ValueError('Source and cache vertex counts differ')
@@ -210,7 +223,8 @@ def main():
     if args.paper_object:
         papers=[bpy.data.objects[args.paper_object]]
     else:
-        papers=[o for o in scene.objects if o.type=='MESH' and o!=ribbon and any(m.name=='Paper contact' for m in o.modifiers)]
+        papers=[o for o in scene.objects if o.type=='MESH' and o!=ribbon
+                and any(m.name in ('Paper contact','Real paper collision') or m.type=='COLLISION' for m in o.modifiers)]
     paper_records=[paper_readback(paper) for paper in papers]
     # Freeze only after the intact F1 consumer and cache identity were proved.
     ribbon.modifiers.clear();ribbon.shape_key_clear();ribbon.animation_data_clear()
@@ -234,7 +248,7 @@ def main():
     holdout=bpy.data.materials.new('Exact paper ray holdout');holdout.use_nodes=True;nodes=holdout.node_tree.nodes;nodes.clear()
     shader=nodes.new('ShaderNodeHoldout');output=nodes.new('ShaderNodeOutputMaterial');holdout.node_tree.links.new(shader.outputs[0],output.inputs['Surface'])
     catcher=material('Actual paper shadow receiver',(1.,1.,1.),roughness=1.)
-    receiver_record=None
+    receiver_record=None;shadow_baseline_record=None;shadow_baseline_path=None
     if papers and args.paper_mode=='shadow':
         emission=bpy.data.materials.new('Paper receiver domain only');emission.use_nodes=True;nodes=emission.node_tree.nodes;nodes.clear()
         shader=nodes.new('ShaderNodeEmission');shader.inputs['Color'].default_value=(1.,1.,1.,1.)
@@ -245,7 +259,14 @@ def main():
         receiver_path=args.out/'paper-receiver-mask.png';receiver_record=render_pass(scene,receiver_path)
         ribbon.visible_camera=True
         scene.view_layers[0].cycles.use_pass_shadow_catcher=True
-        shadow_compositor(scene,receiver_path);scene.use_nodes=False
+        shadow_pass_compositor(scene)
+        shadow_baseline_path=args.out/'paper-shadow-baseline.png'
+        ribbon.visible_camera=False;ribbon.visible_shadow=False
+        for paper in papers:
+            paper.hide_render=False;paper.is_shadow_catcher=True
+            paper.data.materials.clear();paper.data.materials.append(catcher)
+        shadow_baseline_record=render_pass(scene,shadow_baseline_path)
+        ribbon.visible_shadow=True;ribbon.visible_camera=True;scene.use_nodes=False
     metadata=[]
     for name in ['simulation-evidence.json','input-audit.json']:
         path=args.source.parent/name
@@ -255,13 +276,13 @@ def main():
                        'facesSha256':array_sha(faces),'flatRestSha256':array_sha(flat)},
               'source':{'path':str(args.source.resolve()),'sha256':sha(args.source),'readback':source_state,'metadata':metadata},
               'camera':camera,'lights':lights,'world':world,'paper':paper_records,'paperMode':args.paper_mode,
-              'paperReceiverMask':receiver_record,
+              'paperReceiverMask':receiver_record,'paperShadowBaseline':shadow_baseline_record,
               'colorManagement':{'viewTransform':scene.view_settings.view_transform,'look':scene.view_settings.look,
                                  'exposure':scene.view_settings.exposure,'gamma':scene.view_settings.gamma},
               'material':material_record,'samples':args.samples,'mapping':mapping,'frames':[],
               'sourceFrameBase':1,'outputFrameBase':0,'geometryInterpolation':False,'rootExtraction':False,
               'cameraOrScaleNormalization':False,'physicsAdmission':False,'visualAdmission':False,'releaseCompleteFrame':None,
-              'shadowMethod':'Per-frame explicit Cycles Shadow Catcher pass. Alpha=clamp(1-luminance(light ratio))*actual paper receiver alpha; black matte under exact holdout ribbon. No reused or blurred shadow.',
+              'shadowMethod':'Per-frame explicit Cycles Shadow Catcher pass divided by a no-caster baseline. Alpha=clamp(1-current/baseline)*actual paper receiver alpha; black matte under exact holdout ribbon. No reused or blurred shadow.',
               'shadowReference':'https://docs.blender.org/manual/en/4.5/render/layers/passes.html'}
     for row in mapping:
         xyz=frames[row['sourceFrame']-1]
@@ -274,7 +295,7 @@ def main():
         uv_hash=array_sha(np.array([entry.uv[:] for entry in ribbon.data.uv_layers['Fixed material coordinates'].data],dtype=np.float32))
         if uv_hash!=material_record['uvSha256']:raise ValueError('Material UV changed across snapshots')
         if camera_readback(scene)!=camera or light_readback(scene)!=lights:raise ValueError('Camera or lights changed during rendering')
-        stem=f"frame-{row['outputFrame']:04d}";passes=[]
+        stem=f"frame-{row['outputFrame']:03d}";passes=[]
         for paper in papers:
             paper.hide_render=args.paper_mode=='source-hidden';paper.is_shadow_catcher=False
             paper.data.materials.clear();paper.data.materials.append(holdout)
@@ -289,7 +310,10 @@ def main():
                 paper.data.materials.clear();paper.data.materials.append(catcher)
             ribbon.visible_camera=False
             scene.view_layers[0].cycles.use_pass_shadow_catcher=True;scene.use_nodes=True
-            shadow_path=args.out/(stem+'-shadow.png');passes.append(render_pass(scene,shadow_path))
+            raw_shadow_path=args.out/(stem+'-shadow-raw.png');passes.append(render_pass(scene,raw_shadow_path))
+            shadow_path=args.out/(stem+'-shadow.png')
+            matte=shadow_matte(shadow_baseline_path,raw_shadow_path,receiver_path,shadow_path)
+            passes.append({'path':shadow_path.name,'sha256':sha(shadow_path),**alpha_readback(shadow_path),**matte})
             shadow=Image.open(shadow_path).convert('RGBA');front=Image.open(ribbon_path).convert('RGBA')
             Image.alpha_composite(shadow,front).save(final_path)
             ribbon.visible_camera=True
@@ -301,6 +325,17 @@ def main():
         evidence['frames'].append(result)
         (args.out/'render-evidence.json').write_text(json.dumps(evidence,indent=2))
         print(json.dumps({'outputFrame':row['outputFrame'],'sourceFrame':row['sourceFrame'],'path':str(final_path),'sha256':result['sha256']}),flush=True)
+    if args.append_transparent_terminal:
+        terminal_index=mapping[-1]['outputFrame']+1
+        terminal_path=args.out/f'frame-{terminal_index:03d}.png'
+        Image.new('RGBA',(scene.render.resolution_x,scene.render.resolution_y),(0,0,0,0)).save(terminal_path)
+        terminal={'outputFrame':terminal_index,'sourceFrame':None,'terminal':True,'path':terminal_path.name,
+                  'sha256':sha(terminal_path),**alpha_readback(terminal_path)}
+        evidence['frames'].append(terminal)
+        evidence['transparentTerminalFrame']=terminal_index
+        (args.out/'render-evidence.json').write_text(json.dumps(evidence,indent=2))
+        print(json.dumps({'outputFrame':terminal_index,'sourceFrame':None,'path':str(terminal_path),
+                          'sha256':terminal['sha256'],'terminal':True}),flush=True)
     print('EXACT_CACHE_RENDER_COMPLETE',flush=True)
 
 

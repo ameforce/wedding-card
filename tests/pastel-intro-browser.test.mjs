@@ -17,8 +17,12 @@ const expectedFrames = manifest.frames.map((_frame, index) => index);
 
 // Installed before App: observe actual fetch/decode/draw without changing assets,
 // timing, or production code. Keep hero identity/source inside the browser only.
-function instrumentIntro({ frameNames, terminalIndex, diagnostic = false }) {
+function instrumentIntro({ frameNames, framePack, terminalIndex, diagnostic = false }) {
   const byteIndexes = new WeakMap();
+  const packedBuffers = new WeakSet();
+  const packOffsets = new Map();
+  let packOffset = 0;
+  framePack?.lengths.forEach((length, index) => { packOffsets.set(packOffset, index); packOffset += length; });
   const blobIndexes = new WeakMap();
   const bitmapIndexes = new WeakMap();
   const evidence = window.__ribbonQA = {
@@ -57,6 +61,7 @@ function instrumentIntro({ frameNames, terminalIndex, diagnostic = false }) {
     const bytes = await originalBytes.apply(this, args);
     const index = frameNames.indexOf(this.url.split("/").at(-1));
     if (index >= 0) byteIndexes.set(bytes, index);
+    if (framePack && this.url.split("/").at(-1) === framePack.file) packedBuffers.add(bytes);
     return bytes;
   };
   const OriginalBlob = window.Blob;
@@ -65,6 +70,7 @@ function instrumentIntro({ frameNames, terminalIndex, diagnostic = false }) {
       super(parts, options);
       const first = parts?.[0];
       if (first && byteIndexes.has(first)) blobIndexes.set(this, byteIndexes.get(first));
+      if (ArrayBuffer.isView(first) && packedBuffers.has(first.buffer) && packOffsets.has(first.byteOffset)) blobIndexes.set(this, packOffsets.get(first.byteOffset));
     }
   };
   const originalBitmap = window.createImageBitmap.bind(window);
@@ -263,7 +269,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
   async function newPage(options = {}) {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, ...options });
     assert.equal(await page.evaluate(() => innerWidth), options.viewport?.width ?? 390, "Viewport setup must take effect before loading App.");
-    await page.addInitScript(instrumentIntro, { frameNames: manifest.frames, terminalIndex: manifest.frames.length - 1, diagnostic: timingDiagnostic });
+    await page.addInitScript(instrumentIntro, { frameNames: manifest.frames, framePack: manifest.framePack, terminalIndex: manifest.frames.length - 1, diagnostic: timingDiagnostic });
     const network = { responses: [], failures: [], errors: [] };
     page.on("response", (response) => { if (response.url().includes("/ribbon-sequence/")) network.responses.push({ path: new URL(response.url()).pathname, status: response.status() }); });
     page.on("requestfailed", (request) => network.failures.push({ path: new URL(request.url()).pathname, error: request.failure()?.errorText }));
@@ -308,8 +314,8 @@ test("real invitation ribbon preserves every frame and restores access across lo
     } finally { await page.close(); }
   });
 
-  for (const width of [360, 430, 768, 1440]) {
-    await scenarioTest(`normal Pastel ${width}px plays the real ribbon across the actual viewport`, async () => {
+  for (const width of [360, 390, 430, 768, 1440]) {
+    await scenarioTest(`normal Pastel ${width}px plays the real ribbon across the actual invitation width`, async () => {
       const page = await newPage({ viewport: { width, height: 900 }, reducedMotion: "no-preference" });
       try {
         await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
@@ -318,16 +324,19 @@ test("real invitation ribbon preserves every frame and restores access across lo
           const canvas = document.querySelector("canvas.pastel-intro-cover__ribbon");
           const rect = canvas.getBoundingClientRect();
           return {
-            viewportWidth: innerWidth, canvasWidth: rect.width, canvasLeft: rect.left,
+            viewportWidth: innerWidth, canvasWidth: rect.width, canvasHeight: rect.height, canvasLeft: rect.left,
             firstDrawIndex: window.__ribbonQA.draws[0].index,
             bodyLocked: document.body.classList.contains("intro-lock"),
             overflow: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth,
           };
         });
+        const expectedWidth = Math.min(width, 430);
+        const expectedLeft = (width - expectedWidth) / 2;
         assert.equal(initial.viewportWidth, width);
         assert.equal(initial.firstDrawIndex, 0);
-        assert.ok(Math.abs(initial.canvasWidth - width) < 0.5, "The actual ribbon canvas must span the whole viewport.");
-        assert.ok(Math.abs(initial.canvasLeft) < 0.5, "The ribbon canvas must stay horizontally registered to the viewport.");
+        assert.ok(Math.abs(initial.canvasWidth - expectedWidth) < 0.5, "The actual ribbon canvas must span the invitation width.");
+        assert.ok(Math.abs(initial.canvasHeight - expectedWidth * manifest.height / manifest.width) < 0.5, "The runtime canvas must preserve the authored portrait or landscape aspect ratio.");
+        assert.ok(Math.abs(initial.canvasLeft - expectedLeft) < 0.5, "The ribbon canvas must stay centered on the invitation.");
         assert.equal(initial.bodyLocked, true);
         assert.ok(initial.overflow <= 1, "The active cover must not cause horizontal overflow.");
         await screenshot(page, `initial-${width}-normal`);
@@ -358,18 +367,22 @@ test("real invitation ribbon preserves every frame and restores access across lo
     } finally { await page.close(); }
   });
 
-  for (const scenario of ["skip-loading", "fetch-failure", "fetch-timeout", "decode-failure"]) {
+  for (const scenario of ["skip-loading", "fetch-failure", "fetch-timeout", "decode-failure", ...(manifest.framePack ? ["pack-integrity-failure"] : [])]) {
     await scenarioTest(scenario, async () => {
       const page = await newPage();
       const blocked = [];
       let requests = 0;
       let resolveFirstFrameRequest;
       const firstFrameRequest = new Promise((resolve) => { resolveFirstFrameRequest = resolve; });
-      await page.route("**/ribbon-sequence/*.webp", (route) => {
+      if (scenario === "decode-failure" && manifest.framePack) await page.addInitScript(() => {
+        window.createImageBitmap = async () => { throw new Error("Synthetic independent bitmap decode failure"); };
+      });
+      await page.route(manifest.framePack ? "**/ribbon-sequence/*.bin" : "**/ribbon-sequence/*.webp", (route) => {
         requests++;
         resolveFirstFrameRequest();
         if (scenario === "fetch-failure") return route.fulfill({ status: 503, body: "Synthetic frame failure" });
-        if (scenario === "decode-failure") return route.fulfill({ status: 200, contentType: "image/webp", body: Buffer.from("invalid-webp-for-independent-decode-failure") });
+        if (scenario === "decode-failure") return manifest.framePack ? route.continue() : route.fulfill({ status: 200, contentType: "image/webp", body: Buffer.from("invalid-webp-for-independent-decode-failure") });
+        if (scenario === "pack-integrity-failure") return route.fulfill({ status: 200, contentType: "application/octet-stream", body: Buffer.from("invalid-packed-ribbon") });
         blocked.push(route);
       });
       try {
@@ -760,7 +773,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     const page = await newPage();
     let manifestRequests = 0;
     let frameRequests = 0;
-    page.on("request", (request) => { if (/\/ribbon-sequence\/.*\.webp$/.test(request.url())) frameRequests++; });
+    page.on("request", (request) => { if (/\/ribbon-sequence\/.*\.(webp|bin)$/.test(request.url())) frameRequests++; });
     const originalText = await readFile(join(projectRoot, "public/assets/design/ribbon-sequence/manifest.json"), "utf8");
     await page.route("**/ribbon-sequence/manifest.json", async (route) => {
       manifestRequests++;
@@ -977,9 +990,9 @@ root.render(window.__qaStrictMode ? createElement(StrictMode, null, createElemen
       let manifestRequests = 0;
       let firstRequestResolve;
       const firstRequest = new Promise((resolve) => { firstRequestResolve = resolve; });
-      page.on("request", (request) => { if (/\/ribbon-sequence\/.*\.webp$/.test(request.url())) { frameRequests++; firstRequestResolve(); } });
+      page.on("request", (request) => { if (/\/ribbon-sequence\/.*\.(webp|bin)$/.test(request.url())) { frameRequests++; firstRequestResolve(); } });
       page.on("request", (request) => { if (request.url().endsWith("/ribbon-sequence/manifest.json")) manifestRequests++; });
-      if (phase === "preparation") await page.route("**/ribbon-sequence/*.webp", (route) => { blocked.push(route); });
+      if (phase === "preparation") await page.route(manifest.framePack ? "**/ribbon-sequence/*.bin" : "**/ribbon-sequence/*.webp", (route) => { blocked.push(route); });
       try {
         await page.goto(url, { waitUntil: "domcontentloaded" });
         if (phase === "preparation") await firstRequest;

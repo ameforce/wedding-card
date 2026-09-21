@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { assertRibbonFrameDimensions, calculatePanelHingeTurn, calculateRootTranslation, createFrameStallGate, createRibbonFrameLoader, createSequentialRibbonScheduler, loadInitialRibbonFrames, loadRibbonManifest } from "./ribbon-player.mjs";
+import { INVITATION_MAX_WIDTH, assertRibbonFrameDimensions, calculatePanelHingeTurn, calculateRootTranslation, createFrameStallGate, createRibbonFrameLoader, createSequentialRibbonScheduler, loadInitialRibbonFrames, loadRibbonManifest } from "./ribbon-player.mjs";
 import "./pastel-intro.css";
 
 const MANIFEST_URL = "/assets/design/ribbon-sequence/manifest.json";
@@ -116,6 +116,13 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
   const skipRef = useRef(() => {});
   const panelOpeningRef = useRef(false);
   const [posterSource] = useState(() => document.querySelector("#pastel-intro-early-poster img")?.currentSrc || "");
+  const [posterDimensions] = useState(() => {
+    const poster = document.querySelector("#pastel-intro-early-poster");
+    const width = Number(poster?.dataset.ribbonWidth);
+    const height = Number(poster?.dataset.ribbonHeight);
+    return Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0
+      ? { width, height } : { width: 960, height: 640 };
+  });
   const [paperImage] = useState(handoffPaperImage);
   const [frameLive, setFrameLive] = useState(false);
   const [panelsOpen, setPanelsOpen] = useState(false);
@@ -187,12 +194,13 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
         if (!manifest) return;
         const translation = calculateRootTranslation(manifest, index, { width: window.innerWidth, height: window.innerHeight });
         const registration = manifest.registration || { x: manifest.width / 2, y: manifest.height / 2 };
-        const scale = window.innerWidth / manifest.width;
+        const scale = Math.min(window.innerWidth, INVITATION_MAX_WIDTH) / manifest.width;
         const track = ribbonTrackRef.current;
         if (!track) return;
         // Registration is constant until a resize; most early frames have no
         // root movement either. Avoid scheduling style work for identical values.
         for (const [property, value] of [
+          ["aspect-ratio", `${manifest.width} / ${manifest.height}`],
           ["--pastel-intro-registration-x", `${(manifest.width / 2 - registration.x) * scale}px`],
           ["--pastel-intro-registration-y", `${(manifest.height / 2 - registration.y) * scale}px`],
           ["--pastel-intro-ribbon-y", `${translation.y}px`],
@@ -399,12 +407,14 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
       if (early?.consume) early.consume("skip");
       else skipRef.current();
     }}>
-      <div className="pastel-intro-cover__panel pastel-intro-cover__panel--left" />
-      <div className="pastel-intro-cover__panel pastel-intro-cover__panel--right" />
-      <div className="pastel-intro-cover__seam" />
-      <div ref={ribbonTrackRef} className="pastel-intro-cover__ribbon-track">
-        {posterSource && <img className={`pastel-intro-cover__poster${frameLive ? " is-hidden" : ""}`} src={posterSource} width="960" height="640" alt="" />}
-        <canvas ref={canvasRef} className="pastel-intro-cover__ribbon" width="960" height="640" />
+      <div className="pastel-intro-cover__envelope">
+        <div className="pastel-intro-cover__panel pastel-intro-cover__panel--left" />
+        <div className="pastel-intro-cover__panel pastel-intro-cover__panel--right" />
+        <div className="pastel-intro-cover__seam" />
+      </div>
+      <div ref={ribbonTrackRef} className="pastel-intro-cover__ribbon-track" style={{ aspectRatio: `${posterDimensions.width} / ${posterDimensions.height}` }}>
+        {posterSource && <img className={`pastel-intro-cover__poster${frameLive ? " is-hidden" : ""}`} src={posterSource} width={posterDimensions.width} height={posterDimensions.height} alt="" />}
+        <canvas ref={canvasRef} className="pastel-intro-cover__ribbon" width={posterDimensions.width} height={posterDimensions.height} />
       </div>
     </div>
   );

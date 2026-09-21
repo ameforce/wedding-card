@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import {
   assertRibbonFrameDimensions,
   calculatePanelHingeTurn,
@@ -50,6 +51,79 @@ const rawV2Manifest = {
     { offset: 1, progress: 1, leftProgress: 1, rightProgress: 1 },
   ],
 };
+
+function packedFixture() {
+  const frames = rawV2Manifest.frames.map((_, i) => new Uint8Array(20 + i).fill(i + 1));
+  const packed = Buffer.concat(frames);
+  const sha256 = createHash("sha256").update(packed).digest("hex");
+  const raw = { ...rawV2Manifest, framePack: { file: `sequence-${sha256.slice(0, 12)}.bin`, sha256, lengths: frames.map((frame) => frame.length) } };
+  return { frames, raw, packed: packed.buffer.slice(packed.byteOffset, packed.byteOffset + packed.byteLength) };
+}
+
+test("the fixed tall release canvas preserves registration and the decoded memory budget", () => {
+  const manifest = validateRibbonManifest({ ...rawV2Manifest, width: 480, height: 1920, registration: { x: 240, y: 960 } }, manifestOptions);
+  const loader = createRibbonFrameLoader(manifest);
+  assert.equal(loader.managedPixelBytes, 480 * 1920 * 4 * 7);
+  assert.ok(loader.managedPixelBytes < 32 * 1024 * 1024);
+  assert.deepEqual(manifest.registration, { x: 240, y: 960 });
+  assert.throws(() => validateRibbonManifest({ ...rawV2Manifest, height: 1920 }, manifestOptions));
+  loader.cancel();
+});
+
+test("one verified frame pack supplies exact frames with shared compressed storage", async () => {
+  const fixture = packedFixture();
+  const manifest = validateRibbonManifest(fixture.raw, manifestOptions);
+  const requests = [];
+  const loader = createRibbonFrameLoader(manifest, {
+    fetchFrame: async (url) => { requests.push(url); return fixture.packed; },
+    decodeFrame: async (bytes) => bytes,
+  });
+  for (let i = 0; i < fixture.frames.length; i++) {
+    const decoded = await loader.getFrame(i);
+    assert.deepEqual([...decoded], [...fixture.frames[i]]);
+    assert.equal(decoded.buffer, fixture.packed);
+  }
+  assert.deepEqual(requests, [manifest.framePack.url]);
+  assert.equal(loader.prefetchedBytes, fixture.packed.byteLength);
+  loader.cancel();
+});
+
+test("frame pack validation rejects path escapes, malformed tables and budget overflow", () => {
+  const { raw } = packedFixture();
+  for (const framePack of [
+    { ...raw.framePack, file: "../other.bin" },
+    { ...raw.framePack, lengths: [20] },
+    { ...raw.framePack, lengths: [20, 20, 20, 20, -1] },
+    { ...raw.framePack, lengths: [4194304, 20, 20, 20, 20] },
+    { ...raw.framePack, extra: true },
+  ]) assert.throws(() => validateRibbonManifest({ ...raw, framePack }, manifestOptions));
+});
+
+test("a corrupt or truncated frame pack never reaches the decoder", async () => {
+  const fixture = packedFixture();
+  const manifest = validateRibbonManifest(fixture.raw, manifestOptions);
+  const corrupt = fixture.packed.slice(0);new Uint8Array(corrupt)[20] ^= 1;
+  for (const packed of [corrupt, fixture.packed.slice(1)]) {
+    let decoded = false;
+    const loader = createRibbonFrameLoader(manifest, { fetchFrame: async () => packed, decodeFrame: async () => { decoded = true; } });
+    await assert.rejects(loader.getFrame(0), /mismatch/);
+    assert.equal(decoded, false);
+    loader.cancel();
+  }
+});
+
+test("skip during a frame pack request cancels late playback preparation", async () => {
+  const fixture = packedFixture();
+  let finish;
+  const loader = createRibbonFrameLoader(validateRibbonManifest(fixture.raw, manifestOptions), {
+    fetchFrame: () => new Promise((resolve) => { finish = resolve; }),
+    decodeFrame: async () => { throw new Error("must not decode"); },
+  });
+  const pending = loader.getFrame(0);
+  loader.cancel();finish(fixture.packed);
+  await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(loader.prefetchedBytes, 0);
+});
 
 test("ribbon manifest accepts only bounded same-origin sequence assets", () => {
   const manifest = validateRibbonManifest(rawManifest, manifestOptions);
@@ -107,7 +181,7 @@ test("v2 manifest locks the authored canvas, timing, poster and root-track contr
     height: 320,
     registration: { x: 240, y: 160 },
   }, manifestOptions));
-  assert.throws(() => validateRibbonManifest({ ...rawV2Manifest, width: 800, height: 640 }, manifestOptions), /uniformly downscaled/);
+  assert.throws(() => validateRibbonManifest({ ...rawV2Manifest, width: 800, height: 640 }, manifestOptions), /bounded 3:2 canvas/);
 });
 
 test("v2 root motion is zero before release and the final visible frame leaves every required viewport", () => {
@@ -119,6 +193,11 @@ test("v2 root motion is zero before release and the final visible frame leaves e
     assert.ok(finalVisible.y > 0);
     assert.equal(ribbonFrameExitedViewport(manifest, 3, viewport, { left: 0, top: 0, width: 960, height: 640 }), true);
   }
+  assert.deepEqual(
+    calculateRootTranslation(manifest, 3, { width: 1440, height: 900 }),
+    calculateRootTranslation(manifest, 3, { width: 430, height: 900 }),
+    "Desktop root motion must use the centered invitation width rather than stretching to the viewport.",
+  );
 });
 
 test("v2 root path remains continuous and does not apply frame normalization", () => {

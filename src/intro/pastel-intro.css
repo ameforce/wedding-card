@@ -22,6 +22,15 @@
 /* The initial HTML poster reuses element names but has its own stylesheet.
    Keep all runtime rules inside the runtime root: CSS arrives before claim,
    while the initial poster is still visible and has no motion variables. */
+.pastel-intro-cover .pastel-intro-cover__envelope {
+  position: absolute;
+  z-index: 1;
+  inset-block: 0;
+  left: 50%;
+  width: min(100vw, 430px);
+  transform: translateX(-50%);
+}
+
 .pastel-intro-cover .pastel-intro-cover__panel {
   position: absolute;
   z-index: 1;
@@ -44,7 +53,7 @@
 
 .pastel-intro-cover .pastel-intro-cover__panel::before {
   z-index: 0;
-  width: 100vw;
+  width: 200%;
   background: #f7f0e4 var(--pastel-intro-paper-image) center / cover no-repeat;
 }
 
@@ -70,7 +79,7 @@
 }
 
 .pastel-intro-cover .pastel-intro-cover__panel--right::before {
-  left: calc(-100vw + 100%);
+  left: -100%;
 }
 
 .pastel-intro-cover .pastel-intro-cover__panel--left::after {
@@ -109,7 +118,7 @@
   z-index: 3;
   top: 50%;
   left: 50%;
-  width: 100vw;
+  width: min(100vw, 430px);
   aspect-ratio: 3 / 2;
   transform: translate(
     calc(-50% + var(--pastel-intro-registration-x)),

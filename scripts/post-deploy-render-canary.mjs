@@ -50,7 +50,7 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export function createRibbonExpectation(manifest, { manifestHash, frameHashes } = {}) {
+export function createRibbonExpectation(manifest, { manifestHash, frameHashes, packHash } = {}) {
   invariant(manifest && (manifest.schemaVersion === 1 || manifest.schemaVersion === 2), "리본 manifest schemaVersion이 올바르지 않습니다.");
   invariant(Number.isInteger(manifest.fps) && manifest.fps === 30, "리본 manifest는 30 fps여야 합니다.");
   invariant(Number.isInteger(manifest.width) && Number.isInteger(manifest.height), "리본 manifest canvas 크기가 없습니다.");
@@ -70,10 +70,15 @@ export function createRibbonExpectation(manifest, { manifestHash, frameHashes } 
     frameHashes: Object.freeze({ ...frameHashes }),
     panelDelayMs: manifest.panelDelayMs,
     panelDurationMs: manifest.panelDurationMs,
+    ...(manifest.framePack ? { framePack: Object.freeze({ ...manifest.framePack }) } : {}),
   };
+  if (manifest.framePack) {
+    invariant(SHA256.test(packHash || "") && packHash === manifest.framePack.sha256, "리본 묶음 파일의 SHA-256이 빌드 파일과 다릅니다.");
+    invariant(manifest.framePack.file === `sequence-${packHash.slice(0, 12)}.bin`, "리본 묶음 파일 이름이 해시와 다릅니다.");
+  }
   if (manifest.schemaVersion === 1) return Object.freeze({ ...common, transitional: true });
 
-  invariant(manifest.fps === 30 && manifest.width >= 480 && manifest.width <= 960 && manifest.width % 3 === 0 && manifest.height * 3 === manifest.width * 2, "v2 리본 manifest canvas가 올바르지 않습니다.");
+  invariant(manifest.fps === 30 && manifest.width >= 480 && manifest.width <= 960 && ((manifest.width % 3 === 0 && manifest.height * 3 === manifest.width * 2) || (manifest.width === 480 && manifest.height === 1920)), "v2 리본 manifest canvas가 올바르지 않습니다.");
   invariant(manifest.holdMs === 800 && manifest.panelDelayMs === 600 && manifest.panelDurationMs === 1400, "v2 리본 timing이 올바르지 않습니다.");
   invariant(Number.isInteger(manifest.releaseCompleteFrame) && manifest.releaseCompleteFrame >= 0 && manifest.releaseCompleteFrame < frames.length - 1, "v2 releaseCompleteFrame이 올바르지 않습니다.");
   invariant(manifest.registration && Number.isFinite(manifest.registration.x) && Number.isFinite(manifest.registration.y), "v2 registration이 올바르지 않습니다.");
@@ -167,7 +172,9 @@ export function validateRibbonPlaybackEvidence({ baseUrl, ribbonExpectation, int
 
   const expectedAssets = new Map([
     [ribbonExpectation.manifestPath, { hash: ribbonExpectation.manifestHash, contentType: "application/json" }],
-    ...ribbonExpectation.frames.map((frame) => [`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}${frame}`, { hash: ribbonExpectation.frameHashes[frame], contentType: "image/webp" }]),
+    ...(ribbonExpectation.framePack
+      ? [[`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}${ribbonExpectation.framePack.file}`, { hash: ribbonExpectation.framePack.sha256, contentType: "application/octet-stream" }]]
+      : ribbonExpectation.frames.map((frame) => [`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}${frame}`, { hash: ribbonExpectation.frameHashes[frame], contentType: "image/webp" }])),
   ]);
   for (const [assetPath, expected] of expectedAssets) {
     const responses = (ribbonResponses || []).filter((response) => pathname(response.url, baseUrl) === assetPath);
@@ -600,6 +607,9 @@ async function installHeroObserver(page) {
 async function installIntroObserver(page) {
   await page.addInitScript(() => {
     const byteIndexes = new WeakMap();
+    const packedBuffers = new WeakSet();
+    let framePack;
+    const packOffsets = new Map();
     const blobIndexes = new WeakMap();
     const bitmapIndexes = new WeakMap();
     const evidence = window.__weddingIntroEvidence = {
@@ -626,6 +636,10 @@ async function installIntroObserver(page) {
     };
     const recordPanelConfig = (response, payload) => {
       if (new URL(response.url, location.href).pathname !== "/assets/design/ribbon-sequence/manifest.json") return;
+      framePack = payload?.framePack;
+      packOffsets.clear();
+      let offset = 0;
+      framePack?.lengths?.forEach((length, index) => { packOffsets.set(offset, index); offset += length; });
       evidence.panelConfig = {
         schemaVersion: payload?.schemaVersion,
         panelCurve: payload?.panelCurve,
@@ -638,6 +652,7 @@ async function installIntroObserver(page) {
       const bytes = await originalArrayBuffer.apply(this, args);
       const match = this.url.match(/\/ribbon-sequence\/frame-(\d+)-[^/]+\.webp$/u);
       if (match) byteIndexes.set(bytes, Number(match[1]));
+      if (framePack && this.url.split("/").at(-1) === framePack.file) packedBuffers.add(bytes);
       return bytes;
     };
     Response.prototype.text = async function (...args) {
@@ -655,6 +670,8 @@ async function installIntroObserver(page) {
       constructor(parts, options) {
         super(parts, options);
         if (parts?.[0] && byteIndexes.has(parts[0])) blobIndexes.set(this, byteIndexes.get(parts[0]));
+        const first = parts?.[0];
+        if (ArrayBuffer.isView(first) && packedBuffers.has(first.buffer) && packOffsets.has(first.byteOffset)) blobIndexes.set(this, packOffsets.get(first.byteOffset));
       }
     };
     const originalCreateImageBitmap = window.createImageBitmap.bind(window);
@@ -768,7 +785,10 @@ function recordRibbonResponse(response, records, tasks, isCurrent = () => true) 
   } catch {
     return;
   }
-  if (responsePath !== RIBBON_MANIFEST_PATH && !responsePath.startsWith(`${RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length)}frame-`)) return;
+  const sequenceDirectory = RIBBON_MANIFEST_PATH.slice(0, -"manifest.json".length);
+  const isFramePack = responsePath.startsWith(sequenceDirectory)
+    && /^sequence-[a-f0-9]{12}\.bin$/u.test(responsePath.slice(sequenceDirectory.length));
+  if (responsePath !== RIBBON_MANIFEST_PATH && !responsePath.startsWith(`${sequenceDirectory}frame-`) && !isFramePack) return;
   tasks.push((async () => {
     try {
       const bytes = await response.body();
@@ -1112,7 +1132,8 @@ async function readBuiltRibbonExpectation() {
     frame,
     sha256(await readFile(new URL(frame, directory))),
   ])));
-  return createRibbonExpectation(manifest, { manifestHash: sha256(manifestBytes), frameHashes });
+  const packHash = manifest.framePack ? sha256(await readFile(new URL(manifest.framePack.file, directory))) : undefined;
+  return createRibbonExpectation(manifest, { manifestHash: sha256(manifestBytes), frameHashes, packHash });
 }
 
 const isCli = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;

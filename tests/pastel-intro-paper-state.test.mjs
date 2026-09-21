@@ -40,10 +40,12 @@ test("actual paper handoff is neutral on both faces and turning activates scoped
       const neutral = await sample();
       const handedOff = await page.screenshot();
       const differences = [];
+      const invitationWidth = Math.min(width, 430);
+      const invitationLeft = (width - invitationWidth) / 2;
       for (const face of neutral) {
         assert.equal(face.shade, 0, `${width}px ${face.side}: initial runtime shade`);
         assert.equal(face.progress, 0, `${width}px ${face.side}: initial runtime progress`);
-        const patch = { left: face.side === "left" ? 8 : width - 48, top: 8, width: 40, height: 120 };
+        const patch = { left: face.side === "left" ? invitationLeft + 8 : invitationLeft + invitationWidth - 48, top: 8, width: 40, height: 120 };
         const [before, after] = await Promise.all([early, handedOff].map((png) => sharp(png).extract(patch).removeAlpha().raw().toBuffer()));
         const mean = before.reduce((sum, value, index) => sum + Math.abs(value - after[index]), 0) / before.length;
         assert.ok(mean <= 1, `${width}px ${face.side}: neutral handoff paper mean difference ${mean}`);
@@ -68,7 +70,7 @@ test("actual paper handoff is neutral on both faces and turning activates scoped
       for (const face of turning) {
         assert.ok(face.shade > 0 && face.shade <= 1, `${width}px ${face.side}: turning shade must activate`);
         assert.notEqual(face.content, "none", `${width}px ${face.side}: scoped shade layer exists`);
-        assert.ok(face.width < width * 0.502 - 1, `${width}px ${face.side}: hinge must foreshorten the paper`);
+        assert.ok(face.width < invitationWidth * 0.502 - 1, `${width}px ${face.side}: hinge must foreshorten the paper`);
       }
       evidence.push({ width, neutral, differences, turning });
       if (process.env.RIBBON_QA_DIR) {

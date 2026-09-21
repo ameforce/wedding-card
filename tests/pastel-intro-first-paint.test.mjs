@@ -14,6 +14,24 @@ const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const sequenceManifest = JSON.parse(await readFile(join(projectRoot, "public/assets/design/ribbon-sequence/manifest.json"), "utf8"));
 const expectedF0Hash = createHash("sha256").update(await readFile(join(projectRoot, "public/assets/design/ribbon-sequence", sequenceManifest.frames[0]))).digest("hex");
 
+test("public fallback paths and a top-level draft query retain the initial cover", { timeout: 20_000 }, async (t) => {
+  const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); await server.close(); });
+  for (const path of ["/invitation", "/?contentPreview=draft", "/invitation?contentPreview=draft"]) {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.route("**/src/main.jsx*", (route) => route.abort());
+    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}${path}`, { waitUntil: "domcontentloaded" });
+    assert.equal(await page.evaluate(() => window.__pastelIntroEarly?.status), "poster", path);
+    assert.equal(await page.locator("#pastel-intro-early-poster").isVisible(), true, path);
+    await page.locator("#pastel-intro-early-poster").click({ position: { x: 10, y: 10 } });
+    assert.equal(await page.evaluate(() => window.__pastelIntroEarly.reason), "skip", path);
+    assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).overflow), "hidden", path);
+    await page.close();
+  }
+});
+
 test("first poster does not wait for a separate early-controller request", { timeout: 15_000 }, async (t) => {
   const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
   await server.listen();
