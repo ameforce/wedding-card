@@ -22,6 +22,8 @@ const MAX_IMAGE_FILE_BYTES = 90 * 1024 * 1024;
 const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_BODY_BYTES = 26 * 1024 * 1024;
 const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+const MEDIA_SETS_TABLE = "invitation_media_sets_v2";
+const LEGACY_MEDIA_SETS_TABLE = "invitation_media_sets";
 const REQUIRED_COPY_LINES = 4;
 const MIN_GALLERY_PHOTOS = 1;
 const GUESTBOOK_RETENTION = "permanent";
@@ -1020,8 +1022,8 @@ async function saveInvitationDraft(request, env) {
   const createdAt = new Date().toISOString();
   if (state?.draft_revision_id) {
     const updated = await db.prepare(
-      "UPDATE invitation_revisions SET content_json = ? WHERE id = ? AND status = 'draft'",
-    ).bind(contentJson, state.draft_revision_id).run();
+      "UPDATE invitation_revisions SET content_json = ?, created_at = ? WHERE id = ? AND status = 'draft'",
+    ).bind(contentJson, createdAt, state.draft_revision_id).run();
     if (updated?.meta?.changes) {
       await db.prepare("UPDATE invitation_state SET updated_at = ? WHERE singleton_id = 1").bind(createdAt).run();
       return json({ revisionId: state.draft_revision_id, savedAt: createdAt });
@@ -1220,9 +1222,32 @@ function mediaUsagePayload(usedBytes, mediaSets = 0) {
   };
 }
 
+async function migrateLegacyMediaSets(db) {
+  await runDatabaseBatch(db, [
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS ${MEDIA_SETS_TABLE} (
+         id TEXT PRIMARY KEY,
+         slot TEXT NOT NULL CHECK (length(slot) BETWEEN 1 AND 40),
+         total_bytes INTEGER NOT NULL CHECK (total_bytes BETWEEN 1 AND 134217728),
+         status TEXT NOT NULL CHECK (status IN ('reserved', 'stored')),
+         created_at TEXT NOT NULL,
+         stored_at TEXT
+       )`,
+    ),
+    db.prepare(
+      `INSERT OR IGNORE INTO ${MEDIA_SETS_TABLE} (id, slot, total_bytes, status, created_at, stored_at)
+       SELECT id, slot, total_bytes, status, created_at, stored_at FROM ${LEGACY_MEDIA_SETS_TABLE}`,
+    ),
+    db.prepare(
+      `DELETE FROM ${LEGACY_MEDIA_SETS_TABLE} WHERE id IN (SELECT id FROM ${MEDIA_SETS_TABLE})`,
+    ),
+  ]);
+}
+
 async function getMediaUsageFromDatabase(db) {
+  await migrateLegacyMediaSets(db);
   const row = await db.prepare(
-    "SELECT COALESCE(SUM(total_bytes), 0) AS used_bytes, COUNT(*) AS media_sets FROM invitation_media_sets WHERE status IN ('reserved', 'stored')",
+    `SELECT COALESCE(SUM(total_bytes), 0) AS used_bytes, COUNT(*) AS media_sets FROM ${MEDIA_SETS_TABLE} WHERE status IN ('reserved', 'stored')`,
   ).first();
   return mediaUsagePayload(row?.used_bytes, row?.media_sets);
 }
@@ -1235,24 +1260,35 @@ async function getAdminMediaUsage(request, env) {
 }
 
 async function reserveMediaStorage(db, { mediaId, slot, totalBytes }) {
+  await migrateLegacyMediaSets(db);
   const createdAt = new Date().toISOString();
   const result = await db.prepare(
-    `INSERT INTO invitation_media_sets (id, slot, total_bytes, status, created_at, stored_at)
+    `INSERT INTO ${MEDIA_SETS_TABLE} (id, slot, total_bytes, status, created_at, stored_at)
      SELECT ?, ?, ?, 'reserved', ?, NULL
-     WHERE (SELECT COALESCE(SUM(total_bytes), 0) FROM invitation_media_sets WHERE status IN ('reserved', 'stored')) + ? <= ?`,
-  ).bind(mediaId, slot, totalBytes, createdAt, totalBytes, MEDIA_STORAGE_LIMIT_BYTES).run();
+     WHERE (SELECT COALESCE(SUM(total_bytes), 0) FROM ${MEDIA_SETS_TABLE} WHERE status IN ('reserved', 'stored')) + ? <= ?`,
+  ).bind(mediaId, slot, totalBytes, createdAt, totalBytes, MEDIA_STORAGE_LIMIT_BYTES).run().catch((error) => {
+    if (String(error?.message || "").includes("CHECK")) {
+      throw { status: 413, code: "MEDIA_TOO_LARGE", message: "현재 저장소 구성이 지원하는 크기를 초과했습니다. 더 작은 파일로 다시 시도해 주세요." };
+    }
+    throw error;
+  });
   if (!result?.meta?.changes) {
     throw { status: 507, code: "MEDIA_STORAGE_LIMIT", message: "미디어 저장 공간 2GB 한도에 도달했습니다. 기존 미디어 정리 후 다시 시도해 주세요." };
   }
 }
 
 async function releaseMediaStorage(db, mediaId) {
-  await db.prepare("DELETE FROM invitation_media_sets WHERE id = ? AND status = 'reserved'").bind(mediaId).run();
+  await migrateLegacyMediaSets(db);
+  await db.prepare(`DELETE FROM ${MEDIA_SETS_TABLE} WHERE id = ? AND status = 'reserved'`).bind(mediaId).run();
 }
 
 async function commitMediaStorage(db, mediaId) {
-  await db.prepare("UPDATE invitation_media_sets SET status = 'stored', stored_at = ? WHERE id = ? AND status = 'reserved'")
+  await migrateLegacyMediaSets(db);
+  const result = await db.prepare(`UPDATE ${MEDIA_SETS_TABLE} SET status = 'stored', stored_at = ? WHERE id = ? AND status = 'reserved'`)
     .bind(new Date().toISOString(), mediaId).run();
+  if (!result?.meta?.changes) {
+    throw { status: 409, code: "MEDIA_STORAGE_LOST", message: "미디어 저장 기록이 변경되어 업로드를 완료하지 못했습니다." };
+  }
 }
 
 const BUNDLED_MUSIC_FALLBACK = {
@@ -1273,7 +1309,7 @@ async function listRevisionsForMediaScan(db) {
 
 function revisionsReferencing(revisions, mediaId) {
   const needle = `invitation/${mediaId}/`;
-  return revisions.filter((revision) => typeof revision.content_json === "string" && revision.content_json.includes(needle));
+  return revisions.filter((revision) => typeof revision.content_json === "string" && revision.content_json.toLowerCase().includes(needle));
 }
 
 function describeRevisionRef(revision) {
@@ -1295,14 +1331,27 @@ function mediaReferenceSummary(referencing, state) {
   };
 }
 
+const STALE_RESERVATION_MS = 60 * 60 * 1000;
+
+function staleReservationCutoff() {
+  return new Date(Date.now() - STALE_RESERVATION_MS).toISOString();
+}
+
+function isStaleReservation(set) {
+  return set.status === "reserved" && Date.parse(set.created_at || "") < Date.now() - STALE_RESERVATION_MS;
+}
+
 async function getAdminMediaList(request, env) {
   const db = requireContentDatabase(env);
   await requireAdminEmail(request, env);
   requireMediaBucket(env);
   const state = await getInvitationState(db);
+  await migrateLegacyMediaSets(db);
   const sets = (await db.prepare(
-    "SELECT id, slot, total_bytes, status, created_at FROM invitation_media_sets ORDER BY created_at DESC",
-  ).all()).results || [];
+    `SELECT id, slot, total_bytes, status, created_at FROM ${MEDIA_SETS_TABLE}
+     WHERE status = 'stored' OR (status = 'reserved' AND created_at < ?)
+     ORDER BY created_at DESC`,
+  ).bind(staleReservationCutoff()).all()).results || [];
   const revisions = await listRevisionsForMediaScan(db);
   const usage = await getMediaUsageFromDatabase(db);
   const media = sets.map((row) => {
@@ -1313,6 +1362,7 @@ async function getAdminMediaList(request, env) {
       kind,
       totalBytes: row.total_bytes,
       status: row.status,
+      abandoned: row.status === "reserved",
       createdAt: row.created_at,
       previewUrl: kind === "photo" ? `${MEDIA_API_PREFIX}/invitation/${row.id}/${row.slot}/480.webp` : null,
       references: mediaReferenceSummary(revisionsReferencing(revisions, row.id), state),
@@ -1325,11 +1375,11 @@ function stripMediaFromDraftDocument(document, mediaId) {
   const needle = `invitation/${mediaId}/`;
   const photos = document?.photos?.pastel;
   let removed = 0;
-  if (photos?.hero && JSON.stringify(photos.hero).includes(needle)) {
+  if (photos?.hero && JSON.stringify(photos.hero).toLowerCase().includes(needle)) {
     return { blocked: "대표 사진으로 사용 중입니다. 초안에서 다른 사진으로 먼저 교체해 주세요." };
   }
   if (Array.isArray(photos?.gallery)) {
-    const kept = photos.gallery.filter((photo) => !JSON.stringify(photo).includes(needle));
+    const kept = photos.gallery.filter((photo) => !JSON.stringify(photo).toLowerCase().includes(needle));
     removed = photos.gallery.length - kept.length;
     if (removed > 0) {
       if (kept.length < 1) {
@@ -1338,11 +1388,11 @@ function stripMediaFromDraftDocument(document, mediaId) {
       photos.gallery = kept;
     }
   }
-  if (typeof document?.content?.music?.src === "string" && document.content.music.src.includes(needle)) {
+  if (typeof document?.content?.music?.src === "string" && document.content.music.src.toLowerCase().includes(needle)) {
     document.content.music = { ...BUNDLED_MUSIC_FALLBACK };
     removed += 1;
   }
-  if (JSON.stringify(document).includes(needle)) {
+  if (JSON.stringify(document).toLowerCase().includes(needle)) {
     return { blocked: "이 미디어를 참조하는 초안 항목을 정리하지 못했습니다." };
   }
   return { removed };
@@ -1372,13 +1422,17 @@ async function deleteAdminMedia(request, env) {
   }
   const payload = await readJson(request);
   const mediaId = String(payload?.mediaId || "").trim().toLowerCase();
-  if (!/^[a-f0-9-]{36}$/.test(mediaId)) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(mediaId)) {
     return apiError(400, "INVALID_MEDIA", "미디어 식별자를 확인해 주세요.");
   }
+  await migrateLegacyMediaSets(db);
   const set = await db.prepare(
-    "SELECT id, slot, total_bytes, status FROM invitation_media_sets WHERE id = ?",
+    `SELECT id, slot, total_bytes, status, created_at FROM ${MEDIA_SETS_TABLE} WHERE id = ?`,
   ).bind(mediaId).first();
   if (!set) return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
+  if (set.status !== "stored" && !isStaleReservation(set)) {
+    return apiError(409, "MEDIA_IN_USE", "업로드가 진행 중인 미디어입니다. 업로드가 끝난 뒤 다시 시도해 주세요.");
+  }
   const state = await getInvitationState(db);
   const revisions = await listRevisionsForMediaScan(db);
   const referencing = revisionsReferencing(revisions, mediaId);
@@ -1392,24 +1446,48 @@ async function deleteAdminMedia(request, env) {
     });
   }
   const statements = [];
+  const expectedChanges = [];
   let removedFromDraft = 0;
   const draftRevision = referencing.find((revision) => revision.id === state?.draft_revision_id);
   if (draftRevision) {
-    const draftDocument = JSON.parse(draftRevision.content_json);
+    let draftDocument;
+    try {
+      draftDocument = JSON.parse(draftRevision.content_json);
+    } catch {
+      return apiError(409, "DRAFT_CORRUPTED", "초안 문서를 해석하지 못해 미디어를 삭제하지 않았습니다.");
+    }
     const strip = stripMediaFromDraftDocument(draftDocument, mediaId);
     if (strip.blocked) return apiError(409, "MEDIA_IN_USE", strip.blocked);
     removedFromDraft = strip.removed;
     statements.push(db.prepare(
-      "UPDATE invitation_revisions SET content_json = ? WHERE id = ? AND status = 'draft'",
-    ).bind(JSON.stringify(draftDocument), draftRevision.id));
+      `UPDATE invitation_revisions SET content_json = ? WHERE id = ? AND status = 'draft' AND content_json = ?
+       AND EXISTS (SELECT 1 FROM invitation_state s WHERE s.singleton_id = 1 AND s.draft_revision_id = invitation_revisions.id)`,
+    ).bind(JSON.stringify(draftDocument), draftRevision.id, draftRevision.content_json));
+    expectedChanges.push(1);
   }
   for (const revision of archivedRefs) {
     statements.push(db.prepare(
-      "DELETE FROM invitation_revisions WHERE id = ? AND id <> COALESCE(?, '') AND id <> COALESCE(?, '')",
-    ).bind(revision.id, state?.draft_revision_id, state?.published_revision_id));
+      `DELETE FROM invitation_revisions WHERE id = ? AND NOT EXISTS (
+         SELECT 1 FROM invitation_state s WHERE s.singleton_id = 1
+           AND (s.draft_revision_id = invitation_revisions.id OR s.published_revision_id = invitation_revisions.id)
+       )`,
+    ).bind(revision.id));
+    expectedChanges.push(1);
   }
-  statements.push(db.prepare("DELETE FROM invitation_media_sets WHERE id = ?").bind(mediaId));
-  await runDatabaseBatch(db, statements);
+  statements.push(db.prepare(
+    `DELETE FROM ${MEDIA_SETS_TABLE} WHERE id = ?
+       AND (status = 'stored' OR (status = 'reserved' AND created_at < ?))
+       AND NOT EXISTS (
+         SELECT 1 FROM invitation_revisions r WHERE lower(r.content_json) LIKE '%' || ? || '%'
+       )`,
+  ).bind(mediaId, staleReservationCutoff(), `invitation/${mediaId}/`));
+  expectedChanges.push(1);
+  const results = await runDatabaseBatch(db, statements);
+  const applied = (Array.isArray(results) ? results : results?.results || [])
+    .map((result) => result?.meta?.changes ?? 0);
+  if (applied.length !== expectedChanges.length || !applied.every((changes, index) => changes === expectedChanges[index])) {
+    return apiError(409, "MEDIA_IN_USE", "삭제 중 다른 변경이 감지되어 미디어를 삭제하지 않았습니다. 다시 시도해 주세요.");
+  }
   const keys = mediaObjectKeys(set);
   let objectsDeleted = true;
   try {
@@ -1495,8 +1573,7 @@ async function uploadInvitationMedia(request, env) {
     await commitMediaStorage(db, mediaId);
   } catch (error) {
     if (typeof bucket.delete !== "function") throw new Error("R2 media cleanup is unavailable", { cause: error });
-    await bucket.delete(keys);
-    await releaseMediaStorage(db, mediaId);
+    await Promise.allSettled([bucket.delete(keys), releaseMediaStorage(db, mediaId)]);
     throw error;
   }
   const src = `${MEDIA_API_PREFIX}/${baseKey}/480.webp`;

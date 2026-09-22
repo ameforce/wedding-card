@@ -628,12 +628,25 @@ export function ContentAdmin() {
     }
   };
 
-  const requestDeleteMedia = (item) => {
-    if (dirty && JSON.stringify(editingDocument).includes(`invitation/${item.mediaId}/`)) {
+  const refreshMediaList = useCallback(async () => {
+    try {
+      const payload = await adapter.getMediaList();
+      setMediaList(Array.isArray(payload?.media) ? payload.media : []);
+      if (payload?.usage) setMediaUsage(payload.usage);
+      return payload;
+    } catch {
+      return null;
+    }
+  }, [adapter]);
+
+  const requestDeleteMedia = async (item) => {
+    if (dirty && JSON.stringify(editingDocument).toLowerCase().includes(`invitation/${item.mediaId}/`)) {
       setStatus({ tone: "error", message: "미적용 변경사항이 이 미디어를 참조하고 있습니다. 임시 적용하거나 새로고침한 뒤 삭제해 주세요." });
       return;
     }
-    setMediaDeleteTarget({ media: item, dependentRevisions: item.references?.archivedRevisions || [], error: "" });
+    const fresh = await refreshMediaList();
+    const current = fresh?.media?.find((entry) => entry.mediaId === item.mediaId) || item;
+    setMediaDeleteTarget({ media: current, dependentRevisions: current.references?.archivedRevisions || [], error: "" });
   };
 
   const confirmDeleteMedia = async () => {
@@ -643,9 +656,8 @@ export function ContentAdmin() {
     try {
       const result = await adapter.deleteMedia(target.media.mediaId, { deleteRevisions: target.dependentRevisions.length > 0 });
       setMediaDeleteTarget(null);
-      const listPayload = await adapter.getMediaList();
-      setMediaList(listPayload?.media || []);
-      setMediaUsage(listPayload?.usage || result.usage || await adapter.getMediaUsage());
+      const listPayload = await refreshMediaList();
+      if (!listPayload?.usage) setMediaUsage(result.usage || await adapter.getMediaUsage());
       await load({ preserveEditingDocument: dirty });
       setStatus({
         tone: "success",
@@ -653,16 +665,15 @@ export function ContentAdmin() {
       });
     } catch (error) {
       if (error?.code === "MEDIA_REFERENCED" && Array.isArray(error.dependentRevisions)) {
-        setMediaDeleteTarget((current) => current && { ...current, dependentRevisions: error.dependentRevisions });
+        setMediaDeleteTarget((current) => current && { ...current, dependentRevisions: error.dependentRevisions, error: error.message || "" });
         return;
       }
-      if (error?.code === "MEDIA_IN_USE") {
+      if (isAdminAuthRequiredError(error)) {
         setMediaDeleteTarget(null);
         showAdminError(error, "미디어를 삭제하지 못했습니다.");
         return;
       }
-      showAdminError(error, "미디어를 삭제하지 못했습니다.");
-      setMediaDeleteTarget(null);
+      setMediaDeleteTarget((current) => current && { ...current, error: error?.message || "미디어를 삭제하지 못했습니다." });
     } finally {
       setDeletingMediaId("");
     }
@@ -684,6 +695,7 @@ export function ContentAdmin() {
       });
       update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], result.photo);
       setMediaUsage(result.usage || await adapter.getMediaUsage());
+      await refreshMediaList();
       setStatus({ tone: "success", message: "새 사진을 초안에 넣었습니다. 새 사진에 맞는 대체 텍스트와 초점을 확인해 주세요." });
       return true;
     } catch (error) {
@@ -739,6 +751,7 @@ export function ContentAdmin() {
       setUploadingSlot("");
       setUploadProgress(null);
     }
+    await refreshMediaList();
     const skippedNote = skipped > 0 ? ` 저장 공간이 부족해 나머지 ${skipped}장은 올리지 않았습니다.` : "";
     const failureNote = failures.length > 0 ? ` ${failures.join(" · ")}` : "";
     if (failures.length === 0 && skipped === 0) {
@@ -766,6 +779,7 @@ export function ContentAdmin() {
       });
       update(["content", "music", "src"], result.audio.src);
       setMediaUsage(result.usage || await adapter.getMediaUsage());
+      await refreshMediaList();
       setStatus({ tone: "success", message: "새 MP3와 곡 정보를 초안에 넣었습니다. 미리듣기 후 임시 적용해 주세요." });
       return true;
     } catch (error) {
@@ -973,10 +987,11 @@ export function ContentAdmin() {
                   {mediaList.map((item) => {
                     const refs = item.references || {};
                     const archivedCount = refs.archivedRevisions?.length || 0;
-                    const statusLabel = refs.published ? "현재 공개본 사용 중"
-                      : refs.draft ? "현재 초안 사용 중"
-                        : archivedCount > 0 ? `과거 리비전 ${archivedCount}개 참조`
-                          : "미사용";
+                    const statusLabel = item.abandoned ? "업로드 중단됨"
+                      : refs.published ? "현재 공개본 사용 중"
+                        : refs.draft ? "현재 초안 사용 중"
+                          : archivedCount > 0 ? `과거 리비전 ${archivedCount}개 참조`
+                            : "미사용";
                     const mediaLabel = item.kind === "audio" ? "배경 음악" : item.slot === "pastel-hero" ? "대표 사진" : "갤러리 사진";
                     return (
                       <li key={item.mediaId} className="content-admin-media-item">

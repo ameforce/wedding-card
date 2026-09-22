@@ -662,6 +662,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .admin-dialog-actions { display: grid; margin-top: 16px; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 9px; }
 .admin-dialog-actions button { min-height: 44px; color: #204f77; background: #fff; border: 1px solid #cfdae3; border-radius: 8px; cursor: pointer; font: 650 13px "Noto Sans KR Variable", sans-serif; }
 .admin-dialog-actions button.is-primary { color: #fff; background: #06477f; border-color: #06477f; }
+.admin-dialog-actions button.is-destructive { color: #fff; background: #9b4d58; border-color: #9b4d58; }
 
 .guestbook-admin-page { min-height: 100vh; }
 .guestbook-admin-toolbar { display: grid; margin: 10px 0 18px; grid-template-columns: minmax(180px, 320px) auto 1fr 44px; align-items: center; gap: 10px; }
