@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
+import { ribbonSpanStyle } from "../../src/intro/ribbon-span.mjs";
 
 const paperPath = resolve(process.cwd(), "public/assets/design/intro-paper-ivory.webp");
 
@@ -35,6 +36,9 @@ export function createEarlyPosterMarkup() {
   };
   const registrationX = responsiveRegistrationOffset(manifest.width / 2 - registration.x);
   const registrationY = responsiveRegistrationOffset(manifest.height / 2 - registration.y);
+  const spanVariables = Object.entries(ribbonSpanStyle).map(([key, value]) => `${key}:${value}`).join(";");
+  const slices = manifest.schemaVersion === 2 ? ["center", "left", "right"] : ["full"];
+  const ribbonImages = slices.map((slice) => `<img class="pastel-intro-cover__ribbon pastel-intro-cover__slice--${slice}" src="${poster}" width="${manifest.width}" height="${manifest.height}" alt="" />`).join("");
   const styles = `
 <style id="pastel-intro-early-style">
 html.early-intro-enabled,html.early-intro-enabled body{overflow:hidden}
@@ -51,8 +55,12 @@ html.early-intro-enabled #pastel-intro-early-poster{display:block}
 #pastel-intro-early-poster .pastel-intro-cover__panel--right{right:0;transform:rotateY(var(--pastel-intro-right-turn));transform-origin:right center;background-position:right center}
 #pastel-intro-early-poster .pastel-intro-cover__seam{position:absolute;z-index:2;inset-block:0;left:50%;width:1px;background:rgba(163,137,109,.22);transform:translateX(-.5px)}
 #pastel-intro-early-poster .pastel-intro-cover__ribbon{position:absolute;z-index:3;top:calc(50% + var(--pastel-intro-registration-y));left:calc(50% + var(--pastel-intro-registration-x));display:block;width:min(100vw,430px);height:auto;transform:translate(-50%,-50%);pointer-events:none}
+#pastel-intro-early-poster .pastel-intro-cover__ribbon-window{position:absolute;z-index:3;inset-block:0;left:50%;width:min(100vw,430px);transform:translateX(-50%);overflow:hidden;pointer-events:none}
+#pastel-intro-early-poster .pastel-intro-cover__slice--center{clip-path:inset(0 var(--ribbon-edge-slice))}
+#pastel-intro-early-poster .pastel-intro-cover__slice--left{clip-path:inset(0 calc(100% - var(--ribbon-edge-slice)) 0 0);transform:translate(-50%,-50%) scaleX(var(--ribbon-edge-scale));transform-origin:var(--ribbon-edge-slice) 50%}
+#pastel-intro-early-poster .pastel-intro-cover__slice--right{clip-path:inset(0 0 0 calc(100% - var(--ribbon-edge-slice)));transform:translate(-50%,-50%) scaleX(var(--ribbon-edge-scale));transform-origin:calc(100% - var(--ribbon-edge-slice)) 50%}
 </style>
 <script id="pastel-intro-early-boot">${bootContents}</script>`;
-  const posterNode = `<div id="pastel-intro-early-poster" data-ribbon-schema="${manifest.schemaVersion}" data-ribbon-frame="${manifest.frames[0]}" data-ribbon-poster-sha256="${posterSha256}" data-ribbon-manifest-sha256="${manifestSha256}" data-ribbon-manifest-base64="${manifestBase64}" data-ribbon-width="${manifest.width}" data-ribbon-height="${manifest.height}" style="--pastel-intro-registration-x:${registrationX};--pastel-intro-registration-y:${registrationY}" aria-hidden="true"><div class="pastel-intro-cover__envelope"><div class="pastel-intro-cover__panel pastel-intro-cover__panel--left"><span class="pastel-intro-cover__paper"></span></div><div class="pastel-intro-cover__panel pastel-intro-cover__panel--right"><span class="pastel-intro-cover__paper"></span></div><div class="pastel-intro-cover__seam"></div></div><img class="pastel-intro-cover__ribbon" src="${poster}" width="${manifest.width}" height="${manifest.height}" alt="" /></div>`;
+  const posterNode = `<div id="pastel-intro-early-poster" data-ribbon-schema="${manifest.schemaVersion}" data-ribbon-frame="${manifest.frames[0]}" data-ribbon-poster-sha256="${posterSha256}" data-ribbon-manifest-sha256="${manifestSha256}" data-ribbon-manifest-base64="${manifestBase64}" data-ribbon-width="${manifest.width}" data-ribbon-height="${manifest.height}" style="--pastel-intro-registration-x:${registrationX};--pastel-intro-registration-y:${registrationY}" aria-hidden="true"><div class="pastel-intro-cover__envelope"><div class="pastel-intro-cover__panel pastel-intro-cover__panel--left"><span class="pastel-intro-cover__paper"></span></div><div class="pastel-intro-cover__panel pastel-intro-cover__panel--right"><span class="pastel-intro-cover__paper"></span></div><div class="pastel-intro-cover__seam"></div></div><div class="pastel-intro-cover__ribbon-window" style="${spanVariables}">${ribbonImages}</div></div>`;
   return { styles, posterNode };
 }

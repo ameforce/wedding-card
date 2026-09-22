@@ -693,7 +693,8 @@ async function installIntroObserver(page) {
     const originalDrawImage = CanvasRenderingContext2D.prototype.drawImage;
     CanvasRenderingContext2D.prototype.drawImage = function (source, ...args) {
       const result = originalDrawImage.call(this, source, ...args);
-      if (this.canvas.matches(".pastel-intro-cover__ribbon")) {
+      // The full-size center draw completes the frame after its two edge slices.
+      if (args.length === 4 && this.canvas.matches(".pastel-intro-cover__ribbon")) {
         const index = bitmapIndexes.get(source);
         let alphaPixels = null;
         if (index !== undefined) {

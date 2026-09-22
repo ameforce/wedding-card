@@ -140,7 +140,7 @@ test("loading runtime cover CSS cannot recolor the still-visible initial paper",
     // independently, as Vite does before the controller claims the poster.
     await page.route("**/src/main.jsx*", (route) => route.abort());
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`, { waitUntil: "load" });
-    await page.locator("#pastel-intro-early-poster img").evaluate((img) => img.decode());
+    await page.locator("#pastel-intro-early-poster img").first().evaluate((img) => img.decode());
     const before = await page.screenshot();
     await page.addStyleTag({ content: css });
     const after = await page.screenshot();
