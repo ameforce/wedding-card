@@ -65,26 +65,35 @@ test("ribbon reaches only the envelope folds through the initial poster and canv
       if (width === 390) {
         const preservation = await page.evaluate(async () => {
           const { drawRibbonFrame } = await import("/src/intro/ribbon-span.mjs");
+          const { RIBBON_BAND_BOTTOMS, RIBBON_BAND_SOURCE_SHA256 } = await import("/src/intro/ribbon-band-regions.mjs");
           const manifest = await (await fetch("/assets/design/ribbon-sequence/manifest.json")).json();
+          if (manifest.framePack.sha256 !== RIBBON_BAND_SOURCE_SHA256 || RIBBON_BAND_BOTTOMS.length !== manifest.frames.length) return { sourceMismatch: true };
           const canvases = Array.from({ length: 2 }, () => Object.assign(document.createElement("canvas"), { width: manifest.width, height: manifest.height }));
           const [original, corrected] = canvases.map((canvas) => canvas.getContext("2d", { willReadFrequently: true }));
           let checked = 0;
           let foldSamples = 0;
+          let tailPixels = 0;
           for (const name of manifest.frames) {
             const image = await createImageBitmap(await (await fetch(`/assets/design/ribbon-sequence/${name}`)).blob());
             original.clearRect(0, 0, manifest.width, manifest.height);
             original.drawImage(image, 0, 0);
-            drawRibbonFrame(corrected, image, manifest);
+            drawRibbonFrame(corrected, image, manifest, checked);
             const a = original.getImageData(72, 0, 336, manifest.height).data;
             const b = corrected.getImageData(72, 0, 336, manifest.height).data;
             for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return { checked, mismatch: name };
             // The Blender paper is 11.9 units wide in a 14-unit camera. While
             // cloth crosses either physical fold, its visible coverage must
             // reach the corresponding web envelope edge, not stop inside it.
-            for (const [fold, edge] of [[36, 0], [443, 479]]) {
+            for (const [side, fold, edge, x] of [[0, 36, 0, 0], [1, 443, 479, 408]]) {
+              const bottom = RIBBON_BAND_BOTTOMS[checked][side];
+              if (checked >= manifest.releaseCompleteFrame && bottom !== 0) return { releaseMismatch: name };
+              const tailA = original.getImageData(x, bottom, 72, manifest.height - bottom).data;
+              const tailB = corrected.getImageData(x, bottom, 72, manifest.height - bottom).data;
+              for (let i = 0; i < tailA.length; i += 1) if (tailA[i] !== tailB[i]) return { checked, tailMismatch: { name, side, i } };
+              tailPixels += tailA.filter((value, i) => i % 4 === 3 && value > 0).length;
               const source = original.getImageData(fold - 1, 0, 3, manifest.height).data;
               const output = corrected.getImageData(edge, 0, 1, manifest.height).data;
-              for (let y = 0; y < manifest.height; y += 1) {
+              for (let y = 0; y < bottom; y += 1) {
                 if ([3, 7, 11].every((offset) => source[y * 12 + offset] >= 250)) {
                   if (output[y * 4 + 3] < 245) return { checked, foldMismatch: { name, fold, y } };
                   foldSamples += 1;
@@ -94,10 +103,11 @@ test("ribbon reaches only the envelope folds through the initial poster and canv
             image.close();
             checked += 1;
           }
-          return { checked, expected: manifest.frames.length, foldSamples };
+          return { checked, expected: manifest.frames.length, foldSamples, tailPixels };
         });
         assert.equal(preservation.checked, preservation.expected, `every frame preserves the authored center: ${JSON.stringify(preservation)}`);
         assert.ok(preservation.foldSamples > 1000, "physical fold coverage is exercised throughout the sequence");
+        assert.ok(preservation.tailPixels > 1000, "visible free tails retain their original pixels throughout the sequence");
         evidence.push({ preservation });
       }
     } finally {
