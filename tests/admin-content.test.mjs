@@ -88,14 +88,18 @@ test("gallery normalization preserves supported documents without filling or tru
 });
 
 test("invalid gallery counts and incomplete photo metadata are rejected without fallback inheritance", () => {
-  for (const photoCount of [0, 13]) {
+  const empty = createContentDocument(weddingContent);
+  empty.photos.pastel.gallery = [];
+  assert.equal(typeof validateEditableContentDocument(normalizeContentDocument(empty, weddingContent))["사진"], "string");
+
+  for (const photoCount of [13, 30]) {
     const document = createContentDocument(weddingContent);
     document.photos.pastel.gallery = Array.from({ length: photoCount }, (_, index) => ({
       src: `/assets/photos/gallery-${index}.webp`, alt: `사진 ${index + 1}`, position: "50% 50%",
     }));
     const normalized = normalizeContentDocument(document, weddingContent);
     assert.equal(normalized.photos.pastel.gallery.length, photoCount);
-    assert.equal(typeof validateEditableContentDocument(normalized)["사진"], "string");
+    assert.equal(validateEditableContentDocument(normalized)["사진"], undefined);
   }
 
   const missing = createContentDocument(weddingContent);
@@ -844,6 +848,7 @@ test("long administrator fields use the full edit row without collapsing short-f
 
 test("the admin UI uses apply, automatic publish review, dirty guard, fixed preview, and responsive shared shell", async () => {
   const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  const client = await readFile(new URL("../src/admin-content/content-client.js", import.meta.url), "utf8");
   const shellSource = await readFile(new URL("../src/admin-content/AdminShell.jsx", import.meta.url), "utf8");
   const previewSource = await readFile(new URL("../src/admin-content/public-content.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -871,8 +876,12 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.match(source, /\/api\/admin\/media|uploadPhoto/);
   assert.match(source, /type="file" multiple accept="image\/jpeg,image\/png,image\/webp"/);
   assert.match(source, /uploadGalleryPhotos/);
-  assert.match(source, /files\.slice\(0, Math\.max\(0, remaining\)\)/);
-  assert.match(source, /for \(const \[index, file\] of accepted\.entries\(\)\)/);
+  assert.match(source, /for \(const \[index, file\] of files\.entries\(\)\)/);
+  assert.match(source, /file\.size > remainingBytes/);
+  assert.match(source, /error\?\.status === 507 \|\| error\?\.code === "MEDIA_STORAGE_LIMIT"/);
+  assert.match(source, /failures\.join\(" · "\)/);
+  assert.match(source, /저장 공간이 부족해 나머지/);
+  assert.doesNotMatch(source, /MAX_GALLERY_PHOTOS|files\.slice\(0, Math\.max\(0, remaining\)\)/);
   assert.match(source, /isAdminAuthRequiredError\(error\)/);
   assert.match(source, /commitEdit\(next, "\.pastel-gallery-section"\)/);
   assert.match(source, /onProgress/);
@@ -880,6 +889,9 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.doesNotMatch(source, /replacementAlt|새 사진 대체 텍스트/);
   assert.doesNotMatch(source, /alt:\s*current\.alt/);
   assert.match(source, /alt: "",\s*\n\s*position:/);
+  assert.match(client, /MAX_IMAGE_FILE_BYTES = 90 \* 1024 \* 1024/);
+  assert.match(client, /file\.size > MAX_IMAGE_FILE_BYTES\)[\s\S]*?원본 이미지는 90MB 이하만 업로드할 수 있습니다/);
+  assert.doesNotMatch(client, /원본 이미지는 25MB/);
   assert.match(source, /배경 음악/);
   assert.match(source, /uploadAudio/);
   assert.match(source, /accept="audio\/mpeg,\.mp3"/);

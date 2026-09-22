@@ -16,12 +16,13 @@ const AUTH_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_LOCK_MS = 15 * 60 * 1000;
 const MAX_BODY_BYTES = 8_192;
 const MAX_CONTENT_BODY_BYTES = 131_072;
-const MAX_MEDIA_BODY_BYTES = 30 * 1024 * 1024;
+const MAX_MEDIA_BODY_BYTES = 97 * 1024 * 1024;
+const MAX_IMAGE_FILE_BYTES = 90 * 1024 * 1024;
 const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_AUDIO_BODY_BYTES = 26 * 1024 * 1024;
 const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 const REQUIRED_COPY_LINES = 4;
 const MIN_GALLERY_PHOTOS = 1;
-const MAX_GALLERY_PHOTOS = 12;
 const GUESTBOOK_RETENTION = "permanent";
 const PUBLIC_BOOTSTRAP_SCHEMA_VERSION = 1;
 const PUBLIC_BOOTSTRAP_MARKER = "<!-- WEDDING_PUBLIC_BOOTSTRAP -->";
@@ -721,8 +722,8 @@ function validateInvitationDocument(document, { publish = false, write = false }
   requirePlainObject(photos.pastel, "photos.pastel");
   const seenPhotoSources = new Set();
   validateInvitationPhoto(photos.pastel.hero, "photos.pastel.hero", seenPhotoSources);
-  if (!Array.isArray(photos.pastel.gallery) || photos.pastel.gallery.length < MIN_GALLERY_PHOTOS || photos.pastel.gallery.length > MAX_GALLERY_PHOTOS) {
-    throw { status: 400, code: "INVALID_CONTENT", message: `photos.pastel.gallery에는 사진 ${MIN_GALLERY_PHOTOS}-${MAX_GALLERY_PHOTOS}개가 필요합니다.` };
+  if (!Array.isArray(photos.pastel.gallery) || photos.pastel.gallery.length < MIN_GALLERY_PHOTOS) {
+    throw { status: 400, code: "INVALID_CONTENT", message: `photos.pastel.gallery에는 사진이 최소 ${MIN_GALLERY_PHOTOS}장 필요합니다.` };
   }
   for (const [index, photo] of photos.pastel.gallery.entries()) {
     validateInvitationPhoto(photo, `photos.pastel.gallery[${index}]`, seenPhotoSources);
@@ -1172,11 +1173,11 @@ async function uploadInvitationMedia(request, env) {
   const slot = String(form.get("slot") || "").trim().toLowerCase();
   const alt = String(form.get("alt") || "").trim();
   const position = String(form.get("position") || "50% 50%").trim();
-  const validSlot = /^(?:pastel-hero|pastel-gallery-(?:new|[0-9]|1[01]))$/.test(slot);
+  const validSlot = /^(?:pastel-hero|pastel-gallery-(?:new|\d+))$/.test(slot);
   if (!validSlot || alt.length > 300 || !validCropPosition(position)) {
     return apiError(400, "INVALID_MEDIA_METADATA", "이미지 슬롯, 설명 또는 초점 위치를 확인해 주세요.");
   }
-  if (!validUpload(original, ["image/jpeg", "image/png", "image/webp"], 25 * 1024 * 1024)
+  if (!validUpload(original, ["image/jpeg", "image/png", "image/webp"], MAX_IMAGE_FILE_BYTES)
     || !validUpload(small, ["image/webp"], 2 * 1024 * 1024)
     || !validUpload(large, ["image/webp"], 4 * 1024 * 1024)
     || original.size + small.size + large.size > MAX_MEDIA_BODY_BYTES) {
@@ -1193,15 +1194,10 @@ async function uploadInvitationMedia(request, env) {
   const totalBytes = original.size + small.size + large.size;
   await reserveMediaStorage(db, { mediaId, slot, totalBytes });
   try {
-    const [originalBytes, smallBytes, largeBytes] = await Promise.all([
-      original.arrayBuffer(),
-      small.arrayBuffer(),
-      large.arrayBuffer(),
-    ]);
     const writeResults = await Promise.allSettled([
-      bucket.put(keys[0], originalBytes, { httpMetadata: { contentType: original.type } }),
-      bucket.put(keys[1], smallBytes, { httpMetadata: { contentType: "image/webp" } }),
-      bucket.put(keys[2], largeBytes, { httpMetadata: { contentType: "image/webp" } }),
+      bucket.put(keys[0], original, { httpMetadata: { contentType: original.type } }),
+      bucket.put(keys[1], small, { httpMetadata: { contentType: "image/webp" } }),
+      bucket.put(keys[2], large, { httpMetadata: { contentType: "image/webp" } }),
     ]);
     const failedWrite = writeResults.find((result) => result.status === "rejected");
     if (failedWrite) throw failedWrite.reason;
@@ -1259,7 +1255,7 @@ async function uploadInvitationAudio(request, env) {
   await requireAdminEmail(request, env);
   const db = requireContentDatabase(env);
   const length = Number(request.headers.get("content-length") || 0);
-  if (length > MAX_MEDIA_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "MP3 파일은 25MB 이하만 업로드할 수 있습니다.");
+  if (length > MAX_AUDIO_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "MP3는 25MB 이하만 업로드할 수 있습니다.");
   const bucket = requireMediaBucket(env);
   const form = await request.formData();
   const file = form.get("file");
@@ -1273,7 +1269,7 @@ async function uploadInvitationAudio(request, env) {
   const key = `invitation/${mediaId}/background-music/track.mp3`;
   await reserveMediaStorage(db, { mediaId, slot: "background-music", totalBytes: file.size });
   try {
-    await bucket.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: "audio/mpeg" } });
+    await bucket.put(key, file, { httpMetadata: { contentType: "audio/mpeg" } });
     await commitMediaStorage(db, mediaId);
   } catch (error) {
     await Promise.allSettled([
