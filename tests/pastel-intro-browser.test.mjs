@@ -91,7 +91,8 @@ function instrumentIntro({ frameNames, framePack, terminalIndex, diagnostic = fa
   CanvasRenderingContext2D.prototype.drawImage = function (source, ...args) {
     const nativeDrawStartedAt = timing ? performance.now() : 0;
     const result = originalDraw.call(this, source, ...args);
-    if (this.canvas.matches(".pastel-intro-cover__ribbon")) {
+    // The full-size center draw completes the frame after its two edge slices.
+    if (args.length === 4 && this.canvas.matches(".pastel-intro-cover__ribbon")) {
       const index = bitmapIndexes.get(source);
       const at = performance.now();
       let alphaPixels = null;
@@ -395,8 +396,9 @@ test("real invitation ribbon preserves every frame and restores access across lo
         }
         if (scenario === "fetch-timeout") {
           await page.waitForTimeout(1000);
-          const poster = await page.locator(".pastel-intro-cover__poster").evaluate((image) => ({ loaded: image.complete && image.naturalWidth > 0, opacity: getComputedStyle(image).opacity, width: image.getBoundingClientRect().width }));
-          assert.ok(poster.loaded && poster.opacity === "1" && poster.width > 100, "The exact tied poster must remain visible while preparation exhausts its budget.");
+          const posters = await page.locator(".pastel-intro-cover__poster").evaluateAll((images) => images.map((image) => ({ loaded: image.complete && image.naturalWidth > 0, opacity: getComputedStyle(image).opacity, width: image.getBoundingClientRect().width })));
+          assert.equal(posters.length, manifest.schemaVersion === 2 ? 3 : 1);
+          assert.ok(posters.every((poster) => poster.loaded && poster.opacity === "1" && poster.width > 100), "Every slice of the exact tied poster must remain visible while preparation exhausts its budget.");
         }
         const state = await finalState(page);
         assertAccessible(state);
@@ -840,7 +842,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     try {
       await page.goto(syntheticUrl, { waitUntil: "commit" });
       await page.waitForTimeout(400);
-      const initial = await page.locator("#pastel-intro-early-poster img").evaluate((image) => ({ ready: image.complete && image.naturalWidth > 0, rootEmpty: document.querySelector("#root").childElementCount === 0 }));
+      const initial = await page.locator("#pastel-intro-early-poster img").first().evaluate((image) => ({ ready: image.complete && image.naturalWidth > 0, rootEmpty: document.querySelector("#root").childElementCount === 0 }));
       assert.deepEqual(initial, { ready: true, rootEmpty: true });
       await page.waitForFunction(() => window.__ribbonQA.handoff !== null);
       const handoff = await page.evaluate(() => window.__ribbonQA.handoff);

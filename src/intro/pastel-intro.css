@@ -113,6 +113,17 @@
   opacity: var(--pastel-intro-seam-opacity);
 }
 
+.pastel-intro-cover .pastel-intro-cover__ribbon-window {
+  position: absolute;
+  z-index: 3;
+  inset-block: 0;
+  left: 50%;
+  width: min(100vw, 430px);
+  transform: translateX(-50%);
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .pastel-intro-cover .pastel-intro-cover__ribbon-track {
   position: absolute;
   z-index: 3;
@@ -139,3 +150,15 @@
 
 .pastel-intro-cover .pastel-intro-cover__poster { opacity: 1; }
 .pastel-intro-cover .pastel-intro-cover__poster.is-hidden { opacity: 0; }
+
+.pastel-intro-cover .pastel-intro-cover__slice--center { clip-path: inset(0 var(--ribbon-edge-slice)); }
+.pastel-intro-cover .pastel-intro-cover__slice--left {
+  clip-path: inset(0 calc(100% - var(--ribbon-edge-slice)) 0 0);
+  transform: scaleX(var(--ribbon-edge-scale));
+  transform-origin: var(--ribbon-edge-slice) 50%;
+}
+.pastel-intro-cover .pastel-intro-cover__slice--right {
+  clip-path: inset(0 0 0 calc(100% - var(--ribbon-edge-slice)));
+  transform: scaleX(var(--ribbon-edge-scale));
+  transform-origin: calc(100% - var(--ribbon-edge-slice)) 50%;
+}
