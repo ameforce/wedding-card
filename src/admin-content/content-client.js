@@ -168,10 +168,11 @@ async function requestJson(fetchImpl, path, options = {}) {
   return payload;
 }
 
-function postFormDataXhr(XHR, path, form, onProgress) {
+function postBodyXhr(XHR, path, body, contentType, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XHR();
     xhr.open("POST", path, true);
+    xhr.setRequestHeader("content-type", contentType);
     if (xhr.upload) {
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable && event.total > 0) {
@@ -190,17 +191,36 @@ function postFormDataXhr(XHR, path, form, onProgress) {
     xhr.onerror = () => reject(new Error("네트워크 오류로 업로드하지 못했습니다."));
     xhr.onabort = () => reject(new Error("업로드가 중단되었습니다."));
     onProgress?.({ phase: "upload", loaded: 0, total: 0 });
-    xhr.send(form);
+    xhr.send(body);
   });
 }
 
-async function postFormData({ path, form, fetchImpl, xhrImpl, onProgress }) {
-  if (typeof xhrImpl === "function") return postFormDataXhr(xhrImpl, path, form, onProgress);
+async function postBody({ path, body, contentType, fetchImpl, xhrImpl, onProgress }) {
+  if (typeof xhrImpl === "function") return postBodyXhr(xhrImpl, path, body, contentType, onProgress);
   onProgress?.({ phase: "upload", loaded: 0, total: 0 });
-  const response = await fetchImpl(path, { method: "POST", credentials: "same-origin", body: form });
+  const response = await fetchImpl(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": contentType },
+    body,
+  });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw createRequestError(response, payload);
   return payload;
+}
+
+function encodeMediaUpload({ slot, alt, position, file, small, large }) {
+  const header = new TextEncoder().encode(JSON.stringify({
+    slot,
+    alt,
+    position,
+    originalType: file.type,
+    sizes: { original: file.size, small: small.size, large: large.size },
+  }));
+  const prefix = new Uint8Array(2);
+  prefix[0] = header.byteLength >> 8;
+  prefix[1] = header.byteLength & 0xff;
+  return new Blob([prefix, header, small, large, file]);
 }
 
 async function imageBitmap(file) {
@@ -571,22 +591,14 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl, xhrIm
     async uploadPhoto({ slot, file, alt, position, onProgress }) {
       onProgress?.({ phase: "optimize" });
       const { small, large } = await optimizedFiles(file);
-      const form = new FormData();
-      form.set("slot", slot);
-      form.set("alt", alt);
-      form.set("position", position);
-      form.set("original", file);
-      form.set("small", small);
-      form.set("large", large);
-      const payload = await postFormData({ path: "/api/admin/media", form, fetchImpl: resolvedFetch, xhrImpl: resolvedXhr, onProgress });
+      const body = encodeMediaUpload({ slot, alt, position, file, small, large });
+      const payload = await postBody({ path: "/api/admin/media", body, contentType: "application/octet-stream", fetchImpl: resolvedFetch, xhrImpl: resolvedXhr, onProgress });
       return { photo: payload.photo, usage: payload.usage };
     },
     async uploadAudio({ file, onProgress }) {
       validAudioFile(file);
       onProgress?.({ phase: "prepare" });
-      const form = new FormData();
-      form.set("file", file);
-      const payload = await postFormData({ path: "/api/admin/media/audio", form, fetchImpl: resolvedFetch, xhrImpl: resolvedXhr, onProgress });
+      const payload = await postBody({ path: "/api/admin/media/audio", body: file, contentType: file.type || "audio/mpeg", fetchImpl: resolvedFetch, xhrImpl: resolvedXhr, onProgress });
       return { audio: payload.audio, usage: payload.usage };
     },
     subscribe() {
