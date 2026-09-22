@@ -1116,11 +1116,14 @@ function createRequestBodyReader(request, maxBytes, tooLargeError) {
   let consumed = 0;
   async function nextChunk() {
     if (!reader) return null;
-    const { done, value } = await reader.read();
-    if (done || !(value instanceof Uint8Array) || value.byteLength === 0) return null;
-    consumed += value.byteLength;
-    if (consumed > maxBytes) throw tooLargeError;
-    return value;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || !(value instanceof Uint8Array)) return null;
+      if (value.byteLength === 0) continue;
+      consumed += value.byteLength;
+      if (consumed > maxBytes) throw tooLargeError;
+      return value;
+    }
   }
   async function readExact(size) {
     const parts = [];
@@ -1256,8 +1259,8 @@ async function uploadInvitationMedia(request, env) {
   const length = Number(request.headers.get("content-length") || 0);
   if (length > MAX_MEDIA_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "이미지 업로드 크기를 줄여 주세요.");
   const bucket = requireMediaBucket(env);
-  const contentType = request.headers.get("content-type") || "";
-  if (!contentType.toLowerCase().startsWith("application/octet-stream")) {
+  const contentType = (request.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
+  if (contentType !== "application/octet-stream") {
     return apiError(415, "UNSUPPORTED_MEDIA_BODY", "업로드 형식이 올바르지 않습니다. 페이지를 새로고침해 주세요.");
   }
   const body = createRequestBodyReader(request, MAX_MEDIA_BODY_BYTES,
@@ -1369,8 +1372,8 @@ async function uploadInvitationAudio(request, env) {
   const length = Number(request.headers.get("content-length") || 0);
   if (length > MAX_AUDIO_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "MP3는 25MB 이하만 업로드할 수 있습니다.");
   const bucket = requireMediaBucket(env);
-  const contentType = request.headers.get("content-type") || "";
-  if (!contentType.toLowerCase().startsWith("audio/mpeg")) {
+  const contentType = (request.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
+  if (contentType !== "audio/mpeg") {
     return apiError(415, "UNSUPPORTED_MEDIA_BODY", "MP3(audio/mpeg) 파일만 업로드할 수 있습니다.");
   }
   const body = createRequestBodyReader(request, MAX_AUDIO_BODY_BYTES,

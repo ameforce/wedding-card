@@ -807,6 +807,84 @@ test("media uploads stream real XHR progress and preserve API error shape", asyn
   ]);
 });
 
+test("photo uploads send the framed octet-stream body", async () => {
+  const fileBytes = new Uint8Array([11, 12, 13, 14]);
+  const file = new File([fileBytes], "photo.jpg", { type: "image/jpeg" });
+  const variantBytes = new Uint8Array([9, 9, 9]);
+  const originalCreateImageBitmap = globalThis.createImageBitmap;
+  const originalDocument = globalThis.document;
+  globalThis.createImageBitmap = async () => ({ width: 4000, height: 3000, close() {} });
+  globalThis.document = {
+    createElement() {
+      return {
+        width: 0,
+        height: 0,
+        getContext() { return { drawImage() {} }; },
+        toBlob(callback) { callback(new Blob([variantBytes], { type: "image/webp" })); },
+      };
+    },
+  };
+  const sent = [];
+  class PhotoXhr {
+    constructor() { this.upload = {}; sent.push(this); }
+    open(method, path) { this.method = method; this.path = path; this.headers = {}; }
+    setRequestHeader(name, value) { this.headers[name] = value; }
+    send(body) {
+      this.body = body;
+      this.status = 201;
+      this.responseText = JSON.stringify({
+        photo: { src: "/api/media/invitation/x/pastel-hero/480.webp", srcSet: "", sizes: "", alt: "테스트 사진", position: "50% 50%" },
+        usage: { usedBytes: 1 },
+      });
+      this.onload();
+    }
+  }
+  try {
+    const cloud = createCloudflareContentAdapter({
+      staticContent: weddingContent,
+      fetchImpl: async () => { throw new Error("fetch must not be used when XHR is available"); },
+      xhrImpl: PhotoXhr,
+    });
+    const progress = [];
+    const uploaded = await cloud.uploadPhoto({
+      slot: "pastel-hero",
+      file,
+      alt: "테스트 사진",
+      position: "50% 50%",
+      onProgress: (event) => progress.push(event),
+    });
+    assert.equal(uploaded.photo.alt, "테스트 사진");
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].method, "POST");
+    assert.equal(sent[0].path, "/api/admin/media");
+    assert.equal(sent[0].headers["content-type"], "application/octet-stream");
+
+    const body = new Uint8Array(await sent[0].body.arrayBuffer());
+    const headerLength = (body[0] << 8) | body[1];
+    const header = JSON.parse(new TextDecoder().decode(body.subarray(2, 2 + headerLength)));
+    assert.equal(header.slot, "pastel-hero");
+    assert.equal(header.alt, "테스트 사진");
+    assert.equal(header.position, "50% 50%");
+    assert.equal(header.originalType, "image/jpeg");
+    assert.equal(header.sizes.original, file.size);
+    assert.equal(header.sizes.small, variantBytes.length);
+    assert.equal(header.sizes.large, variantBytes.length);
+
+    const expectedTail = new Uint8Array(variantBytes.length * 2 + fileBytes.length);
+    expectedTail.set(variantBytes, 0);
+    expectedTail.set(variantBytes, variantBytes.length);
+    expectedTail.set(fileBytes, variantBytes.length * 2);
+    assert.deepEqual(body.subarray(2 + headerLength), expectedTail);
+    assert.deepEqual(progress, [
+      { phase: "optimize" },
+      { phase: "upload", loaded: 0, total: 0 },
+    ]);
+  } finally {
+    globalThis.createImageBitmap = originalCreateImageBitmap;
+    globalThis.document = originalDocument;
+  }
+});
+
 test("production admin requests preserve Access authentication failures for re-login UX", async () => {
   const adapter = createCloudflareContentAdapter({
     staticContent: weddingContent,

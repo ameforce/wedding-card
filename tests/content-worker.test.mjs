@@ -725,7 +725,7 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
   const objects = new Map();
   const bucket = {
     async put(key, value, options) {
-      objects.set(key, { value: new Uint8Array(value instanceof Blob ? await value.arrayBuffer() : value), httpMetadata: options.httpMetadata, etag: `etag-${objects.size}` });
+      objects.set(key, { value: await storedBytes(value), httpMetadata: options.httpMetadata, etag: `etag-${objects.size}` });
     },
     async get(key) {
       const object = objects.get(key);
@@ -763,7 +763,9 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
     assert.equal(objects.size, 3);
     assert.equal(payload.usage.usedBytes, 8);
     assert.equal(payload.usage.limitBytes, 2 * 1024 * 1024 * 1024);
-    assert.equal([...objects.keys()].some((key) => key.includes("/original.jpg")), true);
+    const originalKey = [...objects.keys()].find((key) => key.includes("/original.jpg"));
+    assert.equal(typeof originalKey, "string");
+    assert.deepEqual(objects.get(originalKey).value, new Uint8Array([1, 2, 3]));
 
     const mediaResponse = await worker.fetch(request(payload.photo.src, { method: "GET" }), { WEDDING_MEDIA: bucket });
     assert.equal(mediaResponse.status, 200);
