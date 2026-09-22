@@ -167,6 +167,40 @@ async function requestJson(fetchImpl, path, options = {}) {
   return payload;
 }
 
+function postFormDataXhr(XHR, path, form, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XHR();
+    xhr.open("POST", path, true);
+    if (xhr.upload) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          onProgress?.({ phase: "upload", loaded: event.loaded, total: event.total });
+        }
+      };
+    }
+    xhr.onload = () => {
+      const payload = (() => { try { return JSON.parse(xhr.responseText || "{}"); } catch { return {}; } })();
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload);
+        return;
+      }
+      reject(createRequestError({ status: xhr.status }, payload));
+    };
+    xhr.onerror = () => reject(new Error("네트워크 오류로 업로드하지 못했습니다."));
+    xhr.onabort = () => reject(new Error("업로드가 중단되었습니다."));
+    xhr.send(form);
+  });
+}
+
+async function postFormData({ path, form, fetchImpl, xhrImpl, onProgress }) {
+  if (typeof xhrImpl === "function") return postFormDataXhr(xhrImpl, path, form, onProgress);
+  onProgress?.({ phase: "upload", loaded: 0, total: 0 });
+  const response = await fetchImpl(path, { method: "POST", credentials: "same-origin", body: form });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw createRequestError(response, payload);
+  return payload;
+}
+
 async function imageBitmap(file) {
   if (typeof createImageBitmap !== "function") throw new Error("이 브라우저에서는 이미지 최적화를 사용할 수 없습니다.");
   return createImageBitmap(file, { imageOrientation: "from-image" });
@@ -426,26 +460,31 @@ export function createLocalReviewContentAdapter({
       persist();
       return { revisionId, publishedAt };
     },
-    async uploadPhoto({ file, alt, position }) {
+    async uploadPhoto({ file, alt, position, onProgress }) {
+      onProgress?.({ phase: "optimize" });
       const { large } = await optimizedFiles(file);
+      const photo = {
+        src: await blobAsDataUrl(large),
+        alt,
+        position,
+        sizes: "(min-width: 768px) 430px, 100vw",
+      };
+      onProgress?.({ phase: "upload", loaded: 1, total: 1 });
       return {
-        photo: {
-          src: await blobAsDataUrl(large),
-          alt,
-          position,
-          sizes: "(min-width: 768px) 430px, 100vw",
-        },
+        photo,
         usage: emptyMediaUsage(true),
       };
     },
-    async uploadAudio({ file }) {
+    async uploadAudio({ file, onProgress }) {
       validAudioFile(file);
+      onProgress?.({ phase: "prepare" });
       const id = randomToken();
       const reference = `${LOCAL_AUDIO_REFERENCE_PREFIX}${id}`;
       await audioStore.put(id, file);
       const source = URL.createObjectURL(file);
       sourceReferences.set(source, reference);
       referenceSources.set(reference, source);
+      onProgress?.({ phase: "upload", loaded: 1, total: 1 });
       return {
         audio: {
           src: source,
@@ -468,14 +507,16 @@ export function createLocalReviewContentAdapter({
   };
 }
 
-export function createCloudflareContentAdapter({ staticContent, fetchImpl = globalThis.fetch } = {}) {
-  if (typeof fetchImpl !== "function") throw new Error("콘텐츠 API 클라이언트를 초기화할 수 없습니다.");
+export function createCloudflareContentAdapter({ staticContent, fetchImpl, xhrImpl } = {}) {
+  const resolvedFetch = fetchImpl ?? globalThis.fetch;
+  if (typeof resolvedFetch !== "function") throw new Error("콘텐츠 API 클라이언트를 초기화할 수 없습니다.");
+  const resolvedXhr = xhrImpl !== undefined ? xhrImpl : (fetchImpl === undefined ? globalThis.XMLHttpRequest : null);
 
   return {
     mode: "cloudflare",
     async getPublicContent({ signal } = {}) {
       try {
-        const payload = await requestJson(fetchImpl, "/api/content", { signal });
+        const payload = await requestJson(resolvedFetch, "/api/content", { signal });
         return {
           source: "cloudflare-published",
           revisionId: payload.revisionId ?? null,
@@ -487,7 +528,7 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
       }
     },
     async getAdminState() {
-      const payload = await requestJson(fetchImpl, "/api/admin/content");
+      const payload = await requestJson(resolvedFetch, "/api/admin/content");
       return {
         draftRevisionId: payload.draftRevisionId ?? null,
         publishedRevisionId: payload.publishedRevisionId ?? null,
@@ -497,12 +538,12 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
       };
     },
     async getMediaUsage() {
-      return requestJson(fetchImpl, "/api/admin/media/usage");
+      return requestJson(resolvedFetch, "/api/admin/media/usage");
     },
     async saveDraft(document) {
       assertValidMusic(document, { allowLocalPreview: false });
       const serialized = serializeContentDocument(document, { allowLocalPreview: false });
-      const payload = await requestJson(fetchImpl, "/api/admin/content", {
+      const payload = await requestJson(resolvedFetch, "/api/admin/content", {
         method: "PUT",
         body: JSON.stringify({ document: serialized }),
       });
@@ -514,18 +555,19 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
       };
     },
     async publish(revisionId) {
-      return requestJson(fetchImpl, "/api/admin/content/publish", {
+      return requestJson(resolvedFetch, "/api/admin/content/publish", {
         method: "POST",
         body: JSON.stringify({ revisionId }),
       });
     },
     async republish(revisionId, expectedPublishedRevisionId) {
-      return requestJson(fetchImpl, "/api/admin/content/rollback", {
+      return requestJson(resolvedFetch, "/api/admin/content/rollback", {
         method: "POST",
         body: JSON.stringify({ revisionId, expectedPublishedRevisionId }),
       });
     },
-    async uploadPhoto({ slot, file, alt, position }) {
+    async uploadPhoto({ slot, file, alt, position, onProgress }) {
+      onProgress?.({ phase: "optimize" });
       const { small, large } = await optimizedFiles(file);
       const form = new FormData();
       form.set("slot", slot);
@@ -534,26 +576,15 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl = glob
       form.set("original", file);
       form.set("small", small);
       form.set("large", large);
-      const response = await fetchImpl("/api/admin/media", {
-        method: "POST",
-        credentials: "same-origin",
-        body: form,
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw createRequestError(response, payload);
+      const payload = await postFormData({ path: "/api/admin/media", form, fetchImpl: resolvedFetch, xhrImpl: resolvedXhr, onProgress });
       return { photo: payload.photo, usage: payload.usage };
     },
-    async uploadAudio({ file }) {
+    async uploadAudio({ file, onProgress }) {
       validAudioFile(file);
+      onProgress?.({ phase: "prepare" });
       const form = new FormData();
       form.set("file", file);
-      const response = await fetchImpl("/api/admin/media/audio", {
-        method: "POST",
-        credentials: "same-origin",
-        body: form,
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw createRequestError(response, payload);
+      const payload = await postFormData({ path: "/api/admin/media/audio", form, fetchImpl: resolvedFetch, xhrImpl: resolvedXhr, onProgress });
       return { audio: payload.audio, usage: payload.usage };
     },
     subscribe() {
