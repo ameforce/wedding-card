@@ -633,8 +633,8 @@ function requireAccountNumber(value, path) {
 
 function requireMusicSource(value) {
   requireText(value, "content.music.src", 2048);
-  if (!/^(?:\/assets\/audio\/[a-z0-9._-]+\.mp3|\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3)$/i.test(value)) {
-    throw { status: 400, code: "INVALID_CONTENT", message: "content.music.src 값은 업로드된 MP3 경로여야 합니다." };
+  if (!/^(?:\/assets\/audio\/[a-z0-9._-]+\.mp3|\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.(?:mp3|m4a|wav))$/i.test(value)) {
+    throw { status: 400, code: "INVALID_CONTENT", message: "content.music.src 값은 업로드된 음악 경로여야 합니다." };
   }
 }
 
@@ -759,6 +759,9 @@ function validateInvitationDocument(document, { publish = false, write = false }
   if (document.schemaVersion === 2) {
     const music = requirePlainObject(content.music, "content.music");
     requireMusicSource(music.src);
+    if (music.autoPlayOnOpen !== undefined && typeof music.autoPlayOnOpen !== "boolean") {
+      throw { status: 400, code: "INVALID_CONTENT", message: "content.music.autoPlayOnOpen 값은 참 또는 거짓이어야 합니다." };
+    }
     requireText(music.title, "content.music.title", 80);
     requireText(music.artist, "content.music.artist", 80);
     requireHttpsUrl(music.sourceUrl, "content.music.sourceUrl");
@@ -1293,6 +1296,7 @@ async function commitMediaStorage(db, mediaId) {
 
 const BUNDLED_MUSIC_FALLBACK = {
   src: "/assets/audio/touching-moments-one-pulse.mp3",
+  autoPlayOnOpen: false,
   title: "Touching Moments One - Pulse",
   artist: "Kevin MacLeod",
   sourceUrl: "https://incompetech.com/music/royalty-free/index.html?Search=Search&isrc=USUAN1100039",
@@ -1400,7 +1404,7 @@ function stripMediaFromDraftDocument(document, mediaId) {
 
 function mediaObjectKeys(set) {
   if (set.slot === "background-music") {
-    return [`invitation/${set.id}/background-music/track.mp3`];
+    return ["mp3", "m4a", "wav"].map((extension) => `invitation/${set.id}/background-music/track.${extension}`);
   }
   const base = `invitation/${set.id}/${set.slot}`;
   return [
@@ -1617,32 +1621,115 @@ function hasMp3Signature(bytes) {
   return hasMpegFrameHeader(bytes.subarray(frameOffset, frameOffset + 4));
 }
 
+function mediaBoxes(bytes, start, end) {
+  const boxes = [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = start;
+  while (offset + 8 <= end && boxes.length < 512) {
+    let size = view.getUint32(offset);
+    let headerSize = 8;
+    if (size === 1) {
+      if (offset + 16 > end) return null;
+      size = view.getUint32(offset + 8) * 2 ** 32 + view.getUint32(offset + 12);
+      headerSize = 16;
+    } else if (size === 0) size = end - offset;
+    if (!Number.isSafeInteger(size) || size < headerSize || size > end - offset) return null;
+    boxes.push({ type: String.fromCharCode(...bytes.subarray(offset + 4, offset + 8)), start: offset + headerSize, end: offset + size });
+    offset += size;
+  }
+  return offset === end ? boxes : null;
+}
+
+function hasAacDescriptor(bytes, start, end) {
+  for (let index = start + 4; index + 2 < end; index += 1) {
+    if (bytes[index] !== 0x04) continue;
+    let length = 0;
+    let cursor = index + 1;
+    for (let part = 0; part < 4 && cursor < end; part += 1) {
+      const value = bytes[cursor++];
+      length = length * 128 + (value & 0x7f);
+      if ((value & 0x80) !== 0) continue;
+      if (length > 0 && cursor + length <= end && bytes[cursor] === 0x40) return true;
+      break;
+    }
+  }
+  return false;
+}
+
+function hasAacM4aSignature(bytes) {
+  const boxes = mediaBoxes(bytes, 0, bytes.length);
+  const ftyp = boxes?.[0];
+  if (ftyp?.type !== "ftyp" || ftyp.end - ftyp.start < 8 || !["M4A ", "isom", "iso2", "mp41", "mp42"].includes(String.fromCharCode(...bytes.subarray(ftyp.start, ftyp.start + 4)))) return false;
+  if (!boxes.some((box) => box.type === "mdat" && box.end > box.start)) return false;
+  const moov = boxes.find((box) => box.type === "moov");
+  const tracks = moov && mediaBoxes(bytes, moov.start, moov.end)?.filter((box) => box.type === "trak");
+  if (!tracks || tracks.length !== 1) return false;
+  const mdia = mediaBoxes(bytes, tracks[0].start, tracks[0].end)?.find((box) => box.type === "mdia");
+  const media = mdia && mediaBoxes(bytes, mdia.start, mdia.end);
+  const handler = media?.find((box) => box.type === "hdlr");
+  if (!handler || handler.end - handler.start < 12 || String.fromCharCode(...bytes.subarray(handler.start + 8, handler.start + 12)) !== "soun") return false;
+  const minf = media.find((box) => box.type === "minf");
+  const stbl = minf && mediaBoxes(bytes, minf.start, minf.end)?.find((box) => box.type === "stbl");
+  const stsd = stbl && mediaBoxes(bytes, stbl.start, stbl.end)?.find((box) => box.type === "stsd");
+  if (!stsd || stsd.end - stsd.start < 8 || new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(stsd.start + 4) !== 1) return false;
+  const entries = mediaBoxes(bytes, stsd.start + 8, stsd.end);
+  const entry = entries?.[0];
+  if (entries?.length !== 1 || entry.type !== "mp4a" || entry.end - entry.start < 28) return false;
+  const esds = mediaBoxes(bytes, entry.start + 28, entry.end)?.find((box) => box.type === "esds");
+  return Boolean(esds && hasAacDescriptor(bytes, esds.start, esds.end));
+}
+
+function hasPcmWavSignature(bytes) {
+  if (bytes.length < 44 || String.fromCharCode(...bytes.subarray(0, 4)) !== "RIFF" || String.fromCharCode(...bytes.subarray(8, 12)) !== "WAVE") return false;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(4, true) + 8 !== bytes.length) return false;
+  let formatValid = false;
+  let dataValid = false;
+  for (let offset = 12; offset + 8 <= bytes.length;) {
+    const length = view.getUint32(offset + 4, true);
+    const start = offset + 8;
+    if (length > bytes.length - start) return false;
+    const type = String.fromCharCode(...bytes.subarray(offset, offset + 4));
+    if (type === "fmt " && length >= 16) {
+      const channels = view.getUint16(start + 2, true);
+      const rate = view.getUint32(start + 4, true);
+      const bits = view.getUint16(start + 14, true);
+      const frameSize = channels * bits / 8;
+      formatValid = view.getUint16(start, true) === 1 && [1, 2].includes(channels) && rate >= 8000 && rate <= 192000
+        && [8, 16, 24, 32].includes(bits) && view.getUint16(start + 12, true) === frameSize && view.getUint32(start + 8, true) === rate * frameSize;
+    }
+    if (type === "data" && length > 0) dataValid = true;
+    offset = start + length + (length & 1);
+    if (offset === bytes.length) return formatValid && dataValid;
+  }
+  return false;
+}
+
 async function uploadInvitationAudio(request, env) {
   requireSameOrigin(request);
   await requireAdminEmail(request, env);
   const db = requireContentDatabase(env);
   const length = Number(request.headers.get("content-length") || 0);
-  if (length > MAX_AUDIO_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "MP3는 25MB 이하만 업로드할 수 있습니다.");
+  if (length > MAX_AUDIO_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "음악 파일은 25MB 이하만 업로드할 수 있습니다.");
   const bucket = requireMediaBucket(env);
   const contentType = (request.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
-  if (contentType !== "audio/mpeg") {
-    return apiError(415, "UNSUPPORTED_MEDIA_BODY", "MP3(audio/mpeg) 파일만 업로드할 수 있습니다.");
-  }
+  const format = {
+    "audio/mpeg": { extension: "mp3", valid: hasMp3Signature },
+    "audio/mp4": { extension: "m4a", valid: hasAacM4aSignature },
+    "audio/wav": { extension: "wav", valid: hasPcmWavSignature },
+  }[contentType];
+  if (!format) return apiError(415, "UNSUPPORTED_MEDIA_BODY", "MP3, M4A(AAC) 또는 WAV(PCM) 파일만 업로드할 수 있습니다.");
   const body = createRequestBodyReader(request, MAX_AUDIO_BODY_BYTES,
-    { status: 413, code: "MEDIA_TOO_LARGE", message: "MP3는 25MB 이하만 업로드할 수 있습니다." });
+    { status: 413, code: "MEDIA_TOO_LARGE", message: "음악 파일은 25MB 이하만 업로드할 수 있습니다." });
   const file = await body.readRest(MAX_AUDIO_FILE_BYTES,
-    { status: 400, code: "INVALID_AUDIO", message: "MP3(audio/mpeg) 파일만 25MB 이하로 업로드할 수 있습니다." });
-  if (file.byteLength === 0) {
-    return apiError(400, "INVALID_AUDIO", "MP3(audio/mpeg) 파일만 25MB 이하로 업로드할 수 있습니다.");
-  }
-  if (!hasMp3Signature(file)) {
-    return apiError(400, "INVALID_AUDIO_SIGNATURE", "파일 내용이 올바른 MP3 형식이 아닙니다.");
-  }
+    { status: 400, code: "INVALID_AUDIO", message: "음악 파일은 25MB 이하만 업로드할 수 있습니다." });
+  if (file.byteLength === 0) return apiError(400, "INVALID_AUDIO", "음악 파일은 25MB 이하만 업로드할 수 있습니다.");
+  if (!format.valid(file)) return apiError(400, "INVALID_AUDIO_SIGNATURE", "파일 내용이 선택한 음악 형식과 맞지 않습니다.");
   const mediaId = crypto.randomUUID();
-  const key = `invitation/${mediaId}/background-music/track.mp3`;
+  const key = `invitation/${mediaId}/background-music/track.${format.extension}`;
   await reserveMediaStorage(db, { mediaId, slot: "background-music", totalBytes: file.byteLength });
   try {
-    await bucket.put(key, file, { httpMetadata: { contentType: "audio/mpeg" } });
+    await bucket.put(key, file, { httpMetadata: { contentType } });
     await commitMediaStorage(db, mediaId);
   } catch (error) {
     await Promise.allSettled([
@@ -1656,7 +1743,7 @@ async function uploadInvitationAudio(request, env) {
     usage: await getMediaUsageFromDatabase(db),
     audio: {
       src: `${MEDIA_API_PREFIX}/${key}`,
-      mimeType: "audio/mpeg",
+      mimeType: contentType,
       sizeBytes: file.byteLength,
     },
   }, 201);
@@ -1697,17 +1784,17 @@ async function getInvitationMedia(request, env, url) {
   const bucket = requireMediaBucket(env);
   const key = decodeURIComponent(url.pathname.slice(`${MEDIA_API_PREFIX}/`.length));
   const isImage = /^invitation\/[a-f0-9-]{36}\/[a-z0-9-]{1,40}\/(?:480|960)\.webp$/.test(key);
-  const isAudio = /^invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3$/.test(key);
-  if (!isImage && !isAudio) {
+  const audioExtension = /^invitation\/[a-f0-9-]{36}\/background-music\/track\.(mp3|m4a|wav)$/.exec(key)?.[1];
+  if (!isImage && !audioExtension) {
     return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
   }
-  if (isAudio) {
+  if (audioExtension) {
     if (typeof bucket.head !== "function") {
       throw { status: 503, code: "MEDIA_UNAVAILABLE", message: "미디어 스트리밍 저장소가 아직 연결되지 않았습니다." };
     }
     const metadata = await bucket.head(key);
     if (!metadata) return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
-    const headers = immutableMediaHeaders(metadata, "audio/mpeg");
+    const headers = immutableMediaHeaders(metadata, { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav" }[audioExtension]);
     headers.set("accept-ranges", "bytes");
     const size = Number(metadata.size) || 0;
     const range = parseByteRange(request.headers.get("range"), size);

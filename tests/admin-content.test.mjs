@@ -401,6 +401,7 @@ test("schema v2 music metadata round-trips and rejects invalid credit URLs", asy
   const document = createContentDocument(weddingContent);
   document.content.music = {
     src: "/api/media/invitation/123e4567-e89b-12d3-a456-426614174000/background-music/track.mp3",
+    autoPlayOnOpen: false,
     title: "새 배경 음악",
     artist: "새 아티스트",
     sourceUrl: "https://music.example.test/track",
@@ -416,6 +417,63 @@ test("schema v2 music metadata round-trips and rejects invalid credit URLs", asy
   });
   document.content.music.sourceUrl = "http://music.example.test/track";
   await assert.rejects(adapter.saveDraft(document), /HTTPS/);
+});
+
+test("published music accepts only same-origin M4A and WAV media paths", () => {
+  const document = createContentDocument(weddingContent);
+  for (const extension of ["m4a", "wav"]) {
+    document.content.music.src = `/api/media/invitation/123e4567-e89b-12d3-a456-426614174000/background-music/track.${extension}`;
+    assert.equal(normalizeContentDocument(document, weddingContent).content.music.src, document.content.music.src);
+    assert.equal(serializeContentDocument(document).content.music.src, document.content.music.src);
+  }
+  document.content.music.src = "https://music.example.test/track.m4a";
+  assert.equal(typeof validateMusicContent(document.content.music).src, "string");
+});
+
+test("opening music preference defaults off for older documents and round-trips through published content", () => {
+  const previous = createContentDocument(weddingContent);
+  delete previous.content.music.autoPlayOnOpen;
+  assert.equal(normalizeContentDocument(previous, weddingContent).content.music.autoPlayOnOpen, false);
+
+  for (const autoPlayOnOpen of [false, true]) {
+    const document = createContentDocument(weddingContent);
+    document.content.music.autoPlayOnOpen = autoPlayOnOpen;
+    const normalized = normalizeContentDocument(document, weddingContent);
+    assert.equal(normalized.content.music.autoPlayOnOpen, autoPlayOnOpen);
+    assert.equal(serializeContentDocument(normalized).content.music.autoPlayOnOpen, autoPlayOnOpen);
+    assert.equal(applyContentDocument(normalized, weddingContent).music.autoPlayOnOpen, autoPlayOnOpen);
+    assert.deepEqual(validateMusicContent(normalized.content.music), {});
+  }
+
+  const invalid = createContentDocument(weddingContent);
+  invalid.content.music.autoPlayOnOpen = "true";
+  assert.equal(typeof validateMusicContent(invalid.content.music).autoPlayOnOpen, "string");
+  assert.throws(() => serializeContentDocument(invalid), (error) => error.code === "INVALID_CONTENT");
+});
+
+test("publish review distinguishes the opening music preference", () => {
+  const published = createContentDocument(weddingContent);
+  const current = cloneContentDocument(published);
+  current.content.music.autoPlayOnOpen = true;
+
+  const diff = buildPublishDiff(current, published);
+  assert.deepEqual(diff.sections, ["배경 음악"]);
+  const music = diff.changes.find((change) => change.label === "배경 음악");
+  assert.match(music.current, /개봉 재생 시도 켜짐/);
+  assert.match(music.published, /개봉 재생 시도 꺼짐/);
+});
+
+test("music opening preference reaches visitors only after publishing", async () => {
+  const storage = memoryStorage();
+  const adapter = createLocalReviewContentAdapter({ staticContent: weddingContent, storage, eventTarget: new EventTarget() });
+  const initial = await adapter.getAdminState();
+  initial.published.content.music.autoPlayOnOpen = true;
+  const saved = await adapter.saveDraft(initial.published);
+  assert.equal((await adapter.getPublicContent()).content.music.autoPlayOnOpen, false);
+  await adapter.publish(saved.draftRevisionId);
+  assert.equal((await adapter.getPublicContent()).content.music.autoPlayOnOpen, true);
+  const reloaded = createLocalReviewContentAdapter({ staticContent: weddingContent, storage, eventTarget: new EventTarget() });
+  assert.equal((await reloaded.getPublicContent()).content.music.autoPlayOnOpen, true);
 });
 
 test("development review keeps draft and published content as separate explicit states", async () => {
@@ -688,7 +746,7 @@ test("local review adapter exposes an empty media manager surface", async () => 
   await assert.rejects(() => local.deleteMedia("any"), /로컬 검토/);
 });
 
-test("production and local adapters accept only bounded MP3 uploads", async () => {
+test("production and local adapters accept bounded MP3 uploads", async () => {
   const calls = [];
   const file = new File([new Uint8Array([0x49, 0x44, 0x33, 0x04])], "track.mp3", { type: "audio/mpeg" });
   const cloud = createCloudflareContentAdapter({
@@ -732,6 +790,31 @@ test("production and local adapters accept only bounded MP3 uploads", async () =
   assert.match(reloadedState.published.content.music.src, /^blob:/);
   assert.equal((await reloaded.getPublicContent()).content.music.title, "로컬 검토 음악");
   await assert.rejects(local.uploadAudio({ file: new File(["not audio"], "track.txt", { type: "text/plain" }) }), /MP3/);
+});
+
+test("M4A and WAV uploads canonicalize browser MIME aliases and reject conflicting file types", async () => {
+  const requests = [];
+  const cloud = createCloudflareContentAdapter({
+    staticContent: weddingContent,
+    fetchImpl: async (path, options) => {
+      requests.push({ path, mimeType: options.headers["content-type"] });
+      return Response.json({ audio: { src: "/api/media/invitation/123e4567-e89b-12d3-a456-426614174000/background-music/track.m4a" }, usage: {} }, { status: 201 });
+    },
+  });
+  const files = [
+    [new File(["m4a"], "track.m4a", { type: "audio/x-m4a" }), "audio/mp4"],
+    [new File(["m4a"], "track.m4a"), "audio/mp4"],
+    [new File(["wav"], "track.wav", { type: "audio/x-wav" }), "audio/wav"],
+  ];
+  const local = createLocalReviewContentAdapter({ staticContent: weddingContent, storage: memoryStorage(), eventTarget: new EventTarget(), audioStore: { async put() {}, async get() { return null; } } });
+  for (const [file, mimeType] of files) {
+    await cloud.uploadAudio({ file });
+    assert.equal(requests.at(-1).path, "/api/admin/media/audio");
+    assert.equal(requests.at(-1).mimeType, mimeType);
+    assert.equal((await local.uploadAudio({ file })).audio.mimeType, mimeType);
+  }
+  await assert.rejects(cloud.uploadAudio({ file: new File(["m4a"], "track.m4a", { type: "video/mp4" }) }), /MP3|M4A|WAV/);
+  await assert.rejects(cloud.uploadAudio({ file: new File(["wav"], "track.wav", { type: "audio/mpeg" }) }), /MP3|M4A|WAV/);
 });
 
 test("media uploads stream real XHR progress and preserve API error shape", async () => {
@@ -1023,9 +1106,12 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.doesNotMatch(client, /원본 이미지는 25MB/);
   assert.match(source, /배경 음악/);
   assert.match(source, /uploadAudio/);
-  assert.match(source, /accept="audio\/mpeg,\.mp3"/);
+  assert.match(source, /accept="audio\/mpeg,audio\/mp4,audio\/wav,\.mp3,\.m4a,\.wav"/);
   assert.match(source, /controls preload="metadata"/);
-  assert.doesNotMatch(source, /autoPlay/);
+  assert.match(source, /checked=\{music\.autoPlayOnOpen === true\}/);
+  assert.match(source, /\["content", "music", "autoPlayOnOpen"\]/);
+  assert.match(source, /브라우저에서 자동 재생을 차단할 수 있습니다/);
+  assert.doesNotMatch(source, /<audio\b[^>]*\sautoPlay(?:\s|=|>)/);
   assert.match(source, /미디어 저장 공간\(사진·음악\)/);
   assert.match(source, /사진과 음악 합계가 2GB에 도달하면 추가 업로드가 자동으로 차단/);
   assert.match(source, /content-admin-music-card[\s\S]*?<\/CollapsibleSection>\s*<div className="content-admin-storage"/);
@@ -1052,7 +1138,10 @@ test("public music controls and credits resolve from runtime content and reset o
   assert.match(source, /audio\?\.pause\(\)[\s\S]*audio\.currentTime = 0[\s\S]*audio\?\.load\(\)/);
   assert.match(source, /href=\{music\.sourceUrl\}/);
   assert.match(source, /href=\{music\.licenseUrl\}/);
-  assert.match(source, /preload="none"[\s\S]*loop/);
+  assert.match(source, /preload=\{allowOpeningPlayback && music\.autoPlayOnOpen === true \? "auto" : "none"\}[\s\S]*loop/);
+  assert.match(source, /PASTEL_INTRO_PAPER_OPENING_EVENT/);
+  assert.match(source, /allowOpeningPlayback=\{variant === "pastel" && runtime\.source !== "admin-live-preview"\}/);
+  assert.match(source, /if \(!allowOpeningPlayback \|\| music\.autoPlayOnOpen !== true\) return undefined/);
   assert.doesNotMatch(source, /src="\/assets\/audio\/touching-moments-one-pulse\.mp3"/);
 });
 

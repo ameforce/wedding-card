@@ -29,7 +29,7 @@ import { pastelGalleryLayout } from "./gallery-layout.js";
 import { fallbackPhotoSource, findPhotoIndexBySource, movePhotoSource } from "./gallery-state.js";
 import { createGuestbookEntry, deleteGuestbookEntry, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
 import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
-import { PastelIntroCover } from "./intro/PastelIntroCover.jsx";
+import { PASTEL_INTRO_PAPER_OPENING_EVENT, PastelIntroCover } from "./intro/PastelIntroCover.jsx";
 
 const VARIANTS = {
   quiet: {
@@ -646,13 +646,13 @@ function BottomActions({ notify, pastel = false }) {
   );
 }
 
-function MusicControl({ notify }) {
+function MusicControl({ notify, allowOpeningPlayback = false }) {
   const { content } = useWeddingRuntime();
   const music = content.music;
-  return <MusicTrackControl key={music.src} music={music} notify={notify} />;
+  return <MusicTrackControl key={music.src} music={music} notify={notify} allowOpeningPlayback={allowOpeningPlayback} />;
 }
 
-function MusicTrackControl({ music, notify }) {
+function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
   const audioRef = useRef(null);
   const [playing, setPlaying] = useState(false);
 
@@ -664,6 +664,16 @@ function MusicTrackControl({ music, notify }) {
       audio?.load();
     };
   }, [music.src]);
+
+  useEffect(() => {
+    if (!allowOpeningPlayback || music.autoPlayOnOpen !== true) return undefined;
+    const attemptOpeningPlayback = () => {
+      const playback = audioRef.current?.play();
+      playback?.catch(() => setPlaying(false));
+    };
+    document.addEventListener(PASTEL_INTRO_PAPER_OPENING_EVENT, attemptOpeningPlayback);
+    return () => document.removeEventListener(PASTEL_INTRO_PAPER_OPENING_EVENT, attemptOpeningPlayback);
+  }, [allowOpeningPlayback, music.autoPlayOnOpen]);
 
   const togglePlayback = async () => {
     const audio = audioRef.current;
@@ -690,10 +700,11 @@ function MusicTrackControl({ music, notify }) {
       <audio
         ref={audioRef}
         src={music.src}
-        preload="none"
+        preload={allowOpeningPlayback && music.autoPlayOnOpen === true ? "auto" : "none"}
         loop
         onPause={() => setPlaying(false)}
         onPlay={() => setPlaying(true)}
+        onError={() => setPlaying(false)}
       />
     </div>
   );
@@ -890,7 +901,7 @@ function GuestbookSection({ notify }) {
   );
 }
 
-function QuietInvitation({ notify, showMusic = true }) {
+function QuietInvitation({ notify }) {
   const { content, photos: runtimePhotos } = useWeddingRuntime();
   const photos = [runtimePhotos.quiet.hero, ...runtimePhotos.quiet.gallery];
   const gallery = usePhotoGallery();
@@ -904,7 +915,6 @@ function QuietInvitation({ notify, showMusic = true }) {
         <EventDate className="date-line" />
         <p className="venue-line">{content.venue.name} · {content.venue.floor}</p>
       </header>
-      {showMusic && <div className="music-control-slot"><MusicControl notify={notify} /></div>}
       <ScrollReveal><Greeting /></ScrollReveal>
       <ScrollReveal><FamilyIntroduction /></ScrollReveal>
       <ScrollReveal><CalendarPattern /></ScrollReveal>
@@ -960,7 +970,7 @@ function PastelGallery({ gallery, photos }) {
   );
 }
 
-function PastelInvitation({ notify, showMusic = true }) {
+function PastelInvitation({ notify }) {
   const { content, photos: runtimePhotos } = useWeddingRuntime();
   const photos = [runtimePhotos.pastel.hero, ...runtimePhotos.pastel.gallery];
   const gallery = usePhotoGallery();
@@ -989,7 +999,6 @@ function PastelInvitation({ notify, showMusic = true }) {
           <p className="pastel-venue-line">{content.venue.name} · {content.venue.floor}</p>
         </div>
       </header>
-      {showMusic && <div className="music-control-slot"><MusicControl notify={notify} /></div>}
       <ScrollReveal><Greeting /></ScrollReveal>
       <ScrollReveal><FamilyIntroduction /></ScrollReveal>
       <ScrollReveal><PastelSchedule /></ScrollReveal>
@@ -1056,8 +1065,9 @@ function WeddingApp() {
       data-content-revision={runtime.revisionId || ""}
     >
       <div className="invitation-stage">
-        {variant === "pastel" ? <PastelInvitation notify={notify} showMusic={!captureMode} /> : <QuietInvitation notify={notify} showMusic={!captureMode} />}
+        {variant === "pastel" ? <PastelInvitation notify={notify} /> : <QuietInvitation notify={notify} />}
       </div>
+      {!captureMode && <div className="music-control-slot"><MusicControl notify={notify} allowOpeningPlayback={variant === "pastel" && runtime.source !== "admin-live-preview"} /></div>}
       {variant === "pastel" && !captureMode && !introFinished && window.__pastelIntroEarly?.status !== "consumed" && (
         <PastelIntroCover onFinish={() => setIntroFinished(true)} />
       )}

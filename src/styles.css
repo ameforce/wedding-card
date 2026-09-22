@@ -380,7 +380,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .guestbook-delete-dialog-actions button.is-destructive { color: #fff; background: #9b4d58; border-color: #9b4d58; }
 .guestbook-delete-dialog-actions button:disabled { cursor: wait; opacity: .58; }
 
-.music-control-slot { display: flex; min-height: 56px; padding: 6px 18px; align-items: center; justify-content: flex-end; }
+.music-control-slot { position: fixed; z-index: 50; top: max(12px, env(safe-area-inset-top)); right: max(calc(env(safe-area-inset-right) + 12px), calc((100vw - min(100vw, 430px)) / 2 + 12px)); width: 44px; height: 44px; }
 .music-control { position: static; }
 .music-control button { display: grid; width: 44px; height: 44px; padding: 0; place-items: center; color: #415a79; background: rgba(255, 255, 255, .86); border: 1px solid rgba(71, 98, 127, .16); border-radius: 50%; cursor: pointer; box-shadow: 0 8px 22px rgba(42, 59, 77, .12); backdrop-filter: blur(10px); }
 .music-control button svg { width: 17px; height: 17px; }
@@ -467,6 +467,9 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .content-admin-storage span, .content-admin-storage small { color: #6b7c8d; font-size: 13px; line-height: 1.5; }
 .content-admin-storage progress { width: 100%; height: 9px; overflow: hidden; accent-color: #6486a5; border: 0; border-radius: 999px; }
 .content-admin-music-card { display: grid; gap: 12px; padding: 12px; background: #f6f4f0; border-radius: 10px; }
+.content-admin-music-autoplay { display: flex; min-height: 44px; align-items: center; gap: 10px; color: #253a56; font-size: 14px; cursor: pointer; }
+.content-admin-music-autoplay input { width: 18px; height: 18px; flex: none; accent-color: #617e99; }
+.content-admin-music-hint { margin-top: -8px; color: #71808d; font-size: 13px; line-height: 1.5; }
 .content-admin-music-upload { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid rgba(65,83,104,.12); }
 .content-admin-music-upload > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; }
 .content-admin-music-upload > div span, .content-admin-music-upload > small { color: #71808d; font-size: 13px; line-height: 1.5; }

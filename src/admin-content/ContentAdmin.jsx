@@ -780,7 +780,7 @@ export function ContentAdmin() {
       update(["content", "music", "src"], result.audio.src);
       setMediaUsage(result.usage || await adapter.getMediaUsage());
       await refreshMediaList();
-      setStatus({ tone: "success", message: "새 MP3와 곡 정보를 초안에 넣었습니다. 미리듣기 후 임시 적용해 주세요." });
+      setStatus({ tone: "success", message: "새 음악과 곡 정보를 초안에 넣었습니다. 미리듣기 후 임시 적용해 주세요." });
       return true;
     } catch (error) {
       showAdminError(error, "배경 음악을 처리하지 못했습니다.");
@@ -948,6 +948,11 @@ export function ContentAdmin() {
                 <Field label="라이선스명" value={music.licenseLabel} error={musicErrors.licenseLabel} onChange={(value) => update(["content", "music", "licenseLabel"], value)} />
                 <Field label="라이선스 URL" wide type="url" value={music.licenseUrl} error={musicErrors.licenseUrl} onChange={(value) => update(["content", "music", "licenseUrl"], value)} hint="HTTPS 주소만 사용할 수 있습니다." />
               </div>
+              <label className="content-admin-music-autoplay">
+                <input type="checkbox" checked={music.autoPlayOnOpen === true} aria-describedby="content-admin-music-autoplay-hint" onChange={(event) => update(["content", "music", "autoPlayOnOpen"], event.target.checked)} />
+                <span>봉투가 열릴 때 음악 재생 시도</span>
+              </label>
+              <small id="content-admin-music-autoplay-hint" className="content-admin-music-hint">브라우저에서 자동 재생을 차단할 수 있습니다. 차단되면 방문자가 재생 버튼을 눌러 들을 수 있습니다.</small>
               <div className="content-admin-music-upload">
                 <div>
                   <strong>현재 곡 미리듣기</strong>
@@ -955,15 +960,15 @@ export function ContentAdmin() {
                 </div>
                 <audio key={music.src} className="content-admin-music-preview" controls preload="metadata" src={music.src} aria-label={`${music.title} 미리듣기`} />
                 <label className={`content-admin-file ${musicReady ? "" : "is-disabled"}`}>
-                  <span>{uploadingSlot === "background-music" ? "MP3 업로드 중…" : "MP3 교체"}</span>
-                  <input type="file" accept="audio/mpeg,.mp3" disabled={Boolean(uploadingSlot) || !musicReady} onChange={async (event) => {
+                  <span>{uploadingSlot === "background-music" ? "음악 업로드 중…" : "음악 교체"}</span>
+                  <input type="file" accept="audio/mpeg,audio/mp4,audio/wav,.mp3,.m4a,.wav" disabled={Boolean(uploadingSlot) || !musicReady} onChange={async (event) => {
                     const file = event.target.files?.[0];
                     if (file) await uploadAudio(file);
                     event.target.value = "";
                   }} />
                 </label>
                 {uploadProgress?.slot === "background-music" && <UploadProgress progress={uploadProgress} />}
-                <small>MP3(audio/mpeg), 최대 25MB · 업로드만으로는 공개되지 않습니다.</small>
+                <small>MP3, M4A(AAC), WAV(PCM), 최대 25MB · 업로드만으로는 공개되지 않습니다.</small>
               </div>
             </div>
           </CollapsibleSection>

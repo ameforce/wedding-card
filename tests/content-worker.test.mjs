@@ -398,6 +398,7 @@ test("public HTML atomically injects one published revision and preloads its her
     srcSet: `/api/media/invitation/${mediaId}/pastel-hero/480.webp 480w, /api/media/invitation/${mediaId}/pastel-hero/960.webp 960w`,
     alt: "새로 공개한 대표 사진",
   };
+  document.content.music.autoPlayOnOpen = true;
   db.state.published_revision_id = "published-42";
   db.revisions.set("published-42", {
     id: "published-42",
@@ -429,6 +430,7 @@ test("public HTML atomically injects one published revision and preloads its her
   assert.equal(bootstrap.source, "cloudflare-published");
   assert.equal(bootstrap.revisionId, "published-42");
   assert.equal(bootstrap.document.photos.pastel.hero.alt, "새로 공개한 대표 사진");
+  assert.equal(bootstrap.document.content.music.autoPlayOnOpen, true);
   assert.match(html, new RegExp(`href="/api/media/invitation/${mediaId}/pastel-hero/480\\.webp"`));
   assert.match(html, /rel="preload"/);
   assert.equal(db.queries.filter((sql) => sql.includes("JOIN invitation_revisions AS revision")).length, 1);
@@ -653,6 +655,38 @@ test("content validation dual-reads schema v1, requires v2 writes, and validates
     assert.match(error.message, /HTTPS/);
     return true;
   });
+});
+
+test("v2 music source validation accepts uploaded M4A and WAV but rejects external music URLs", () => {
+  const document = confirmedDocument();
+  for (const extension of ["m4a", "wav"]) {
+    document.content.music.src = `/api/media/invitation/123e4567-e89b-12d3-a456-426614174000/background-music/track.${extension}`;
+    assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
+  }
+  document.content.music.src = "https://music.example.test/track.wav";
+  assert.throws(() => __test.validateInvitationDocument(document, { write: true }), (error) => error.code === "INVALID_CONTENT");
+});
+
+test("published opening music preference accepts booleans, preserves old v2 reads, and rejects malformed values", () => {
+  const previous = confirmedDocument();
+  delete previous.content.music.autoPlayOnOpen;
+  assert.doesNotThrow(() => __test.validateInvitationDocument(previous, { write: true }));
+
+  for (const enabled of [false, true]) {
+    const document = confirmedDocument();
+    document.content.music.autoPlayOnOpen = enabled;
+    assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
+  }
+
+  for (const invalid of ["true", 1, null]) {
+    const document = confirmedDocument();
+    document.content.music.autoPlayOnOpen = invalid;
+    assert.throws(() => __test.validateInvitationDocument(document, { write: true }), (error) => {
+      assert.equal(error.code, "INVALID_CONTENT");
+      assert.match(error.message, /content\.music\.autoPlayOnOpen/);
+      return true;
+    });
+  }
 });
 
 test("schema v2 writes validate editable account fields while v1 reads stay compatible", () => {
@@ -1057,6 +1091,69 @@ test("Access-authenticated MP3 uploads use immutable private keys and stream GET
   }
 });
 
+test("authenticated AAC M4A and PCM WAV uploads preserve formats through HEAD and range playback", async () => {
+  const box = (type, payload) => {
+    const result = Buffer.alloc(8 + payload.length);
+    result.writeUInt32BE(result.length, 0);
+    result.write(type, 4, "ascii");
+    Buffer.from(payload).copy(result, 8);
+    return result;
+  };
+  const ftyp = box("ftyp", Buffer.from("M4A \u0000\u0000\u0000\u0000isom", "ascii"));
+  const esds = box("esds", Buffer.from([0, 0, 0, 0, 0x03, 0x05, 0, 0, 0, 0, 0x04, 0x01, 0x40]));
+  const stsd = box("stsd", Buffer.concat([Buffer.from([0, 0, 0, 0, 0, 0, 0, 1]), box("mp4a", Buffer.concat([Buffer.alloc(28), esds]))]));
+  const handler = box("hdlr", Buffer.concat([Buffer.alloc(8), Buffer.from("soun"), Buffer.alloc(4)]));
+  const m4a = Buffer.concat([ftyp, box("moov", box("trak", box("mdia", Buffer.concat([handler, box("minf", box("stbl", stsd))])))), box("mdat", Buffer.from([1, 2, 3, 4]))]);
+  const wav = Buffer.alloc(46);
+  wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28);
+  wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(2, 40);
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const bucket = memoryMediaBucket();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    for (const [mimeType, extension, bytes] of [["audio/mp4", "m4a", m4a], ["audio/wav", "wav", wav]]) {
+      const response = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+        method: "POST", headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, "content-type": mimeType }, body: bytes,
+      }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+      assert.equal(response.status, 201);
+      const payload = await response.json();
+      assert.match(payload.audio.src, new RegExp(`/background-music/track\\.${extension}$`));
+      assert.equal(payload.audio.mimeType, mimeType);
+      const head = await worker.fetch(request(payload.audio.src, { method: "HEAD" }), { WEDDING_MEDIA: bucket });
+      assert.equal(head.status, 200);
+      assert.equal(head.headers.get("content-type"), mimeType);
+      assert.equal(head.headers.get("accept-ranges"), "bytes");
+      const range = await worker.fetch(request(payload.audio.src, { method: "GET", headers: { range: "bytes=0-3" } }), { WEDDING_MEDIA: bucket });
+      assert.equal(range.status, 206);
+      assert.deepEqual(new Uint8Array(await range.arrayBuffer()), new Uint8Array(bytes.subarray(0, 4)));
+    }
+    const nonAac = Buffer.from(m4a);
+    nonAac[nonAac.indexOf(Buffer.from([0x04, 0x01, 0x40])) + 2] = 0x69;
+    const invalidFiles = [
+      ["audio/mp4", Buffer.concat([ftyp, box("mdat", Buffer.from([1, 2, 3, 4]))])],
+      ["audio/mp4", Buffer.from(m4a.toString("binary").replace("soun", "vide"), "binary")],
+      ["audio/mp4", nonAac],
+      ["audio/mp4", wav],
+      ["audio/wav", m4a],
+      ["audio/wav", Buffer.from([82, 73, 70, 70, 4, 0, 0, 0, 87, 65, 86, 69])],
+      ["audio/wav", Buffer.from(wav.map((byte, index) => index === 20 ? 6 : byte))],
+    ];
+    for (const [mimeType, bytes] of invalidFiles) {
+      const response = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+        method: "POST", headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, "content-type": mimeType }, body: bytes,
+      }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+      assert.equal(response.status, 400);
+      assert.equal((await response.json()).code, "INVALID_AUDIO_SIGNATURE");
+    }
+    assert.equal(db.mediaSets.size, 2);
+    assert.equal(bucket.objects.size, 2);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("MP3 administration fails closed on origin, Access, D1, and R2 boundaries", async () => {
   const fixture = await accessFixture();
   const form = () => new File([new Uint8Array([0x49, 0x44, 0x33, 1])], "track.mp3", { type: "audio/mpeg" });
@@ -1414,7 +1511,7 @@ test("media deletion frees quota and removes R2 objects when unreferenced", asyn
   });
 });
 
-test("media deletion strips draft references and resets music to the bundled fallback", async () => {
+test("media deletion removes uploaded M4A objects while resetting draft music to the bundled fallback", async () => {
   const db = invitationDatabase();
   const photoId = "00000000-0000-0000-0000-000000000001";
   const keepId = "00000000-0000-0000-0000-000000000002";
@@ -1426,7 +1523,7 @@ test("media deletion strips draft references and resets music to the bundled fal
     srcSet: `/api/media/invitation/${keepId}/pastel-gallery-1/480.webp 480w, /api/media/invitation/${keepId}/pastel-gallery-1/960.webp 960w`,
   }];
   draftDoc.content.music = {
-    src: `/api/media/invitation/${audioId}/background-music/track.mp3`,
+    src: `/api/media/invitation/${audioId}/background-music/track.m4a`,
     title: "업로드한 곡",
     artist: "관리자",
     sourceUrl: "https://example.test/source",
@@ -1438,6 +1535,8 @@ test("media deletion strips draft references and resets music to the bundled fal
   db.mediaSets.set(photoId, mediaRow(photoId, "pastel-gallery-0", 1000));
   db.mediaSets.set(audioId, mediaRow(audioId, "background-music", 2000));
   const bucket = memoryBucket();
+  const audioObjectKey = `invitation/${audioId}/background-music/track.m4a`;
+  bucket.objects.set(audioObjectKey, new Uint8Array([4]));
   await withAccessEnv(async (fixture, headers) => {
     const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket };
     const photoResponse = await worker.fetch(request("/api/admin/media/delete", {
@@ -1463,6 +1562,7 @@ test("media deletion strips draft references and resets music to the bundled fal
     assert.equal(payload.removedFromDraft, 1);
     draft = JSON.parse(db.revisions.get("draft-1").content_json);
     assert.deepEqual(draft.content.music, weddingContent.music);
+    assert.equal(bucket.objects.has(audioObjectKey), false);
   });
 });
 

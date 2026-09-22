@@ -70,6 +70,7 @@ export const weddingContent = {
   },
   music: {
     src: "/assets/audio/touching-moments-one-pulse.mp3",
+    autoPlayOnOpen: false,
     title: "Touching Moments One - Pulse",
     artist: "Kevin MacLeod",
     sourceUrl: "https://incompetech.com/music/royalty-free/index.html?Search=Search&isrc=USUAN1100039",
