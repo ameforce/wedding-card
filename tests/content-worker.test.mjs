@@ -747,6 +747,71 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
   }
 });
 
+test("media uploads accept an empty description but document writes still require it", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const objects = new Map();
+  const bucket = {
+    async put(key, value, options) {
+      objects.set(key, { value: new Uint8Array(value), httpMetadata: options.httpMetadata });
+    },
+    async get() { return null; },
+    async delete(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const form = new FormData();
+    form.set("slot", "pastel-gallery-new");
+    form.set("alt", "");
+    form.set("position", "50% 50%");
+    form.set("original", new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }));
+    form.set("small", new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }));
+    form.set("large", new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }));
+    const uploadResponse = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: form,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(uploadResponse.status, 201);
+    const payload = await uploadResponse.json();
+    assert.equal(payload.photo.alt, "");
+    assert.equal(objects.size, 3);
+
+    const overLimit = new FormData();
+    overLimit.set("slot", "pastel-gallery-new");
+    overLimit.set("alt", "x".repeat(301));
+    overLimit.set("position", "50% 50%");
+    overLimit.set("original", new File([new Uint8Array([1])], "photo.jpg", { type: "image/jpeg" }));
+    overLimit.set("small", new File([new Uint8Array([2])], "480.webp", { type: "image/webp" }));
+    overLimit.set("large", new File([new Uint8Array([3])], "960.webp", { type: "image/webp" }));
+    const overLimitResponse = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: overLimit,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(overLimitResponse.status, 400);
+    assert.equal((await overLimitResponse.json()).code, "INVALID_MEDIA_METADATA");
+
+    const document = confirmedDocument();
+    document.photos.pastel.gallery[0] = payload.photo;
+    assert.throws(() => __test.validateInvitationDocument(document, { write: true }), (error) => error.code === "INVALID_CONTENT");
+    const draftResponse = await worker.fetch(request("/api/admin/content", {
+      method: "PUT",
+      headers: { "cf-access-jwt-assertion": fixture.assertion },
+      body: JSON.stringify({ document }),
+    }), { ...fixture.env, GUESTBOOK_DB: db });
+    assert.equal(draftResponse.status, 400);
+    const draftPayload = await draftResponse.json();
+    assert.equal(draftPayload.code, "INVALID_CONTENT");
+    assert.equal(typeof draftPayload.fieldErrors["photos.pastel.gallery[0].alt"], "string");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("failed image variants settle before R2 cleanup and release the quota reservation only after cleanup", async () => {
   const fixture = await accessFixture();
   const db = invitationDatabase();

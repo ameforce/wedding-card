@@ -1173,7 +1173,7 @@ async function uploadInvitationMedia(request, env) {
   const alt = String(form.get("alt") || "").trim();
   const position = String(form.get("position") || "50% 50%").trim();
   const validSlot = /^(?:pastel-hero|pastel-gallery-(?:new|[0-9]|1[01]))$/.test(slot);
-  if (!validSlot || alt.length < 1 || alt.length > 300 || !validCropPosition(position)) {
+  if (!validSlot || alt.length > 300 || !validCropPosition(position)) {
     return apiError(400, "INVALID_MEDIA_METADATA", "이미지 슬롯, 설명 또는 초점 위치를 확인해 주세요.");
   }
   if (!validUpload(original, ["image/jpeg", "image/png", "image/webp"], 25 * 1024 * 1024)
