@@ -716,6 +716,7 @@ test("media uploads stream real XHR progress and preserve API error shape", asyn
   const uploaded = await cloud.uploadAudio({ file, onProgress: (event) => progress.push(event) });
   assert.deepEqual(progress, [
     { phase: "prepare" },
+    { phase: "upload", loaded: 0, total: 0 },
     { phase: "upload", loaded: 4, total: 8 },
     { phase: "upload", loaded: 8, total: 8 },
   ]);
@@ -747,6 +748,27 @@ test("media uploads stream real XHR progress and preserve API error shape", asyn
   await fallback.uploadAudio({ file, onProgress: (event) => fallbackProgress.push(event) });
   assert.deepEqual(fallbackCalls, [["/api/admin/media/audio", "POST"]]);
   assert.deepEqual(fallbackProgress, [
+    { phase: "prepare" },
+    { phase: "upload", loaded: 0, total: 0 },
+  ]);
+
+  const silentProgress = [];
+  class SilentXhr {
+    constructor() { this.upload = {}; }
+    open(method, path) { this.method = method; this.path = path; }
+    send() {
+      this.status = 201;
+      this.responseText = JSON.stringify({ audio: { src: "/api/media/x/track.mp3" }, usage: {} });
+      this.onload();
+    }
+  }
+  const silent = createCloudflareContentAdapter({
+    staticContent: weddingContent,
+    fetchImpl: async () => { throw new Error("fetch must not be used when XHR is available"); },
+    xhrImpl: SilentXhr,
+  });
+  await silent.uploadAudio({ file, onProgress: (event) => silentProgress.push(event) });
+  assert.deepEqual(silentProgress, [
     { phase: "prepare" },
     { phase: "upload", loaded: 0, total: 0 },
   ]);
@@ -991,6 +1013,8 @@ test("authentication, refresh, dialog focus, and rollback guards protect privile
   assert.match(source, /revision\.publishedAt && !\[draftRevisionId, publishedRevisionId\]\.includes/);
   assert.match(client, /!target\.publishedAt/);
   assert.match(source, /adapter\.republish\(republishTarget\.id, publishedRevisionId\)/);
+  assert.match(source, /const republish = async \(\) => \{[\s\S]*?if \(uploadingSlot\) \{[\s\S]*?업로드가 끝난 뒤 다시 공개해 주세요/);
+  assert.match(source, /disabled=\{Boolean\(uploadingSlot\)\} onClick=\{\(\) => setRepublishTarget/);
   assert.match(source, /STALE_PUBLISHED_REVISION/);
   assert.match(client, /expectedPublishedRevisionId/);
   assert.doesNotMatch(source, /versionHistory\.length - index/);

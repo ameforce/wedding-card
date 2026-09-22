@@ -567,6 +567,11 @@ export function ContentAdmin() {
 
   const republish = async () => {
     if (!republishTarget) return;
+    if (uploadingSlot) {
+      setRepublishTarget(null);
+      setStatus({ tone: "error", message: "업로드가 진행 중입니다. 업로드가 끝난 뒤 다시 공개해 주세요." });
+      return;
+    }
     setBusy(true);
     try {
       const result = await adapter.republish(republishTarget.id, publishedRevisionId);
@@ -938,7 +943,7 @@ export function ContentAdmin() {
                     <time dateTime={revision.publishedAt || revision.createdAt || ""}>{formatAdminTimestamp(revision.publishedAt || revision.createdAt)}</time>
                     <small>{revision.id === draftRevisionId ? "현재 작업" : revision.id === publishedRevisionId ? "현재 공개 버전" : revision.publishedAt ? "이 버전으로 공개됨" : revision.status === "archived" ? "이전 임시 적용" : "임시 적용"}</small>
                     {revision.publishedAt && ![draftRevisionId, publishedRevisionId].includes(revision.id) && (
-                      <button type="button" onClick={() => setRepublishTarget({ id: revision.id, label })}><ArrowClockwise aria-hidden="true" />이 버전을 다시 공개</button>
+                      <button type="button" disabled={Boolean(uploadingSlot)} onClick={() => setRepublishTarget({ id: revision.id, label })}><ArrowClockwise aria-hidden="true" />이 버전을 다시 공개</button>
                     )}
                   </div>
                 </li>
