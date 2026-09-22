@@ -682,6 +682,102 @@ test("production and local adapters accept only bounded MP3 uploads", async () =
   await assert.rejects(local.uploadAudio({ file: new File(["not audio"], "track.txt", { type: "text/plain" }) }), /MP3/);
 });
 
+test("media uploads stream real XHR progress and preserve API error shape", async () => {
+  const file = new File([new Uint8Array([0x49, 0x44, 0x33, 0x04])], "track.mp3", { type: "audio/mpeg" });
+  const sent = [];
+  class FakeXhr {
+    static status = 201;
+    static payload = {};
+    constructor() {
+      this.upload = {};
+      sent.push(this);
+    }
+    open(method, path) { this.method = method; this.path = path; }
+    send(body) {
+      this.body = body;
+      this.upload.onprogress({ lengthComputable: false, loaded: 0, total: 0 });
+      this.upload.onprogress({ lengthComputable: true, loaded: 4, total: 8 });
+      this.upload.onprogress({ lengthComputable: true, loaded: 8, total: 8 });
+      this.status = FakeXhr.status;
+      this.responseText = JSON.stringify(FakeXhr.payload);
+      this.onload();
+    }
+  }
+  FakeXhr.payload = {
+    audio: { src: "/api/media/invitation/123e4567-e89b-12d3-a456-426614174000/background-music/track.mp3", mimeType: "audio/mpeg", sizeBytes: file.size },
+    usage: { usedBytes: file.size },
+  };
+  const progress = [];
+  const cloud = createCloudflareContentAdapter({
+    staticContent: weddingContent,
+    fetchImpl: async () => { throw new Error("fetch must not be used when XHR is available"); },
+    xhrImpl: FakeXhr,
+  });
+  const uploaded = await cloud.uploadAudio({ file, onProgress: (event) => progress.push(event) });
+  assert.deepEqual(progress, [
+    { phase: "prepare" },
+    { phase: "upload", loaded: 4, total: 8 },
+    { phase: "upload", loaded: 8, total: 8 },
+  ]);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].method, "POST");
+  assert.equal(sent[0].path, "/api/admin/media/audio");
+  assert.equal(sent[0].body instanceof FormData, true);
+  assert.equal(uploaded.audio.mimeType, "audio/mpeg");
+
+  FakeXhr.status = 413;
+  FakeXhr.payload = { code: "MEDIA_TOO_LARGE", message: "저장 공간이 부족합니다.", fieldErrors: { file: "파일이 큽니다." } };
+  await assert.rejects(cloud.uploadAudio({ file }), (error) => {
+    assert.equal(error.status, 413);
+    assert.equal(error.code, "MEDIA_TOO_LARGE");
+    assert.equal(error.fieldErrors.file, "파일이 큽니다.");
+    return true;
+  });
+
+  const fallbackCalls = [];
+  const fallbackProgress = [];
+  const fallback = createCloudflareContentAdapter({
+    staticContent: weddingContent,
+    xhrImpl: null,
+    fetchImpl: async (path, options = {}) => {
+      fallbackCalls.push([path, options.method]);
+      return Response.json({ audio: { src: "/api/media/x/track.mp3" }, usage: {} }, { status: 201 });
+    },
+  });
+  await fallback.uploadAudio({ file, onProgress: (event) => fallbackProgress.push(event) });
+  assert.deepEqual(fallbackCalls, [["/api/admin/media/audio", "POST"]]);
+  assert.deepEqual(fallbackProgress, [
+    { phase: "prepare" },
+    { phase: "upload", loaded: 0, total: 0 },
+  ]);
+
+  const injectedCalls = [];
+  const injectedFetch = createCloudflareContentAdapter({
+    staticContent: weddingContent,
+    fetchImpl: async () => {
+      injectedCalls.push("fetch");
+      return Response.json({ audio: { src: "/api/media/x/track.mp3" }, usage: {} }, { status: 201 });
+    },
+  });
+  const originalXhr = globalThis.XMLHttpRequest;
+  globalThis.XMLHttpRequest = FakeXhr;
+  try {
+    await injectedFetch.uploadAudio({ file });
+  } finally {
+    globalThis.XMLHttpRequest = originalXhr;
+  }
+  assert.deepEqual(injectedCalls, ["fetch"]);
+  assert.equal(sent.length, 2);
+
+  const localProgress = [];
+  const localAudio = createLocalReviewContentAdapter({ staticContent: weddingContent, storage: memoryStorage(), eventTarget: new EventTarget() });
+  await localAudio.uploadAudio({ file, onProgress: (event) => localProgress.push(event) });
+  assert.deepEqual(localProgress, [
+    { phase: "prepare" },
+    { phase: "upload", loaded: 1, total: 1 },
+  ]);
+});
+
 test("production admin requests preserve Access authentication failures for re-login UX", async () => {
   const adapter = createCloudflareContentAdapter({
     staticContent: weddingContent,
@@ -751,9 +847,17 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.match(previewSource, /if \(previewDraft\)/);
   assert.doesNotMatch(previewSource, /getAdminState\(\)/);
   assert.match(source, /\/api\/admin\/media|uploadPhoto/);
-  assert.match(source, /새 사진 대체 텍스트/);
-  assert.match(source, /replacementAlt\.trim\(\)/);
+  assert.match(source, /type="file" multiple accept="image\/jpeg,image\/png,image\/webp"/);
+  assert.match(source, /uploadGalleryPhotos/);
+  assert.match(source, /files\.slice\(0, Math\.max\(0, remaining\)\)/);
+  assert.match(source, /for \(const \[index, file\] of accepted\.entries\(\)\)/);
+  assert.match(source, /isAdminAuthRequiredError\(error\)/);
+  assert.match(source, /commitEdit\(next, "\.pastel-gallery-section"\)/);
+  assert.match(source, /onProgress/);
+  assert.match(source, /<progress max="100"/);
+  assert.doesNotMatch(source, /replacementAlt|새 사진 대체 텍스트/);
   assert.doesNotMatch(source, /alt:\s*current\.alt/);
+  assert.match(source, /alt: "",\s*\n\s*position:/);
   assert.match(source, /배경 음악/);
   assert.match(source, /uploadAudio/);
   assert.match(source, /accept="audio\/mpeg,\.mp3"/);
