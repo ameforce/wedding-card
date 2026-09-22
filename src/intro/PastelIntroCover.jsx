@@ -9,13 +9,13 @@ const FRAME_STALL_MS = 1_500;
 const PLAYBACK_SLACK_MS = 2_500;
 const MINIMUM_POSTER_HOLD_MS = 800;
 
-function drawFrame(canvas, frame, manifest) {
+function drawFrame(canvas, frame, manifest, frameIndex = 0) {
   assertRibbonFrameDimensions(frame, manifest);
   const context = canvas?.getContext("2d");
   if (!context) throw new Error("Ribbon sequence canvas is unavailable.");
   if (canvas.width !== manifest.width) canvas.width = manifest.width;
   if (canvas.height !== manifest.height) canvas.height = manifest.height;
-  drawRibbonFrame(context, frame, manifest);
+  drawRibbonFrame(context, frame, manifest, frameIndex);
 }
 
 function earlyIntroState() { return window.__pastelIntroEarly || null; }
@@ -285,7 +285,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
           }
           stallGate.clear(); ready.delete(frameIndex);
           try {
-            drawFrame(canvasRef.current, frame, manifest);
+            drawFrame(canvasRef.current, frame, manifest, frameIndex);
             applyRootTranslation(frameIndex);
             if (!firstDrawn) { firstDrawn = true; setFrameLive(true); }
             if (scheduler.markDrawn(frameIndex, now)) {
