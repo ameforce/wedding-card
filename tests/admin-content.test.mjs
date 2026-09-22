@@ -899,6 +899,8 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.doesNotMatch(source, /autoPlay/);
   assert.match(source, /미디어 저장 공간\(사진·음악\)/);
   assert.match(source, /사진과 음악 합계가 2GB에 도달하면 추가 업로드가 자동으로 차단/);
+  assert.match(source, /content-admin-music-card[\s\S]*?<\/CollapsibleSection>\s*<div className="content-admin-storage"/);
+  assert.match(source, /content-admin-storage[\s\S]*?CollapsibleSection title="사진"/);
   assert.match(source, /관리자 인증이 필요합니다/);
   assert.match(source, /Google 계정으로 다시 로그인/);
   assert.match(source, /authRequired \? <AdminReauthentication \/>/);
