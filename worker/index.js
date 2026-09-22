@@ -17,6 +17,7 @@ const AUTH_LOCK_MS = 15 * 60 * 1000;
 const MAX_BODY_BYTES = 8_192;
 const MAX_CONTENT_BODY_BYTES = 131_072;
 const MAX_MEDIA_BODY_BYTES = 97 * 1024 * 1024;
+const MAX_MEDIA_HEADER_BYTES = 4 * 1024;
 const MAX_IMAGE_FILE_BYTES = 90 * 1024 * 1024;
 const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_BODY_BYTES = 26 * 1024 * 1024;
@@ -1109,8 +1110,100 @@ function requireMediaBucket(env) {
   return env.WEDDING_MEDIA;
 }
 
-function validUpload(file, types, maxBytes) {
-  return file && typeof file.arrayBuffer === "function" && types.includes(file.type) && file.size > 0 && file.size <= maxBytes;
+function createRequestBodyReader(request, maxBytes, tooLargeError) {
+  const reader = request.body?.getReader();
+  let buffered = new Uint8Array(0);
+  let consumed = 0;
+  async function nextChunk() {
+    if (!reader) return null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || !(value instanceof Uint8Array)) return null;
+      if (value.byteLength === 0) continue;
+      consumed += value.byteLength;
+      if (consumed > maxBytes) throw tooLargeError;
+      return value;
+    }
+  }
+  async function readExact(size) {
+    const parts = [];
+    let remaining = size;
+    while (remaining > 0) {
+      let chunk = buffered;
+      buffered = new Uint8Array(0);
+      if (chunk.byteLength === 0) chunk = await nextChunk();
+      if (chunk === null || chunk.byteLength === 0) break;
+      const take = Math.min(remaining, chunk.byteLength);
+      parts.push(chunk.subarray(0, take));
+      if (take < chunk.byteLength) buffered = chunk.subarray(take);
+      remaining -= take;
+    }
+    if (remaining > 0) {
+      throw { status: 400, code: "INVALID_MEDIA_BODY", message: "업로드 본문이 올바르지 않습니다." };
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    return bytes;
+  }
+  function streamExact(size) {
+    let remaining = size;
+    return new ReadableStream({
+      async pull(controller) {
+        if (remaining <= 0) {
+          controller.close();
+          return;
+        }
+        try {
+          let chunk = buffered;
+          buffered = new Uint8Array(0);
+          if (chunk.byteLength === 0) chunk = await nextChunk();
+          if (chunk === null || chunk.byteLength === 0) {
+            controller.error({ status: 400, code: "INVALID_MEDIA_BODY", message: "업로드 본문이 올바르지 않습니다." });
+            return;
+          }
+          const take = Math.min(remaining, chunk.byteLength);
+          controller.enqueue(chunk.subarray(0, take));
+          if (take < chunk.byteLength) buffered = chunk.subarray(take);
+          remaining -= take;
+        } catch (error) {
+          controller.error(error);
+        }
+      },
+      cancel() {
+        reader?.cancel().catch(() => {});
+      },
+    });
+  }
+  async function readRest(maxSize, tooLarge) {
+    const parts = [];
+    let size = 0;
+    while (true) {
+      let chunk = buffered;
+      buffered = new Uint8Array(0);
+      if (chunk.byteLength === 0) chunk = await nextChunk();
+      if (chunk === null || chunk.byteLength === 0) break;
+      size += chunk.byteLength;
+      if (size > maxSize) throw tooLarge;
+      parts.push(chunk);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    return bytes;
+  }
+  async function expectEnd() {
+    if (buffered.byteLength > 0 || (await nextChunk()) !== null) {
+      throw { status: 400, code: "INVALID_MEDIA_BODY", message: "업로드 본문이 올바르지 않습니다." };
+    }
+  }
+  return { readExact, readRest, streamExact, expectEnd };
 }
 
 function mediaUsagePayload(usedBytes, mediaSets = 0) {
@@ -1166,41 +1259,64 @@ async function uploadInvitationMedia(request, env) {
   const length = Number(request.headers.get("content-length") || 0);
   if (length > MAX_MEDIA_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "이미지 업로드 크기를 줄여 주세요.");
   const bucket = requireMediaBucket(env);
-  const form = await request.formData();
-  const original = form.get("original");
-  const small = form.get("small");
-  const large = form.get("large");
-  const slot = String(form.get("slot") || "").trim().toLowerCase();
-  const alt = String(form.get("alt") || "").trim();
-  const position = String(form.get("position") || "50% 50%").trim();
+  const contentType = (request.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
+  if (contentType !== "application/octet-stream") {
+    return apiError(415, "UNSUPPORTED_MEDIA_BODY", "업로드 형식이 올바르지 않습니다. 페이지를 새로고침해 주세요.");
+  }
+  const body = createRequestBodyReader(request, MAX_MEDIA_BODY_BYTES,
+    { status: 413, code: "MEDIA_TOO_LARGE", message: "이미지 업로드 크기를 줄여 주세요." });
+  const headerLengthBytes = await body.readExact(2);
+  const headerLength = (headerLengthBytes[0] << 8) | headerLengthBytes[1];
+  if (headerLength < 2 || headerLength > MAX_MEDIA_HEADER_BYTES) {
+    return apiError(400, "INVALID_MEDIA_BODY", "업로드 본문이 올바르지 않습니다.");
+  }
+  let header;
+  try {
+    header = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await body.readExact(headerLength)));
+  } catch (error) {
+    if (error && Number.isInteger(error.status)) throw error;
+    return apiError(400, "INVALID_MEDIA_BODY", "업로드 본문이 올바르지 않습니다.");
+  }
+  const slot = String(header?.slot || "").trim().toLowerCase();
+  const alt = String(header?.alt || "").trim();
+  const position = String(header?.position || "50% 50%").trim();
   const validSlot = /^(?:pastel-hero|pastel-gallery-(?:new|\d+))$/.test(slot);
   if (!validSlot || alt.length > 300 || !validCropPosition(position)) {
     return apiError(400, "INVALID_MEDIA_METADATA", "이미지 슬롯, 설명 또는 초점 위치를 확인해 주세요.");
   }
-  if (!validUpload(original, ["image/jpeg", "image/png", "image/webp"], MAX_IMAGE_FILE_BYTES)
-    || !validUpload(small, ["image/webp"], 2 * 1024 * 1024)
-    || !validUpload(large, ["image/webp"], 4 * 1024 * 1024)
-    || original.size + small.size + large.size > MAX_MEDIA_BODY_BYTES) {
+  const sizes = header?.sizes && typeof header.sizes === "object" ? header.sizes : {};
+  const originalSize = Number(sizes.original);
+  const smallSize = Number(sizes.small);
+  const largeSize = Number(sizes.large);
+  const originalType = String(header?.originalType || "");
+  const validSizes = Number.isInteger(originalSize) && originalSize > 0 && originalSize <= MAX_IMAGE_FILE_BYTES
+    && Number.isInteger(smallSize) && smallSize > 0 && smallSize <= 2 * 1024 * 1024
+    && Number.isInteger(largeSize) && largeSize > 0 && largeSize <= 4 * 1024 * 1024
+    && originalSize + smallSize + largeSize <= MAX_MEDIA_BODY_BYTES;
+  if (!["image/jpeg", "image/png", "image/webp"].includes(originalType) || !validSizes) {
     return apiError(400, "INVALID_MEDIA", "원본과 480·960px WebP 이미지를 확인해 주세요.");
   }
+  const small = await body.readExact(smallSize);
+  const large = await body.readExact(largeSize);
   const mediaId = crypto.randomUUID();
-  const originalExtension = original.type === "image/png" ? "png" : original.type === "image/webp" ? "webp" : "jpg";
+  const originalExtension = originalType === "image/png" ? "png" : originalType === "image/webp" ? "webp" : "jpg";
   const baseKey = `invitation/${mediaId}/${slot}`;
   const keys = [
     `${baseKey}/original.${originalExtension}`,
     `${baseKey}/480.webp`,
     `${baseKey}/960.webp`,
   ];
-  const totalBytes = original.size + small.size + large.size;
+  const totalBytes = originalSize + smallSize + largeSize;
   await reserveMediaStorage(db, { mediaId, slot, totalBytes });
   try {
     const writeResults = await Promise.allSettled([
-      bucket.put(keys[0], original, { httpMetadata: { contentType: original.type } }),
+      bucket.put(keys[0], body.streamExact(originalSize), { httpMetadata: { contentType: originalType } }),
       bucket.put(keys[1], small, { httpMetadata: { contentType: "image/webp" } }),
       bucket.put(keys[2], large, { httpMetadata: { contentType: "image/webp" } }),
     ]);
     const failedWrite = writeResults.find((result) => result.status === "rejected");
     if (failedWrite) throw failedWrite.reason;
+    await body.expectEnd();
     await commitMediaStorage(db, mediaId);
   } catch (error) {
     if (typeof bucket.delete !== "function") throw new Error("R2 media cleanup is unavailable", { cause: error });
@@ -1232,8 +1348,8 @@ function hasMpegFrameHeader(bytes) {
   return version !== 0x08 && layer !== 0 && bitrate !== 0 && bitrate !== 0xf0 && sampleRate !== 0x0c;
 }
 
-async function hasMp3Signature(file) {
-  const header = new Uint8Array(await file.slice(0, 10).arrayBuffer());
+function hasMp3Signature(bytes) {
+  const header = bytes.subarray(0, 10);
   let frameOffset = 0;
   if (header.length >= 10 && header[0] === 0x49 && header[1] === 0x44 && header[2] === 0x33) {
     const validId3 = header[3] >= 2
@@ -1245,9 +1361,8 @@ async function hasMp3Signature(file) {
     const footerSize = header[3] === 4 && (header[5] & 0x10) !== 0 ? 10 : 0;
     frameOffset = 10 + tagSize + footerSize;
   }
-  if (frameOffset + 4 > file.size) return false;
-  const frame = new Uint8Array(await file.slice(frameOffset, frameOffset + 4).arrayBuffer());
-  return hasMpegFrameHeader(frame);
+  if (frameOffset + 4 > bytes.length) return false;
+  return hasMpegFrameHeader(bytes.subarray(frameOffset, frameOffset + 4));
 }
 
 async function uploadInvitationAudio(request, env) {
@@ -1257,17 +1372,23 @@ async function uploadInvitationAudio(request, env) {
   const length = Number(request.headers.get("content-length") || 0);
   if (length > MAX_AUDIO_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "MP3는 25MB 이하만 업로드할 수 있습니다.");
   const bucket = requireMediaBucket(env);
-  const form = await request.formData();
-  const file = form.get("file");
-  if (!validUpload(file, ["audio/mpeg"], MAX_AUDIO_FILE_BYTES)) {
+  const contentType = (request.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
+  if (contentType !== "audio/mpeg") {
+    return apiError(415, "UNSUPPORTED_MEDIA_BODY", "MP3(audio/mpeg) 파일만 업로드할 수 있습니다.");
+  }
+  const body = createRequestBodyReader(request, MAX_AUDIO_BODY_BYTES,
+    { status: 413, code: "MEDIA_TOO_LARGE", message: "MP3는 25MB 이하만 업로드할 수 있습니다." });
+  const file = await body.readRest(MAX_AUDIO_FILE_BYTES,
+    { status: 400, code: "INVALID_AUDIO", message: "MP3(audio/mpeg) 파일만 25MB 이하로 업로드할 수 있습니다." });
+  if (file.byteLength === 0) {
     return apiError(400, "INVALID_AUDIO", "MP3(audio/mpeg) 파일만 25MB 이하로 업로드할 수 있습니다.");
   }
-  if (!await hasMp3Signature(file)) {
+  if (!hasMp3Signature(file)) {
     return apiError(400, "INVALID_AUDIO_SIGNATURE", "파일 내용이 올바른 MP3 형식이 아닙니다.");
   }
   const mediaId = crypto.randomUUID();
   const key = `invitation/${mediaId}/background-music/track.mp3`;
-  await reserveMediaStorage(db, { mediaId, slot: "background-music", totalBytes: file.size });
+  await reserveMediaStorage(db, { mediaId, slot: "background-music", totalBytes: file.byteLength });
   try {
     await bucket.put(key, file, { httpMetadata: { contentType: "audio/mpeg" } });
     await commitMediaStorage(db, mediaId);
@@ -1284,7 +1405,7 @@ async function uploadInvitationAudio(request, env) {
     audio: {
       src: `${MEDIA_API_PREFIX}/${key}`,
       mimeType: "audio/mpeg",
-      sizeBytes: file.size,
+      sizeBytes: file.byteLength,
     },
   }, 201);
 }
