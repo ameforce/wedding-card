@@ -8,3 +8,5 @@ artifacts/source-assets/
 *.log
 __pycache__/
 *.py[cod]
+output/
+.playwright-cli/
