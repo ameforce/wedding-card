@@ -151,6 +151,7 @@ function createRequestError(response, payload) {
   error.status = response.status;
   error.code = typeof payload?.code === "string" ? payload.code : null;
   error.fieldErrors = payload?.fieldErrors && typeof payload.fieldErrors === "object" ? payload.fieldErrors : null;
+  error.dependentRevisions = Array.isArray(payload?.dependentRevisions) ? payload.dependentRevisions : null;
   return error;
 }
 
@@ -422,25 +423,37 @@ export function createLocalReviewContentAdapter({
     async getMediaUsage() {
       return emptyMediaUsage(true);
     },
+    async getMediaList() {
+      return { usage: emptyMediaUsage(true), media: [] };
+    },
+    async deleteMedia() {
+      throw new Error("로컬 검토에서는 미디어 저장소를 사용하지 않습니다.");
+    },
     async saveDraft(document) {
       const current = load();
       const serialized = serializeContentDocument(serializeDocument(document), { allowLocalPreview: true });
       assertValidMusic(serialized, { allowLocalPreview: true });
+      const draftId = current.draftRevisionId || localRevision("local-draft", now);
       state = {
         ...current,
-        draftRevisionId: localRevision("local-draft", now),
+        draftRevisionId: draftId,
         draft: normalizeContentDocument(serialized, staticContent, { allowLocalPreview: true }),
       };
-      state.revisions = [
-        {
-          id: state.draftRevisionId,
-          status: "draft",
-          createdAt: now(),
-          publishedAt: null,
-          document: cloneContentDocument(state.draft),
-        },
-        ...(current.revisions || []).map((revision) => revision.status === "draft" ? { ...revision, status: "archived" } : revision),
-      ].slice(0, 20);
+      const priorDraft = (current.revisions || []).find((revision) => revision.id === draftId && revision.status === "draft");
+      state.revisions = priorDraft
+        ? current.revisions.map((revision) => revision.id === draftId
+          ? { ...revision, createdAt: now(), document: cloneContentDocument(state.draft) }
+          : revision)
+        : [
+          {
+            id: draftId,
+            status: "draft",
+            createdAt: now(),
+            publishedAt: null,
+            document: cloneContentDocument(state.draft),
+          },
+          ...(current.revisions || []),
+        ].slice(0, 20);
       persist();
       return presentState(state);
     },
@@ -561,6 +574,15 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl, xhrIm
     },
     async getMediaUsage() {
       return requestJson(resolvedFetch, "/api/admin/media/usage");
+    },
+    async getMediaList() {
+      return requestJson(resolvedFetch, "/api/admin/media/list");
+    },
+    async deleteMedia(mediaId, { deleteRevisions = false } = {}) {
+      return requestJson(resolvedFetch, "/api/admin/media/delete", {
+        method: "POST",
+        body: JSON.stringify({ mediaId, deleteRevisions }),
+      });
     },
     async saveDraft(document) {
       assertValidMusic(document, { allowLocalPreview: false });

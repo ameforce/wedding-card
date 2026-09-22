@@ -1,4 +1,4 @@
-import { ArrowClockwise, ArrowDown, ArrowUp, ArrowsOutSimple, CheckCircle, DeviceMobile, PencilSimple, Plus, Trash, Warning, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowDown, ArrowUp, ArrowsOutSimple, CheckCircle, DeviceMobile, MusicNotes, PencilSimple, Plus, Trash, Warning, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { weddingContent } from "../content.js";
@@ -325,6 +325,39 @@ function RepublishDialog({ version, busy, onCancel, onConfirm }) {
   );
 }
 
+function MediaDeleteDialog({ media, dependentRevisions, error, busy, onCancel, onConfirm }) {
+  const dialogRef = useDialogFocus({ busy, onCancel });
+  const cascade = dependentRevisions.length > 0;
+  return createPortal(
+    <div className="admin-dialog-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !busy) onCancel();
+    }}>
+      <section ref={dialogRef} className="admin-dialog is-compact" role="dialog" aria-modal="true" aria-labelledby="media-delete-title" tabIndex="-1">
+        <button type="button" className="admin-dialog-close" onClick={onCancel} disabled={busy} aria-label="미디어 삭제 확인 닫기"><X aria-hidden="true" /></button>
+        <h2 id="media-delete-title">저장된 미디어를 삭제할까요?</h2>
+        <p>선택한 {media.kind === "audio" ? "음악" : "사진"} 파일({formatStorage(media.totalBytes || 0)})을 저장소에서 영구 삭제하고 저장 공간을 회수합니다.</p>
+        {media.references?.draft && <p>현재 초안이 이 미디어를 사용 중입니다. 삭제하면 초안의 해당 항목이 자동으로 제거됩니다.</p>}
+        {cascade && (
+          <>
+            <p>아래 과거 리비전 {dependentRevisions.length}개가 이 미디어를 참조합니다. 삭제하면 해당 리비전도 함께 영구 삭제됩니다.</p>
+            <ul className="admin-dialog-sections">
+              {dependentRevisions.map((revision) => (
+                <li key={revision.id}>{revision.publishedAt ? "이전 공개본" : "이전 초안"} · {formatAdminTimestamp(revision.publishedAt || revision.createdAt)} · {revision.id.slice(0, 8)}</li>
+              ))}
+            </ul>
+          </>
+        )}
+        <div className="admin-dialog-warning"><Warning aria-hidden="true" weight="fill" /><span>삭제된 파일과 리비전은 복구할 수 없습니다.</span></div>
+        {error ? <p className="is-error" role="alert">{error}</p> : null}
+        <div className="admin-dialog-actions">
+          <button type="button" onClick={onCancel} disabled={busy}>취소</button>
+          <button type="button" className="is-destructive" onClick={onConfirm} disabled={busy}>{busy ? "삭제 중…" : cascade ? "리비전과 함께 삭제" : "영구 삭제"}</button>
+        </div>
+      </section>
+    </div>, document.body,
+  );
+}
+
 export function ContentAdmin() {
   const localReview = isLocalReviewBuild();
   const adapter = useMemo(() => createContentAdapter({ staticContent: weddingContent }), []);
@@ -342,6 +375,9 @@ export function ContentAdmin() {
   const [uploadingSlot, setUploadingSlot] = useState("");
   const [uploadProgress, setUploadProgress] = useState(null);
   const [mediaUsage, setMediaUsage] = useState(null);
+  const [mediaList, setMediaList] = useState([]);
+  const [mediaDeleteTarget, setMediaDeleteTarget] = useState(null);
+  const [deletingMediaId, setDeletingMediaId] = useState("");
   const [authRequired, setAuthRequired] = useState(false);
   const [publishReviewOpen, setPublishReviewOpen] = useState(false);
   const [republishTarget, setRepublishTarget] = useState(null);
@@ -358,6 +394,7 @@ export function ContentAdmin() {
       setAuthRequired(true);
       setPublishReviewOpen(false);
       setRepublishTarget(null);
+      setMediaDeleteTarget(null);
       setStatus({ tone: "error", message: "승인된 Google 계정으로 다시 로그인해 주세요." });
       return;
     }
@@ -367,7 +404,8 @@ export function ContentAdmin() {
   const load = useCallback(async ({ preserveEditingDocument = false } = {}) => {
     setBusy(true);
     try {
-      const [state, usage] = await Promise.all([adapter.getAdminState(), adapter.getMediaUsage()]);
+      const [state, usage, mediaListPayload] = await Promise.all([adapter.getAdminState(), adapter.getMediaUsage(), adapter.getMediaList()]);
+      setMediaList(Array.isArray(mediaListPayload?.media) ? mediaListPayload.media : []);
       const next = normalizeContentDocument(state.draft || state.published, weddingContent, { allowLocalPreview: localReview });
       if (!preserveEditingDocument) setEditingDocument(next);
       setAppliedDocument(next);
@@ -590,6 +628,57 @@ export function ContentAdmin() {
     }
   };
 
+  const refreshMediaList = useCallback(async () => {
+    try {
+      const payload = await adapter.getMediaList();
+      setMediaList(Array.isArray(payload?.media) ? payload.media : []);
+      if (payload?.usage) setMediaUsage(payload.usage);
+      return payload;
+    } catch {
+      return null;
+    }
+  }, [adapter]);
+
+  const requestDeleteMedia = async (item) => {
+    if (dirty && JSON.stringify(editingDocument).toLowerCase().includes(`invitation/${item.mediaId}/`)) {
+      setStatus({ tone: "error", message: "미적용 변경사항이 이 미디어를 참조하고 있습니다. 임시 적용하거나 새로고침한 뒤 삭제해 주세요." });
+      return;
+    }
+    const fresh = await refreshMediaList();
+    const current = fresh?.media?.find((entry) => entry.mediaId === item.mediaId) || item;
+    setMediaDeleteTarget({ media: current, dependentRevisions: current.references?.archivedRevisions || [], error: "" });
+  };
+
+  const confirmDeleteMedia = async () => {
+    const target = mediaDeleteTarget;
+    if (!target) return;
+    setDeletingMediaId(target.media.mediaId);
+    try {
+      const result = await adapter.deleteMedia(target.media.mediaId, { deleteRevisions: target.dependentRevisions.length > 0 });
+      setMediaDeleteTarget(null);
+      const listPayload = await refreshMediaList();
+      if (!listPayload?.usage) setMediaUsage(result.usage || await adapter.getMediaUsage());
+      await load({ preserveEditingDocument: dirty });
+      setStatus({
+        tone: "success",
+        message: `미디어를 삭제하고 ${formatStorage(result.freedBytes || 0)}의 공간을 회수했습니다.${result.removedFromDraft > 0 ? " 초안의 해당 항목도 제거했습니다." : ""}${Array.isArray(result.deletedRevisions) && result.deletedRevisions.length > 0 ? ` 과거 리비전 ${result.deletedRevisions.length}개를 함께 삭제했습니다.` : ""}${result.objectsDeleted === false ? " 단, 저장소 객체 일부를 정리하지 못했습니다." : ""}`,
+      });
+    } catch (error) {
+      if (error?.code === "MEDIA_REFERENCED" && Array.isArray(error.dependentRevisions)) {
+        setMediaDeleteTarget((current) => current && { ...current, dependentRevisions: error.dependentRevisions, error: error.message || "" });
+        return;
+      }
+      if (isAdminAuthRequiredError(error)) {
+        setMediaDeleteTarget(null);
+        showAdminError(error, "미디어를 삭제하지 못했습니다.");
+        return;
+      }
+      setMediaDeleteTarget((current) => current && { ...current, error: error?.message || "미디어를 삭제하지 못했습니다." });
+    } finally {
+      setDeletingMediaId("");
+    }
+  };
+
   const uploadPhoto = async (slot, file) => {
     const isHero = slot === "pastel-hero";
     const index = isHero ? -1 : Number(slot.replace("pastel-gallery-", ""));
@@ -606,6 +695,7 @@ export function ContentAdmin() {
       });
       update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], result.photo);
       setMediaUsage(result.usage || await adapter.getMediaUsage());
+      await refreshMediaList();
       setStatus({ tone: "success", message: "새 사진을 초안에 넣었습니다. 새 사진에 맞는 대체 텍스트와 초점을 확인해 주세요." });
       return true;
     } catch (error) {
@@ -661,6 +751,7 @@ export function ContentAdmin() {
       setUploadingSlot("");
       setUploadProgress(null);
     }
+    await refreshMediaList();
     const skippedNote = skipped > 0 ? ` 저장 공간이 부족해 나머지 ${skipped}장은 올리지 않았습니다.` : "";
     const failureNote = failures.length > 0 ? ` ${failures.join(" · ")}` : "";
     if (failures.length === 0 && skipped === 0) {
@@ -688,6 +779,7 @@ export function ContentAdmin() {
       });
       update(["content", "music", "src"], result.audio.src);
       setMediaUsage(result.usage || await adapter.getMediaUsage());
+      await refreshMediaList();
       setStatus({ tone: "success", message: "새 MP3와 곡 정보를 초안에 넣었습니다. 미리듣기 후 임시 적용해 주세요." });
       return true;
     } catch (error) {
@@ -885,6 +977,49 @@ export function ContentAdmin() {
             <small>{mediaUsage?.localReview ? "production에서는 사진과 음악 합계가 2GB에 도달하면 추가 업로드가 자동으로 차단됩니다." : `사용률 ${mediaUsage?.percent || 0}% · 남은 공간 ${formatStorage(mediaUsage?.remainingBytes || 0)}`}</small>
           </div>
 
+          {!localReview && (
+            <CollapsibleSection title="저장된 미디어" busy={busy}>
+              <p className="content-admin-media-note">문서에서 제거한 사진·음악 파일도 저장 공간을 계속 사용합니다. 여기서 삭제하면 파일과 용량이 영구 회수됩니다.</p>
+              {mediaList.length === 0 ? (
+                <p className="content-admin-media-empty">저장된 미디어가 없습니다.</p>
+              ) : (
+                <ul className="content-admin-media-list">
+                  {mediaList.map((item) => {
+                    const refs = item.references || {};
+                    const archivedCount = refs.archivedRevisions?.length || 0;
+                    const statusLabel = item.abandoned ? "업로드 중단됨"
+                      : refs.published ? "현재 공개본 사용 중"
+                        : refs.draft ? "현재 초안 사용 중"
+                          : archivedCount > 0 ? `과거 리비전 ${archivedCount}개 참조`
+                            : "미사용";
+                    const mediaLabel = item.kind === "audio" ? "배경 음악" : item.slot === "pastel-hero" ? "대표 사진" : "갤러리 사진";
+                    return (
+                      <li key={item.mediaId} className="content-admin-media-item">
+                        {item.previewUrl
+                          ? <img src={item.previewUrl} alt="" className="content-admin-media-thumb" loading="lazy" />
+                          : <span className="content-admin-media-thumb is-audio" aria-hidden="true"><MusicNotes aria-hidden="true" /></span>}
+                        <div className="content-admin-media-meta">
+                          <strong>{mediaLabel}</strong>
+                          <span>{formatStorage(item.totalBytes)} · {formatAdminTimestamp(item.createdAt)}</span>
+                          <em>{statusLabel}</em>
+                        </div>
+                        <button
+                          type="button"
+                          className="is-destructive"
+                          disabled={Boolean(refs.published) || Boolean(deletingMediaId) || Boolean(uploadingSlot)}
+                          onClick={() => requestDeleteMedia(item)}
+                          aria-label={`${mediaLabel} 미디어 삭제 (${item.mediaId.slice(0, 8)})`}
+                        >
+                          <Trash aria-hidden="true" />삭제
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </CollapsibleSection>
+          )}
+
           <CollapsibleSection title="사진" busy={busy} attention={Boolean(uploadingSlot || validationErrors["사진"])}>
             <div className="content-admin-photo-list">
               <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={Boolean(uploadingSlot)} fileError={validationErrors["상단 대표 사진 파일"]} altError={validationErrors["상단 대표 사진 대체 텍스트"]} positionError={validationErrors["상단 대표 사진 초점 위치"]} onUpload={uploadPhoto} progress={uploadProgress?.slot === "pastel-hero" ? uploadProgress : null} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
@@ -961,6 +1096,16 @@ export function ContentAdmin() {
 
       {!authRequired && publishReviewOpen && <PublishReviewDialog diff={publishDiff} currentLabel={draftRevisionId && !dirty ? "현재 초안" : "현재 편집"} publishedLabel="현재 공개" dirty={dirty} busy={busy} onCancel={() => setPublishReviewOpen(false)} onConfirm={() => void publish()} />}
       {!authRequired && republishTarget && <RepublishDialog version={republishTarget} busy={busy} onCancel={() => setRepublishTarget(null)} onConfirm={() => void republish()} />}
+      {!authRequired && mediaDeleteTarget && (
+        <MediaDeleteDialog
+          media={mediaDeleteTarget.media}
+          dependentRevisions={mediaDeleteTarget.dependentRevisions}
+          error={mediaDeleteTarget.error}
+          busy={Boolean(deletingMediaId)}
+          onCancel={() => setMediaDeleteTarget(null)}
+          onConfirm={() => void confirmDeleteMedia()}
+        />
+      )}
       </div>
     </AdminShell>
   );

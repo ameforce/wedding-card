@@ -63,11 +63,13 @@ function invitationDatabase() {
   };
   const revisions = new Map();
   const mediaSets = new Map();
+  const legacyMediaSets = new Map();
   const queries = [];
   return {
     state,
     revisions,
     mediaSets,
+    legacyMediaSets,
     queries,
     async batch(statements) {
       const results = [];
@@ -89,11 +91,14 @@ function invitationDatabase() {
           if (sql.includes("FROM invitation_state")) return { ...state };
           if (sql.includes("FROM invitation_revisions")) return revisions.get(values[0]) || null;
           if (sql.includes("FROM invitation_media_sets")) {
-            const active = [...mediaSets.values()].filter((entry) => ["reserved", "stored"].includes(entry.status));
-            return {
-              used_bytes: active.reduce((total, entry) => total + entry.total_bytes, 0),
-              media_sets: active.length,
-            };
+            if (sql.includes("SUM(")) {
+              const active = [...mediaSets.values()].filter((entry) => ["reserved", "stored"].includes(entry.status));
+              return {
+                used_bytes: active.reduce((total, entry) => total + entry.total_bytes, 0),
+                media_sets: active.length,
+              };
+            }
+            return mediaSets.get(values[0]) || null;
           }
           return null;
         },
@@ -104,6 +109,16 @@ function invitationDatabase() {
               results.sort((left, right) => right.created_at.localeCompare(left.created_at));
               return { results: results.slice(0, 20) };
             }
+            return { results };
+          }
+          if (sql.includes("FROM invitation_media_sets")) {
+            let results = [...mediaSets.values()];
+            if (sql.includes("WHERE status = 'stored' OR (status = 'reserved' AND created_at < ?)")) {
+              results = results.filter((row) => row.status === "stored" || (row.status === "reserved" && row.created_at < values[0]));
+            } else if (sql.includes("WHERE status = 'stored'")) {
+              results = results.filter((row) => row.status === "stored");
+            }
+            results.sort((left, right) => right.created_at.localeCompare(left.created_at));
             return { results };
           }
           return { results: [] };
@@ -120,8 +135,21 @@ function invitationDatabase() {
               created_by: createdBy,
               published_at: null,
             });
+          } else if (sql.startsWith("CREATE TABLE IF NOT EXISTS invitation_media_sets_v2")) {
+            changes = 0;
+          } else if (sql.includes("INSERT OR IGNORE INTO invitation_media_sets_v2")) {
+            changes = 0;
+            for (const [id, row] of legacyMediaSets) {
+              if (!mediaSets.has(id)) {
+                mediaSets.set(id, row);
+                changes += 1;
+              }
+            }
           } else if (sql.startsWith("INSERT INTO invitation_media_sets")) {
             const [id, slot, totalBytes, createdAt, , limitBytes] = values;
+            if (totalBytes > 134217728) {
+              throw new Error("CHECK constraint failed: invitation_media_sets_v2.total_bytes");
+            }
             const usedBytes = [...mediaSets.values()]
               .filter((entry) => ["reserved", "stored"].includes(entry.status))
               .reduce((total, entry) => total + entry.total_bytes, 0);
@@ -130,7 +158,7 @@ function invitationDatabase() {
             } else {
               changes = 0;
             }
-          } else if (sql.includes("UPDATE invitation_media_sets SET status = 'stored'")) {
+          } else if (sql.includes("SET status = 'stored'")) {
             const [storedAt, id] = values;
             const row = mediaSets.get(id);
             if (row?.status === "reserved") {
@@ -139,14 +167,54 @@ function invitationDatabase() {
             } else {
               changes = 0;
             }
+          } else if (sql.includes("SET content_json = ?")) {
+            const hasCreatedAt = sql.includes("created_at = ?");
+            const hasContentGuard = sql.includes("AND content_json = ?");
+            const [contentJson, idOrCreatedAt, third] = values;
+            const id = hasCreatedAt ? third : idOrCreatedAt;
+            const row = revisions.get(id);
+            const isCurrentDraft = !sql.includes("invitation_state") || state.draft_revision_id === id;
+            const contentMatches = !hasContentGuard || row?.content_json === third;
+            if (row && row.status === "draft" && isCurrentDraft && contentMatches) {
+              row.content_json = contentJson;
+              if (hasCreatedAt) row.created_at = idOrCreatedAt;
+            } else {
+              changes = 0;
+            }
+          } else if (sql.includes("DELETE FROM invitation_revisions")) {
+            const [id] = values;
+            const isCurrentPointer = sql.includes("invitation_state")
+              && (state.draft_revision_id === id || state.published_revision_id === id);
+            changes = !isCurrentPointer && revisions.delete(id) ? 1 : 0;
           } else if (sql.includes("DELETE FROM invitation_media_sets")) {
-            const row = mediaSets.get(values[0]);
-            changes = row?.status === "reserved" && mediaSets.delete(values[0]) ? 1 : 0;
+            if (sql.includes("id IN (SELECT id FROM invitation_media_sets_v2)")) {
+              changes = 0;
+              for (const id of [...legacyMediaSets.keys()]) {
+                if (mediaSets.has(id)) {
+                  legacyMediaSets.delete(id);
+                  changes += 1;
+                }
+              }
+            } else if (sql.includes("LIKE '%' || ? || '%'")) {
+              const row = mediaSets.get(values[0]);
+              const [id, cutoffIso, needle] = values;
+              const deletable = row && (row.status === "stored" || (row.status === "reserved" && row.created_at < cutoffIso));
+              const referenced = [...revisions.values()]
+                .some((revision) => typeof revision.content_json === "string" && revision.content_json.toLowerCase().includes(needle));
+              changes = deletable && !referenced && mediaSets.delete(id) ? 1 : 0;
+            } else if (sql.includes("status = 'reserved'")) {
+              const row = mediaSets.get(values[0]);
+              changes = row?.status === "reserved" && mediaSets.delete(values[0]) ? 1 : 0;
+            } else {
+              changes = mediaSets.delete(values[0]) ? 1 : 0;
+            }
           } else if (sql.includes("SET draft_revision_id = ?, updated_at = ?")) {
             [state.draft_revision_id, state.updated_at] = values;
           } else if (sql.includes("SET draft_revision_id = NULL, published_revision_id = ?")) {
             [state.published_revision_id, state.updated_at] = values;
             state.draft_revision_id = null;
+          } else if (sql.includes("SET updated_at = ?") && !sql.includes("revision_id")) {
+            [state.updated_at] = values;
           } else if (sql.includes("SET published_revision_id = ?, updated_at = ?")) {
             const [nextRevisionId, updatedAt, expectedRevisionId] = values;
             if (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId) {
@@ -906,7 +974,7 @@ test("failed image variants settle before R2 cleanup and release the quota reser
   }
 });
 
-test("failed R2 cleanup keeps the media quota reservation", async () => {
+test("failed R2 cleanup still releases the media quota reservation", async () => {
   const fixture = await accessFixture();
   const db = invitationDatabase();
   const bucket = {
@@ -933,8 +1001,7 @@ test("failed R2 cleanup keeps the media quota reservation", async () => {
       }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(response.status, 500);
-    assert.equal(db.mediaSets.size, 1);
-    assert.equal([...db.mediaSets.values()][0].status, "reserved");
+    assert.equal(db.mediaSets.size, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1189,6 +1256,539 @@ test("media uploads fail closed before R2 writes when the 2GB project quota woul
     assert.equal(response.status, 507);
     assert.equal((await response.json()).code, "MEDIA_STORAGE_LIMIT");
     assert.equal(putCount, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+function mediaRow(id, slot, bytes, createdAt = "2026-08-17T00:00:00.000Z") {
+  return { id, slot, total_bytes: bytes, status: "stored", created_at: createdAt, stored_at: createdAt };
+}
+
+function revisionRow(id, document, { status = "archived", publishedAt = null, createdAt = "2026-08-10T00:00:00.000Z" } = {}) {
+  return {
+    id,
+    content_json: JSON.stringify(document),
+    status,
+    created_at: createdAt,
+    created_by: "groom@example.test",
+    published_at: publishedAt,
+  };
+}
+
+function memoryBucket() {
+  const objects = new Map();
+  return {
+    objects,
+    async put(key, value) { objects.set(key, await storedBytes(value)); },
+    async get(key) {
+      if (!objects.has(key)) return null;
+      return { body: objects.get(key), size: objects.get(key).byteLength, etag: "test" };
+    },
+    async delete(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+    },
+  };
+}
+
+async function withAccessEnv(run) {
+  const fixture = await accessFixture();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  const headers = { "cf-access-jwt-assertion": fixture.assertion };
+  try {
+    await run(fixture, headers);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test("draft saves update the existing draft revision instead of accumulating archives", async () => {
+  const db = invitationDatabase();
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db };
+    const first = await worker.fetch(request("/api/admin/content", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ document: confirmedDocument() }),
+    }), env);
+    assert.equal(first.status, 201);
+    const { revisionId } = await first.json();
+    assert.equal(db.state.draft_revision_id, revisionId);
+    assert.equal(db.revisions.size, 1);
+
+    const updated = confirmedDocument();
+    updated.content.message = ["수정된", "초안", "문장", "입니다"];
+    const second = await worker.fetch(request("/api/admin/content", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ document: updated }),
+    }), env);
+    assert.equal(second.status, 200);
+    const secondPayload = await second.json();
+    assert.equal(secondPayload.revisionId, revisionId);
+    assert.equal(db.revisions.size, 1);
+    const row = db.revisions.get(revisionId);
+    assert.equal(row.status, "draft");
+    assert.match(row.content_json, /수정된/);
+    const mutableUpdates = db.queries.filter(
+      (sql) => sql.includes("SET content_json = ?") && sql.includes("created_at = ?"),
+    );
+    assert.equal(mutableUpdates.length, 1);
+    assert.equal([...db.revisions.values()].filter((revision) => revision.status === "archived" && !revision.published_at).length, 0);
+  });
+});
+
+test("admin media list requires Access and reports revision references", async () => {
+  const db = invitationDatabase();
+  const draftDoc = confirmedDocument();
+  const publishedDoc = confirmedDocument();
+  const archivedDoc = confirmedDocument();
+  const draftMediaId = "00000000-0000-0000-0000-000000000001";
+  const publishedMediaId = "00000000-0000-0000-0000-000000000002";
+  const archivedMediaId = "00000000-0000-0000-0000-000000000003";
+  const audioId = "00000000-0000-0000-0000-000000000004";
+  draftDoc.photos.pastel.gallery = [galleryPhoto(0)];
+  publishedDoc.photos.pastel.gallery = [{
+    ...galleryPhoto(1),
+    src: `/api/media/invitation/${publishedMediaId}/pastel-gallery-1/480.webp`,
+    srcSet: `/api/media/invitation/${publishedMediaId}/pastel-gallery-1/480.webp 480w, /api/media/invitation/${publishedMediaId}/pastel-gallery-1/960.webp 960w`,
+  }];
+  archivedDoc.photos.pastel.gallery = [{
+    ...galleryPhoto(2),
+    src: `/api/media/invitation/${archivedMediaId}/pastel-gallery-2/480.webp`,
+    srcSet: `/api/media/invitation/${archivedMediaId}/pastel-gallery-2/480.webp 480w, /api/media/invitation/${archivedMediaId}/pastel-gallery-2/960.webp 960w`,
+  }];
+  db.revisions.set("draft-1", revisionRow("draft-1", draftDoc, { status: "draft" }));
+  db.revisions.set("pub-1", revisionRow("pub-1", publishedDoc, { status: "published", publishedAt: "2026-08-15T00:00:00.000Z" }));
+  db.revisions.set("arch-1", revisionRow("arch-1", archivedDoc, { status: "archived", publishedAt: "2026-08-01T00:00:00.000Z" }));
+  db.state.draft_revision_id = "draft-1";
+  db.state.published_revision_id = "pub-1";
+  db.mediaSets.set(draftMediaId, mediaRow(draftMediaId, "pastel-gallery-0", 1000));
+  db.mediaSets.set(publishedMediaId, mediaRow(publishedMediaId, "pastel-gallery-1", 2000));
+  db.mediaSets.set(archivedMediaId, mediaRow(archivedMediaId, "pastel-gallery-2", 3000));
+  db.mediaSets.set(audioId, mediaRow(audioId, "background-music", 4000));
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: memoryBucket() };
+    const denied = await worker.fetch(request("/api/admin/media/list", { method: "GET" }), env);
+    assert.equal(denied.status, 401);
+
+    const response = await worker.fetch(request("/api/admin/media/list", { method: "GET", headers }), env);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.media.length, 4);
+    assert.equal(payload.usage.usedBytes, 10000);
+    const byId = Object.fromEntries(payload.media.map((item) => [item.mediaId, item]));
+    assert.equal(byId[draftMediaId].references.draft, true);
+    assert.equal(byId[draftMediaId].references.published, false);
+    assert.equal(byId[publishedMediaId].references.published, true);
+    assert.deepEqual(byId[archivedMediaId].references.archivedRevisions.map((revision) => revision.id), ["arch-1"]);
+    assert.equal(byId[audioId].kind, "audio");
+    assert.equal(byId[audioId].previewUrl, null);
+    assert.equal(byId[draftMediaId].previewUrl, `/api/media/invitation/${draftMediaId}/pastel-gallery-0/480.webp`);
+  });
+});
+
+test("media deletion frees quota and removes R2 objects when unreferenced", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000009";
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 5000));
+  const bucket = memoryBucket();
+  bucket.objects.set(`invitation/${mediaId}/pastel-gallery-0/original.jpg`, new Uint8Array([1]));
+  bucket.objects.set(`invitation/${mediaId}/pastel-gallery-0/480.webp`, new Uint8Array([2]));
+  bucket.objects.set(`invitation/${mediaId}/pastel-gallery-0/960.webp`, new Uint8Array([3]));
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.deleted, mediaId);
+    assert.equal(payload.freedBytes, 5000);
+    assert.equal(payload.objectsDeleted, true);
+    assert.equal(payload.usage.usedBytes, 0);
+    assert.equal(db.mediaSets.size, 0);
+    assert.equal(bucket.objects.size, 0);
+  });
+});
+
+test("media deletion strips draft references and resets music to the bundled fallback", async () => {
+  const db = invitationDatabase();
+  const photoId = "00000000-0000-0000-0000-000000000001";
+  const keepId = "00000000-0000-0000-0000-000000000002";
+  const audioId = "00000000-0000-0000-0000-000000000003";
+  const draftDoc = confirmedDocument();
+  draftDoc.photos.pastel.gallery = [galleryPhoto(0), {
+    ...galleryPhoto(1),
+    src: `/api/media/invitation/${keepId}/pastel-gallery-1/480.webp`,
+    srcSet: `/api/media/invitation/${keepId}/pastel-gallery-1/480.webp 480w, /api/media/invitation/${keepId}/pastel-gallery-1/960.webp 960w`,
+  }];
+  draftDoc.content.music = {
+    src: `/api/media/invitation/${audioId}/background-music/track.mp3`,
+    title: "업로드한 곡",
+    artist: "관리자",
+    sourceUrl: "https://example.test/source",
+    licenseLabel: "CC0",
+    licenseUrl: "https://example.test/license",
+  };
+  db.revisions.set("draft-1", revisionRow("draft-1", draftDoc, { status: "draft" }));
+  db.state.draft_revision_id = "draft-1";
+  db.mediaSets.set(photoId, mediaRow(photoId, "pastel-gallery-0", 1000));
+  db.mediaSets.set(audioId, mediaRow(audioId, "background-music", 2000));
+  const bucket = memoryBucket();
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket };
+    const photoResponse = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId: photoId }),
+    }), env);
+    assert.equal(photoResponse.status, 200);
+    let payload = await photoResponse.json();
+    assert.equal(payload.removedFromDraft, 1);
+    let draft = JSON.parse(db.revisions.get("draft-1").content_json);
+    assert.equal(draft.photos.pastel.gallery.length, 1);
+    assert.equal(draft.photos.pastel.gallery[0].src.includes(keepId), true);
+    assert.equal(draft.content.music.src.includes(audioId), true);
+
+    const audioResponse = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId: audioId }),
+    }), env);
+    assert.equal(audioResponse.status, 200);
+    payload = await audioResponse.json();
+    assert.equal(payload.removedFromDraft, 1);
+    draft = JSON.parse(db.revisions.get("draft-1").content_json);
+    assert.deepEqual(draft.content.music, weddingContent.music);
+  });
+});
+
+test("media deletion blocks while the published revision references the file", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000001";
+  const publishedDoc = confirmedDocument();
+  publishedDoc.photos.pastel.gallery = [galleryPhoto(0)];
+  db.revisions.set("pub-1", revisionRow("pub-1", publishedDoc, { status: "published", publishedAt: "2026-08-15T00:00:00.000Z" }));
+  db.state.published_revision_id = "pub-1";
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 1000));
+  const bucket = memoryBucket();
+  bucket.objects.set(`invitation/${mediaId}/pastel-gallery-0/480.webp`, new Uint8Array([1]));
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MEDIA_IN_USE");
+    assert.equal(db.mediaSets.size, 1);
+    assert.equal(bucket.objects.size, 1);
+  });
+});
+
+test("media deletion lists dependent revisions and cascades only after confirmation", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000001";
+  const archivedDoc = confirmedDocument();
+  archivedDoc.photos.pastel.gallery = [galleryPhoto(0)];
+  db.revisions.set("arch-1", revisionRow("arch-1", archivedDoc, { status: "archived", publishedAt: "2026-08-01T00:00:00.000Z" }));
+  db.revisions.set("arch-2", revisionRow("arch-2", confirmedDocument(), { status: "archived", publishedAt: "2026-08-02T00:00:00.000Z" }));
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 1000));
+  const bucket = memoryBucket();
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket };
+    const blocked = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), env);
+    assert.equal(blocked.status, 409);
+    const blockedPayload = await blocked.json();
+    assert.equal(blockedPayload.code, "MEDIA_REFERENCED");
+    assert.deepEqual(blockedPayload.dependentRevisions.map((revision) => revision.id), ["arch-1"]);
+    assert.equal(db.mediaSets.size, 1);
+    assert.equal(db.revisions.has("arch-1"), true);
+
+    const confirmed = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId, deleteRevisions: true }),
+    }), env);
+    assert.equal(confirmed.status, 200);
+    const payload = await confirmed.json();
+    assert.deepEqual(payload.deletedRevisions.map((revision) => revision.id), ["arch-1"]);
+    assert.equal(db.revisions.has("arch-1"), false);
+    assert.equal(db.revisions.has("arch-2"), true);
+    assert.equal(db.mediaSets.size, 0);
+  });
+});
+
+test("media list hides reserved uploads and deletion refuses in-flight sets", async () => {
+  const db = invitationDatabase();
+  const reservedId = "00000000-0000-0000-0000-00000000000a";
+  const storedId = "00000000-0000-0000-0000-00000000000b";
+  const staleId = "00000000-0000-0000-0000-00000000000f";
+  db.mediaSets.set(reservedId, { ...mediaRow(reservedId, "pastel-gallery-9", 1000, new Date().toISOString()), status: "reserved" });
+  db.mediaSets.set(storedId, mediaRow(storedId, "pastel-gallery-10", 2000));
+  db.mediaSets.set(staleId, { ...mediaRow(staleId, "pastel-gallery-15", 3000), status: "reserved" });
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: memoryBucket() };
+    const list = await worker.fetch(request("/api/admin/media/list", { method: "GET", headers }), env);
+    assert.equal(list.status, 200);
+    const payload = await list.json();
+    assert.deepEqual(payload.media.map((item) => item.mediaId).sort(), [staleId, storedId].sort());
+    assert.equal(payload.media.find((item) => item.mediaId === staleId).abandoned, true);
+    assert.equal(payload.media.find((item) => item.mediaId === storedId).abandoned, false);
+    assert.equal(payload.usage.usedBytes, 6000);
+
+    const refused = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId: reservedId }),
+    }), env);
+    assert.equal(refused.status, 409);
+    assert.equal((await refused.json()).code, "MEDIA_IN_USE");
+    assert.equal(db.mediaSets.has(reservedId), true);
+
+    const staleDelete = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId: staleId }),
+    }), env);
+    assert.equal(staleDelete.status, 200);
+    assert.equal(db.mediaSets.has(staleId), false);
+    assert.equal(db.mediaSets.has(reservedId), true);
+  });
+});
+
+test("media upload fails closed when the reservation row disappears before commit", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const objects = new Map();
+  const bucket = {
+    async put(key, value, options) {
+      objects.set(key, { value: await storedBytes(value), httpMetadata: options.httpMetadata });
+      const reserved = [...db.mediaSets.values()].find((row) => row.status === "reserved");
+      if (reserved) db.mediaSets.delete(reserved.id);
+    },
+    async get(key) {
+      return objects.get(key) || null;
+    },
+    async delete(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: {
+        origin: "https://example.test",
+        "cf-access-jwt-assertion": fixture.assertion,
+        ...MEDIA_UPLOAD_HEADERS,
+      },
+      body: await mediaUploadBody({
+        slot: "pastel-hero",
+        alt: "",
+        position: "50% 50%",
+        original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MEDIA_STORAGE_LOST");
+    assert.equal(objects.size, 0);
+    assert.equal(db.mediaSets.size, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("media reference matching is case-insensitive", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-00000000000c";
+  const archivedDoc = confirmedDocument();
+  archivedDoc.photos.pastel.gallery = [{
+    ...galleryPhoto(0),
+    src: `/api/media/INVITATION/${mediaId.toUpperCase()}/pastel-gallery-0/480.webp`,
+    srcSet: `/api/media/INVITATION/${mediaId.toUpperCase()}/pastel-gallery-0/480.webp 480w`,
+  }];
+  db.revisions.set("arch-1", revisionRow("arch-1", archivedDoc, { status: "archived", publishedAt: "2026-08-01T00:00:00.000Z" }));
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 1000));
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: memoryBucket() };
+    const list = await worker.fetch(request("/api/admin/media/list", { method: "GET", headers }), env);
+    const payload = await list.json();
+    const item = payload.media.find((entry) => entry.mediaId === mediaId);
+    assert.deepEqual(item.references.archivedRevisions.map((revision) => revision.id), ["arch-1"]);
+
+    const blocked = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), env);
+    assert.equal(blocked.status, 409);
+    assert.equal((await blocked.json()).code, "MEDIA_REFERENCED");
+  });
+});
+
+test("media deletion refuses when the draft document cannot be parsed", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-00000000000d";
+  db.revisions.set("draft-1", {
+    id: "draft-1",
+    content_json: `{"photos": "invitation/${mediaId}/`,
+    status: "draft",
+    created_at: "2026-08-10T00:00:00.000Z",
+    created_by: "groom@example.test",
+    published_at: null,
+  });
+  db.state.draft_revision_id = "draft-1";
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 1000));
+  const bucket = memoryBucket();
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "DRAFT_CORRUPTED");
+    assert.equal(db.mediaSets.size, 1);
+    assert.equal(bucket.objects.size, 0);
+  });
+});
+
+test("media deletion aborts when a revision becomes a live pointer mid-batch", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000001";
+  const archivedDoc = confirmedDocument();
+  archivedDoc.photos.pastel.gallery = [galleryPhoto(0)];
+  db.revisions.set("arch-1", revisionRow("arch-1", archivedDoc, { status: "archived", publishedAt: "2026-08-01T00:00:00.000Z" }));
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 1000));
+  const bucket = memoryBucket();
+  bucket.objects.set(`invitation/${mediaId}/pastel-gallery-0/480.webp`, new Uint8Array([1]));
+  const originalBatch = db.batch.bind(db);
+  db.batch = async (statements) => {
+    db.state.published_revision_id = "arch-1";
+    return originalBatch(statements);
+  };
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId, deleteRevisions: true }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MEDIA_IN_USE");
+    assert.equal(db.revisions.has("arch-1"), true);
+    assert.equal(db.mediaSets.has(mediaId), true);
+    assert.equal(bucket.objects.size, 1);
+  });
+});
+
+test("photo upload cleanup still releases the reservation when R2 delete fails", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const objects = new Map();
+  const bucket = {
+    async put(key, value) {
+      objects.set(key, await storedBytes(value));
+      throw new Error("simulated R2 write failure");
+    },
+    async get(key) {
+      return objects.get(key) || null;
+    },
+    async delete() {
+      throw new Error("simulated R2 delete failure");
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: {
+        origin: "https://example.test",
+        "cf-access-jwt-assertion": fixture.assertion,
+        ...MEDIA_UPLOAD_HEADERS,
+      },
+      body: await mediaUploadBody({
+        slot: "pastel-hero",
+        alt: "",
+        position: "50% 50%",
+        original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 500);
+    assert.equal(db.mediaSets.size, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("legacy media sets migrate to the v2 quota table on the first media operation", async () => {
+  const db = invitationDatabase();
+  const legacyId = "00000000-0000-0000-0000-0000000000aa";
+  db.legacyMediaSets.set(legacyId, mediaRow(legacyId, "pastel-gallery-3", 1000));
+  const bucket = memoryBucket();
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket };
+    const list = await worker.fetch(request("/api/admin/media/list", { method: "GET", headers }), env);
+    assert.equal(list.status, 200);
+    const payload = await list.json();
+    assert.deepEqual(payload.media.map((item) => item.mediaId), [legacyId]);
+    assert.equal(db.mediaSets.has(legacyId), true);
+    assert.equal(db.legacyMediaSets.size, 0);
+
+    const deleted = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId: legacyId }),
+    }), env);
+    assert.equal(deleted.status, 200);
+    assert.equal(db.mediaSets.has(legacyId), false);
+    assert.equal(db.legacyMediaSets.size, 0);
+  });
+});
+
+test("media reservations accept totals beyond the retired 30MiB per-set bound", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const bucket = memoryBucket();
+  const largeOriginal = new Uint8Array(40 * 1024 * 1024);
+  largeOriginal[0] = 0xff;
+  largeOriginal[1] = 0xd8;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: {
+        origin: "https://example.test",
+        "cf-access-jwt-assertion": fixture.assertion,
+        ...MEDIA_UPLOAD_HEADERS,
+      },
+      body: await mediaUploadBody({
+        slot: "pastel-gallery-new",
+        alt: "대형 사진",
+        position: "50% 50%",
+        original: new File([largeOriginal], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 201);
+    const set = [...db.mediaSets.values()][0];
+    assert.equal(set.status, "stored");
+    assert.equal(set.total_bytes > 40 * 1024 * 1024, true);
   } finally {
     globalThis.fetch = originalFetch;
   }
