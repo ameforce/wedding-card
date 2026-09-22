@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { INVITATION_MAX_WIDTH, assertRibbonFrameDimensions, calculatePanelHingeTurn, calculateRootTranslation, createFrameStallGate, createRibbonFrameLoader, createSequentialRibbonScheduler, loadInitialRibbonFrames, loadRibbonManifest } from "./ribbon-player.mjs";
 import "./pastel-intro.css";
+import { drawRibbonFrame, ribbonSpanStyle } from "./ribbon-span.mjs";
 
 const MANIFEST_URL = "/assets/design/ribbon-sequence/manifest.json";
 const ASSET_WAIT_MS = 5_000;
@@ -14,8 +15,7 @@ function drawFrame(canvas, frame, manifest) {
   if (!context) throw new Error("Ribbon sequence canvas is unavailable.");
   if (canvas.width !== manifest.width) canvas.width = manifest.width;
   if (canvas.height !== manifest.height) canvas.height = manifest.height;
-  context.clearRect(0, 0, manifest.width, manifest.height);
-  context.drawImage(frame, 0, 0, manifest.width, manifest.height);
+  drawRibbonFrame(context, frame, manifest);
 }
 
 function earlyIntroState() { return window.__pastelIntroEarly || null; }
@@ -116,6 +116,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
   const skipRef = useRef(() => {});
   const panelOpeningRef = useRef(false);
   const [posterSource] = useState(() => document.querySelector("#pastel-intro-early-poster img")?.currentSrc || "");
+  const [posterSlices] = useState(() => document.getElementById("pastel-intro-early-poster")?.dataset.ribbonSchema === "2" ? ["center", "left", "right"] : ["full"]);
   const [posterDimensions] = useState(() => {
     const poster = document.querySelector("#pastel-intro-early-poster");
     const width = Number(poster?.dataset.ribbonWidth);
@@ -412,9 +413,11 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
         <div className="pastel-intro-cover__panel pastel-intro-cover__panel--right" />
         <div className="pastel-intro-cover__seam" />
       </div>
-      <div ref={ribbonTrackRef} className="pastel-intro-cover__ribbon-track" style={{ aspectRatio: `${posterDimensions.width} / ${posterDimensions.height}` }}>
-        {posterSource && <img className={`pastel-intro-cover__poster${frameLive ? " is-hidden" : ""}`} src={posterSource} width={posterDimensions.width} height={posterDimensions.height} alt="" />}
-        <canvas ref={canvasRef} className="pastel-intro-cover__ribbon" width={posterDimensions.width} height={posterDimensions.height} />
+      <div className="pastel-intro-cover__ribbon-window" style={ribbonSpanStyle}>
+        <div ref={ribbonTrackRef} className="pastel-intro-cover__ribbon-track" style={{ aspectRatio: `${posterDimensions.width} / ${posterDimensions.height}` }}>
+          {posterSource && posterSlices.map((slice) => <img key={slice} className={`pastel-intro-cover__poster pastel-intro-cover__slice--${slice}${frameLive ? " is-hidden" : ""}`} src={posterSource} width={posterDimensions.width} height={posterDimensions.height} alt="" />)}
+          <canvas ref={canvasRef} className="pastel-intro-cover__ribbon" width={posterDimensions.width} height={posterDimensions.height} />
+        </div>
       </div>
     </div>
   );

@@ -27,7 +27,7 @@ test("actual paper handoff is neutral on both faces and turning activates scoped
     });
     try {
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`, { waitUntil: "commit" });
-      await page.locator("#pastel-intro-early-poster img").evaluate((image) => image.decode());
+      await page.locator("#pastel-intro-early-poster img").first().evaluate((image) => image.decode());
       const early = await page.screenshot();
       releaseMain();
       await page.waitForFunction(() => {
