@@ -18,7 +18,6 @@ export const ACCOUNT_SIDE_LABELS = Object.freeze({ groom: "신랑 측", bride: "
 export const MAX_ACCOUNT_ENTRIES = 8;
 export const REQUIRED_COPY_LINES = 4;
 export const MIN_GALLERY_PHOTOS = 1;
-export const MAX_GALLERY_PHOTOS = 12;
 const ACCOUNT_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{0,30}$/;
 
 export function updateRequiredCopyLine(lines, index, value) {
@@ -258,9 +257,9 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
   }
   Object.assign(errors, validateMusicContent(document?.content?.music, { allowLocalPreview }));
   const gallery = document?.photos?.pastel?.gallery;
-  const galleryValid = Array.isArray(gallery) && gallery.length >= MIN_GALLERY_PHOTOS && gallery.length <= MAX_GALLERY_PHOTOS;
+  const galleryValid = Array.isArray(gallery) && gallery.length >= MIN_GALLERY_PHOTOS;
   if (!galleryValid) {
-    errors["사진"] = `갤러리 사진은 ${MIN_GALLERY_PHOTOS}장부터 ${MAX_GALLERY_PHOTOS}장까지 사용할 수 있습니다.`;
+    errors["사진"] = `갤러리 사진은 최소 ${MIN_GALLERY_PHOTOS}장이 필요합니다.`;
   }
   const photos = [document?.photos?.pastel?.hero, ...(Array.isArray(gallery) ? gallery : [])];
   const seenSources = new Set();

@@ -6,7 +6,6 @@ import {
   ACCOUNT_SIDE_LABELS,
   ACCOUNT_SIDES,
   MAX_ACCOUNT_ENTRIES,
-  MAX_GALLERY_PHOTOS,
   MIN_GALLERY_PHOTOS,
   REQUIRED_COPY_LINES,
   buildPublishDiff,
@@ -129,7 +128,7 @@ function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, fileErr
   );
 }
 
-function GalleryPhotoUploader({ onUpload, busy, disabled, limitReached, progress }) {
+function GalleryPhotoUploader({ onUpload, busy, disabled, progress }) {
   const [position, setPosition] = useState("50% 50%");
   const positionMatch = position.trim().match(/^(\d{1,3})%\s+(\d{1,3})%$/);
   const ready = Boolean(positionMatch)
@@ -151,7 +150,6 @@ function GalleryPhotoUploader({ onUpload, busy, disabled, limitReached, progress
         }} />
       </label>
       {progress && <UploadProgress progress={progress} />}
-      {limitReached && <small>갤러리는 최대 {MAX_GALLERY_PHOTOS}장까지 추가할 수 있습니다.</small>}
     </section>
   );
 }
@@ -620,19 +618,18 @@ export function ContentAdmin() {
   };
 
   const uploadGalleryPhotos = async (files, position) => {
-    const remaining = MAX_GALLERY_PHOTOS - documentRef.current.photos.pastel.gallery.length;
-    const accepted = files.slice(0, Math.max(0, remaining));
-    const dropped = files.length - accepted.length;
-    if (accepted.length === 0) {
-      setStatus({ tone: "error", message: `갤러리는 최대 ${MAX_GALLERY_PHOTOS}장까지 추가할 수 있습니다.` });
-      return;
-    }
     setUploadingSlot("pastel-gallery-new");
     let succeeded = 0;
+    let skipped = 0;
+    let remainingBytes = mediaUsage?.localReview ? null : mediaUsage?.remainingBytes ?? null;
     const failures = [];
     try {
-      for (const [index, file] of accepted.entries()) {
-        setUploadProgress({ slot: "pastel-gallery-new", index: index + 1, count: accepted.length, fileName: file.name, phase: "optimize", loaded: 0, total: 0 });
+      for (const [index, file] of files.entries()) {
+        if (remainingBytes !== null && file.size > remainingBytes) {
+          skipped = files.length - index;
+          break;
+        }
+        setUploadProgress({ slot: "pastel-gallery-new", index: index + 1, count: files.length, fileName: file.name, phase: "optimize", loaded: 0, total: 0 });
         try {
           const result = await adapter.uploadPhoto({
             slot: "pastel-gallery-new",
@@ -644,7 +641,9 @@ export function ContentAdmin() {
           const next = cloneContentDocument(documentRef.current);
           next.photos.pastel.gallery.push(result.photo);
           commitEdit(next, ".pastel-gallery-section");
-          setMediaUsage(result.usage || await adapter.getMediaUsage());
+          const usage = result.usage || await adapter.getMediaUsage();
+          setMediaUsage(usage);
+          remainingBytes = usage?.localReview ? null : usage?.remainingBytes ?? remainingBytes;
           succeeded += 1;
         } catch (error) {
           if (isAdminAuthRequiredError(error)) {
@@ -652,19 +651,25 @@ export function ContentAdmin() {
             return;
           }
           failures.push(`${file.name}: ${error?.message || "업로드하지 못했습니다."}`);
+          if (error?.status === 507 || error?.code === "MEDIA_STORAGE_LIMIT") {
+            skipped = files.length - index - 1;
+            break;
+          }
         }
       }
     } finally {
       setUploadingSlot("");
       setUploadProgress(null);
     }
-    const droppedNote = dropped > 0 ? ` 갤러리 한도로 ${dropped}장은 제외했습니다.` : "";
-    if (failures.length === 0) {
-      setStatus({ tone: "success", message: `${succeeded}장의 사진을 초안에 넣었습니다.${droppedNote} 각 사진의 대체 텍스트와 초점을 확인해 주세요.` });
+    const skippedNote = skipped > 0 ? ` 저장 공간이 부족해 나머지 ${skipped}장은 올리지 않았습니다.` : "";
+    const failureNote = failures.length > 0 ? ` ${failures.join(" · ")}` : "";
+    if (failures.length === 0 && skipped === 0) {
+      setStatus({ tone: "success", message: `${succeeded}장의 사진을 초안에 넣었습니다. 각 사진의 대체 텍스트와 초점을 확인해 주세요.` });
     } else if (succeeded > 0) {
-      setStatus({ tone: "error", message: `${succeeded}장은 추가했지만 ${failures.length}장은 실패했습니다.${droppedNote} ${failures[0]}` });
+      const failureCount = failures.length > 0 ? ` ${failures.length}장은 실패했습니다.` : "";
+      setStatus({ tone: "error", message: `${succeeded}장은 추가했습니다.${failureCount}${skippedNote}${failureNote}` });
     } else {
-      setStatus({ tone: "error", message: `사진을 업로드하지 못했습니다.${droppedNote} ${failures[0] || ""}` });
+      setStatus({ tone: "error", message: `사진을 업로드하지 못했습니다.${skippedNote}${failureNote}` });
     }
   };
 
@@ -902,7 +907,7 @@ export function ContentAdmin() {
                   </div>}
                 />
               ))}
-              <GalleryPhotoUploader onUpload={uploadGalleryPhotos} busy={uploadingSlot === "pastel-gallery-new"} disabled={Boolean(uploadingSlot) || photos.gallery.length >= MAX_GALLERY_PHOTOS} limitReached={photos.gallery.length >= MAX_GALLERY_PHOTOS} progress={uploadProgress?.slot === "pastel-gallery-new" ? uploadProgress : null} />
+              <GalleryPhotoUploader onUpload={uploadGalleryPhotos} busy={uploadingSlot === "pastel-gallery-new"} disabled={Boolean(uploadingSlot)} progress={uploadProgress?.slot === "pastel-gallery-new" ? uploadProgress : null} />
             </div>
           </CollapsibleSection>
 

@@ -11,6 +11,7 @@ export const LOCAL_REVIEW_STORAGE_KEY = "wedding-card.content-review.v1";
 export const LOCAL_REVIEW_EVENT = "wedding-card:content-review-updated";
 export const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 export const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
+export const MAX_IMAGE_FILE_BYTES = 90 * 1024 * 1024;
 export const ACCESS_LOGOUT_PATH = "/cdn-cgi/access/logout";
 const LOCAL_AUDIO_REFERENCE_PREFIX = "local-review-audio:";
 const LOCAL_AUDIO_DATABASE_NAME = "wedding-card.content-review-media.v1";
@@ -301,7 +302,7 @@ async function optimizedFiles(file) {
   if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
     throw new Error("JPG, PNG 또는 WebP 이미지를 선택해 주세요.");
   }
-  if (file.size > 25 * 1024 * 1024) throw new Error("원본 이미지는 25MB 이하만 업로드할 수 있습니다.");
+  if (file.size > MAX_IMAGE_FILE_BYTES) throw new Error("원본 이미지는 90MB 이하만 업로드할 수 있습니다.");
   const [small, large] = await Promise.all([resizeWebp(file, 480), resizeWebp(file, 960)]);
   return { small, large };
 }

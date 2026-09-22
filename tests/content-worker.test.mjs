@@ -195,8 +195,8 @@ function galleryPhoto(index) {
   };
 }
 
-test("Worker accepts exactly four copy lines and dynamic galleries from one to twelve photos", () => {
-  for (const photoCount of [1, 4, 12]) {
+test("Worker accepts exactly four copy lines and dynamic galleries of any size from one photo up", () => {
+  for (const photoCount of [1, 4, 12, 30]) {
     const document = confirmedDocument();
     document.photos.pastel.gallery = Array.from({ length: photoCount }, (_, index) => galleryPhoto(index));
     assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
@@ -209,7 +209,7 @@ test("Worker rejects legacy copy counts, invalid gallery counts, duplicates, and
     document.content.story = Array.from({ length: lineCount }, (_, index) => `이야기 ${index + 1}`);
     assert.throws(() => __test.validateInvitationDocument(document, { write: true }), (error) => error.code === "INVALID_CONTENT");
   }
-  for (const photoCount of [0, 13]) {
+  for (const photoCount of [0]) {
     const document = confirmedDocument();
     document.photos.pastel.gallery = Array.from({ length: photoCount }, (_, index) => galleryPhoto(index));
     assert.throws(() => __test.validateInvitationDocument(document, { write: true }), (error) => error.code === "INVALID_CONTENT");
@@ -255,7 +255,7 @@ function memoryMediaBucket() {
   return {
     objects,
     async put(key, value, options) {
-      objects.set(key, { value: new Uint8Array(value), httpMetadata: options.httpMetadata, etag: `etag-${objects.size}` });
+      objects.set(key, { value: new Uint8Array(value instanceof Blob ? await value.arrayBuffer() : value), httpMetadata: options.httpMetadata, etag: `etag-${objects.size}` });
     },
     async head(key) {
       const object = objects.get(key);
@@ -692,7 +692,7 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
   const objects = new Map();
   const bucket = {
     async put(key, value, options) {
-      objects.set(key, { value: new Uint8Array(value), httpMetadata: options.httpMetadata, etag: `etag-${objects.size}` });
+      objects.set(key, { value: new Uint8Array(value instanceof Blob ? await value.arrayBuffer() : value), httpMetadata: options.httpMetadata, etag: `etag-${objects.size}` });
     },
     async get(key) {
       const object = objects.get(key);
@@ -753,7 +753,7 @@ test("media uploads accept an empty description but document writes still requir
   const objects = new Map();
   const bucket = {
     async put(key, value, options) {
-      objects.set(key, { value: new Uint8Array(value), httpMetadata: options.httpMetadata });
+      objects.set(key, { value: new Uint8Array(value instanceof Blob ? await value.arrayBuffer() : value), httpMetadata: options.httpMetadata });
     },
     async get() { return null; },
     async delete(keys) {
@@ -779,6 +779,22 @@ test("media uploads accept an empty description but document writes still requir
     const payload = await uploadResponse.json();
     assert.equal(payload.photo.alt, "");
     assert.equal(objects.size, 3);
+
+    const highIndex = new FormData();
+    highIndex.set("slot", "pastel-gallery-15");
+    highIndex.set("alt", "높은 순번 사진");
+    highIndex.set("position", "50% 50%");
+    highIndex.set("original", new File([new Uint8Array([9])], "photo.jpg", { type: "image/jpeg" }));
+    highIndex.set("small", new File([new Uint8Array([8])], "480.webp", { type: "image/webp" }));
+    highIndex.set("large", new File([new Uint8Array([7])], "960.webp", { type: "image/webp" }));
+    const highIndexResponse = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: highIndex,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(highIndexResponse.status, 201);
+    assert.match((await highIndexResponse.json()).photo.src, /\/pastel-gallery-15\/480\.webp$/);
+    assert.equal(objects.size, 6);
 
     const overLimit = new FormData();
     overLimit.set("slot", "pastel-gallery-new");
@@ -823,7 +839,7 @@ test("failed image variants settle before R2 cleanup and release the quota reser
       try {
         if (key.endsWith("/original.jpg")) throw new Error("simulated original write failure");
         await new Promise((resolve) => setTimeout(resolve, 10));
-        objects.set(key, new Uint8Array(value));
+        objects.set(key, new Uint8Array(value instanceof Blob ? await value.arrayBuffer() : value));
       } finally {
         settledWrites += 1;
       }
@@ -1035,6 +1051,36 @@ test("MP3 upload rejects spoofed files and shared-quota overflow before R2 write
     assert.equal(quotaResponse.status, 507);
     assert.equal((await quotaResponse.json()).code, "MEDIA_STORAGE_LIMIT");
     assert.equal(quotaBucket.objects.size, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("oversized MP3 request bodies are rejected before buffering and R2 writes", async () => {
+  const fixture = await accessFixture();
+  let putCount = 0;
+  const bucket = {
+    async put() { putCount += 1; },
+    async get() { return null; },
+    async delete() {},
+  };
+  const oversized = new FormData();
+  oversized.set("file", new File([new Uint8Array([0x49, 0x44, 0x33])], "huge.mp3", { type: "audio/mpeg" }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
+      method: "POST",
+      headers: {
+        origin: "https://example.test",
+        "cf-access-jwt-assertion": fixture.assertion,
+        "content-length": String(27 * 1024 * 1024),
+      },
+      body: oversized,
+    }), { ...fixture.env, GUESTBOOK_DB: invitationDatabase(), WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 413);
+    assert.equal((await response.json()).code, "MEDIA_TOO_LARGE");
+    assert.equal(putCount, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
