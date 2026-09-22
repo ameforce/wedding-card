@@ -848,14 +848,6 @@ export function ContentAdmin() {
           </CollapsibleSection>
 
           <CollapsibleSection title="배경 음악" busy={busy}>
-            <div className="content-admin-storage" aria-live="polite">
-              <div>
-                <strong>미디어 저장 공간(사진·음악)</strong>
-                <span>{mediaUsage?.localReview ? "로컬 검토에서는 Cloudflare 공간을 사용하지 않습니다." : `${formatStorage(mediaUsage?.usedBytes || 0)} / ${formatStorage(mediaUsage?.limitBytes || 0)}`}</span>
-              </div>
-              <progress max="100" value={mediaUsage?.percent || 0} aria-label="미디어 저장 공간 사용률" />
-              <small>{mediaUsage?.localReview ? "production에서는 사진과 음악 합계가 2GB에 도달하면 추가 업로드가 자동으로 차단됩니다." : `사용률 ${mediaUsage?.percent || 0}% · 남은 공간 ${formatStorage(mediaUsage?.remainingBytes || 0)}`}</small>
-            </div>
             <div className="content-admin-music-card">
               <div className="content-admin-grid">
                 <Field label="곡명" value={music.title} error={musicErrors.title} onChange={(value) => update(["content", "music", "title"], value)} />
@@ -883,6 +875,15 @@ export function ContentAdmin() {
               </div>
             </div>
           </CollapsibleSection>
+
+          <div className="content-admin-storage" aria-live="polite">
+            <div>
+              <strong>미디어 저장 공간(사진·음악)</strong>
+              <span>{mediaUsage?.localReview ? "로컬 검토에서는 Cloudflare 공간을 사용하지 않습니다." : `${formatStorage(mediaUsage?.usedBytes || 0)} / ${formatStorage(mediaUsage?.limitBytes || 0)}`}</span>
+            </div>
+            <progress max="100" value={mediaUsage?.percent || 0} aria-label="미디어 저장 공간 사용률" />
+            <small>{mediaUsage?.localReview ? "production에서는 사진과 음악 합계가 2GB에 도달하면 추가 업로드가 자동으로 차단됩니다." : `사용률 ${mediaUsage?.percent || 0}% · 남은 공간 ${formatStorage(mediaUsage?.remainingBytes || 0)}`}</small>
+          </div>
 
           <CollapsibleSection title="사진" busy={busy} attention={Boolean(uploadingSlot || validationErrors["사진"])}>
             <div className="content-admin-photo-list">
