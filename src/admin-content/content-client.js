@@ -188,6 +188,7 @@ function postFormDataXhr(XHR, path, form, onProgress) {
     };
     xhr.onerror = () => reject(new Error("네트워크 오류로 업로드하지 못했습니다."));
     xhr.onabort = () => reject(new Error("업로드가 중단되었습니다."));
+    onProgress?.({ phase: "upload", loaded: 0, total: 0 });
     xhr.send(form);
   });
 }
