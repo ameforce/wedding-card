@@ -656,8 +656,8 @@ test("production and local adapters accept only bounded MP3 uploads", async () =
   const uploaded = await cloud.uploadAudio({ file });
   assert.equal(uploaded.audio.mimeType, "audio/mpeg");
   assert.equal(calls[0][0], "/api/admin/media/audio");
-  assert.equal(calls[0][1].body instanceof FormData, true);
-  assert.equal(calls[0][1].headers, undefined);
+  assert.equal(calls[0][1].body instanceof File, true);
+  assert.equal(calls[0][1].headers["content-type"], "audio/mpeg");
 
   const storage = memoryStorage();
   const blobs = new Map();
@@ -696,7 +696,8 @@ test("media uploads stream real XHR progress and preserve API error shape", asyn
       this.upload = {};
       sent.push(this);
     }
-    open(method, path) { this.method = method; this.path = path; }
+    open(method, path) { this.method = method; this.path = path; this.headers = {}; }
+    setRequestHeader(name, value) { this.headers[name] = value; }
     send(body) {
       this.body = body;
       this.upload.onprogress({ lengthComputable: false, loaded: 0, total: 0 });
@@ -727,7 +728,8 @@ test("media uploads stream real XHR progress and preserve API error shape", asyn
   assert.equal(sent.length, 1);
   assert.equal(sent[0].method, "POST");
   assert.equal(sent[0].path, "/api/admin/media/audio");
-  assert.equal(sent[0].body instanceof FormData, true);
+  assert.equal(sent[0].body instanceof File, true);
+  assert.equal(sent[0].headers["content-type"], "audio/mpeg");
   assert.equal(uploaded.audio.mimeType, "audio/mpeg");
 
   FakeXhr.status = 413;
@@ -760,6 +762,7 @@ test("media uploads stream real XHR progress and preserve API error shape", asyn
   class SilentXhr {
     constructor() { this.upload = {}; }
     open(method, path) { this.method = method; this.path = path; }
+    setRequestHeader() {}
     send() {
       this.status = 201;
       this.responseText = JSON.stringify({ audio: { src: "/api/media/x/track.mp3" }, usage: {} });

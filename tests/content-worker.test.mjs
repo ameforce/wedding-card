@@ -250,12 +250,45 @@ test("Worker rejects legacy copy counts, invalid gallery counts, duplicates, and
   assert.throws(() => __test.validateInvitationDocument(invalidCrop, { write: true }), (error) => error.code === "INVALID_CONTENT");
 });
 
+async function storedBytes(value) {
+  if (value instanceof ReadableStream) return new Uint8Array(await new Response(value).arrayBuffer());
+  if (value instanceof Blob) return new Uint8Array(await value.arrayBuffer());
+  return new Uint8Array(value);
+}
+
+async function mediaUploadBody({ slot, alt = "", position = "50% 50%", original, small, large }) {
+  const header = new TextEncoder().encode(JSON.stringify({
+    slot,
+    alt,
+    position,
+    originalType: original.type,
+    sizes: { original: original.size, small: small.size, large: large.size },
+  }));
+  const [originalBytes, smallBytes, largeBytes] = await Promise.all([
+    original.arrayBuffer(), small.arrayBuffer(), large.arrayBuffer(),
+  ]);
+  const body = new Uint8Array(2 + header.byteLength + smallBytes.byteLength + largeBytes.byteLength + originalBytes.byteLength);
+  body[0] = header.byteLength >> 8;
+  body[1] = header.byteLength & 0xff;
+  body.set(header, 2);
+  let offset = 2 + header.byteLength;
+  body.set(new Uint8Array(smallBytes), offset);
+  offset += smallBytes.byteLength;
+  body.set(new Uint8Array(largeBytes), offset);
+  offset += largeBytes.byteLength;
+  body.set(new Uint8Array(originalBytes), offset);
+  return body;
+}
+
+const MEDIA_UPLOAD_HEADERS = { "content-type": "application/octet-stream" };
+const AUDIO_UPLOAD_HEADERS = { "content-type": "audio/mpeg" };
+
 function memoryMediaBucket() {
   const objects = new Map();
   return {
     objects,
     async put(key, value, options) {
-      objects.set(key, { value: new Uint8Array(value instanceof Blob ? await value.arrayBuffer() : value), httpMetadata: options.httpMetadata, etag: `etag-${objects.size}` });
+      objects.set(key, { value: await storedBytes(value), httpMetadata: options.httpMetadata, etag: `etag-${objects.size}` });
     },
     async head(key) {
       const object = objects.get(key);
@@ -702,20 +735,21 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
       for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
     },
   };
-  const form = new FormData();
-  form.set("slot", "pastel-hero");
-  form.set("alt", "신랑과 신부의 상단 사진");
-  form.set("position", "50% 58%");
-  form.set("original", new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }));
-  form.set("small", new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }));
-  form.set("large", new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }));
   const uploadRequest = new Request("https://example.test/api/admin/media", {
     method: "POST",
     headers: {
       origin: "https://example.test",
       "cf-access-jwt-assertion": fixture.assertion,
+      ...MEDIA_UPLOAD_HEADERS,
     },
-    body: form,
+    body: await mediaUploadBody({
+      slot: "pastel-hero",
+      alt: "신랑과 신부의 상단 사진",
+      position: "50% 58%",
+      original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+      small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+      large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+    }),
   });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
@@ -753,7 +787,7 @@ test("media uploads accept an empty description but document writes still requir
   const objects = new Map();
   const bucket = {
     async put(key, value, options) {
-      objects.set(key, { value: new Uint8Array(value instanceof Blob ? await value.arrayBuffer() : value), httpMetadata: options.httpMetadata });
+      objects.set(key, { value: await storedBytes(value), httpMetadata: options.httpMetadata });
     },
     async get() { return null; },
     async delete(keys) {
@@ -763,50 +797,47 @@ test("media uploads accept an empty description but document writes still requir
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
   try {
-    const form = new FormData();
-    form.set("slot", "pastel-gallery-new");
-    form.set("alt", "");
-    form.set("position", "50% 50%");
-    form.set("original", new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }));
-    form.set("small", new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }));
-    form.set("large", new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }));
     const uploadResponse = await worker.fetch(new Request("https://example.test/api/admin/media", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: form,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: await mediaUploadBody({
+        slot: "pastel-gallery-new",
+        alt: "",
+        original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(uploadResponse.status, 201);
     const payload = await uploadResponse.json();
     assert.equal(payload.photo.alt, "");
     assert.equal(objects.size, 3);
 
-    const highIndex = new FormData();
-    highIndex.set("slot", "pastel-gallery-15");
-    highIndex.set("alt", "높은 순번 사진");
-    highIndex.set("position", "50% 50%");
-    highIndex.set("original", new File([new Uint8Array([9])], "photo.jpg", { type: "image/jpeg" }));
-    highIndex.set("small", new File([new Uint8Array([8])], "480.webp", { type: "image/webp" }));
-    highIndex.set("large", new File([new Uint8Array([7])], "960.webp", { type: "image/webp" }));
     const highIndexResponse = await worker.fetch(new Request("https://example.test/api/admin/media", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: highIndex,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: await mediaUploadBody({
+        slot: "pastel-gallery-15",
+        alt: "높은 순번 사진",
+        original: new File([new Uint8Array([9])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([8])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([7])], "960.webp", { type: "image/webp" }),
+      }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(highIndexResponse.status, 201);
     assert.match((await highIndexResponse.json()).photo.src, /\/pastel-gallery-15\/480\.webp$/);
     assert.equal(objects.size, 6);
 
-    const overLimit = new FormData();
-    overLimit.set("slot", "pastel-gallery-new");
-    overLimit.set("alt", "x".repeat(301));
-    overLimit.set("position", "50% 50%");
-    overLimit.set("original", new File([new Uint8Array([1])], "photo.jpg", { type: "image/jpeg" }));
-    overLimit.set("small", new File([new Uint8Array([2])], "480.webp", { type: "image/webp" }));
-    overLimit.set("large", new File([new Uint8Array([3])], "960.webp", { type: "image/webp" }));
     const overLimitResponse = await worker.fetch(new Request("https://example.test/api/admin/media", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: overLimit,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: await mediaUploadBody({
+        slot: "pastel-gallery-new",
+        alt: "x".repeat(301),
+        original: new File([new Uint8Array([1])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([2])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([3])], "960.webp", { type: "image/webp" }),
+      }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(overLimitResponse.status, 400);
     assert.equal((await overLimitResponse.json()).code, "INVALID_MEDIA_METADATA");
@@ -839,7 +870,7 @@ test("failed image variants settle before R2 cleanup and release the quota reser
       try {
         if (key.endsWith("/original.jpg")) throw new Error("simulated original write failure");
         await new Promise((resolve) => setTimeout(resolve, 10));
-        objects.set(key, new Uint8Array(value instanceof Blob ? await value.arrayBuffer() : value));
+        objects.set(key, await storedBytes(value));
       } finally {
         settledWrites += 1;
       }
@@ -850,20 +881,19 @@ test("failed image variants settle before R2 cleanup and release the quota reser
     },
     async get() { return null; },
   };
-  const form = new FormData();
-  form.set("slot", "pastel-gallery-new");
-  form.set("alt", "실패 원자성 검증 사진");
-  form.set("position", "50% 50%");
-  form.set("original", new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }));
-  form.set("small", new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }));
-  form.set("large", new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }));
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
   try {
     const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: form,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: await mediaUploadBody({
+        slot: "pastel-gallery-new",
+        alt: "실패 원자성 검증 사진",
+        original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(response.status, 500);
     assert.equal(cleanupObservedSettledWrites, true);
@@ -886,20 +916,19 @@ test("failed R2 cleanup keeps the media quota reservation", async () => {
     },
     async get() { return null; },
   };
-  const form = new FormData();
-  form.set("slot", "pastel-gallery-new");
-  form.set("alt", "정리 실패 검증 사진");
-  form.set("position", "50% 50%");
-  form.set("original", new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }));
-  form.set("small", new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }));
-  form.set("large", new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }));
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
   try {
     const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: form,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: await mediaUploadBody({
+        slot: "pastel-gallery-new",
+        alt: "정리 실패 검증 사진",
+        original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(response.status, 500);
     assert.equal(db.mediaSets.size, 1);
@@ -914,15 +943,14 @@ test("Access-authenticated MP3 uploads use immutable private keys and stream GET
   const db = invitationDatabase();
   const bucket = memoryMediaBucket();
   const bytes = new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfb, 0x90, 0x64]);
-  const form = new FormData();
-  form.set("file", new File([bytes], "track.mp3", { type: "audio/mpeg" }));
+  const file = new File([bytes], "track.mp3", { type: "audio/mpeg" });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
   try {
     const response = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: form,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...AUDIO_UPLOAD_HEADERS },
+      body: file,
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(response.status, 201);
     const payload = await response.json();
@@ -962,11 +990,7 @@ test("Access-authenticated MP3 uploads use immutable private keys and stream GET
 
 test("MP3 administration fails closed on origin, Access, D1, and R2 boundaries", async () => {
   const fixture = await accessFixture();
-  const form = () => {
-    const value = new FormData();
-    value.set("file", new File([new Uint8Array([0x49, 0x44, 0x33, 1])], "track.mp3", { type: "audio/mpeg" }));
-    return value;
-  };
+  const form = () => new File([new Uint8Array([0x49, 0x44, 0x33, 1])], "track.mp3", { type: "audio/mpeg" });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
   try {
@@ -1012,23 +1036,19 @@ test("MP3 upload rejects spoofed files and shared-quota overflow before R2 write
   try {
     const spoofDb = invitationDatabase();
     const spoofBucket = memoryMediaBucket();
-    const spoofForm = new FormData();
-    spoofForm.set("file", new File([new Uint8Array([1, 2, 3, 4])], "spoof.mp3", { type: "audio/mpeg" }));
     const spoofResponse = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: spoofForm,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...AUDIO_UPLOAD_HEADERS },
+      body: new File([new Uint8Array([1, 2, 3, 4])], "spoof.mp3", { type: "audio/mpeg" }),
     }), { ...fixture.env, GUESTBOOK_DB: spoofDb, WEDDING_MEDIA: spoofBucket });
     assert.equal(spoofResponse.status, 400);
     assert.equal((await spoofResponse.json()).code, "INVALID_AUDIO_SIGNATURE");
     assert.equal(spoofBucket.objects.size, 0);
 
-    const id3OnlyForm = new FormData();
-    id3OnlyForm.set("file", new File([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])], "id3-only.mp3", { type: "audio/mpeg" }));
     const id3OnlyResponse = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: id3OnlyForm,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...AUDIO_UPLOAD_HEADERS },
+      body: new File([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])], "id3-only.mp3", { type: "audio/mpeg" }),
     }), { ...fixture.env, GUESTBOOK_DB: invitationDatabase(), WEDDING_MEDIA: memoryMediaBucket() });
     assert.equal(id3OnlyResponse.status, 400);
     assert.equal((await id3OnlyResponse.json()).code, "INVALID_AUDIO_SIGNATURE");
@@ -1041,12 +1061,10 @@ test("MP3 upload rejects spoofed files and shared-quota overflow before R2 write
       status: "stored",
     });
     const quotaBucket = memoryMediaBucket();
-    const quotaForm = new FormData();
-    quotaForm.set("file", new File([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfb, 0x90, 0x64])], "track.mp3", { type: "audio/mpeg" }));
     const quotaResponse = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: quotaForm,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...AUDIO_UPLOAD_HEADERS },
+      body: new File([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfb, 0x90, 0x64])], "track.mp3", { type: "audio/mpeg" }),
     }), { ...fixture.env, GUESTBOOK_DB: quotaDb, WEDDING_MEDIA: quotaBucket });
     assert.equal(quotaResponse.status, 507);
     assert.equal((await quotaResponse.json()).code, "MEDIA_STORAGE_LIMIT");
@@ -1064,8 +1082,7 @@ test("oversized MP3 request bodies are rejected before buffering and R2 writes",
     async get() { return null; },
     async delete() {},
   };
-  const oversized = new FormData();
-  oversized.set("file", new File([new Uint8Array([0x49, 0x44, 0x33])], "huge.mp3", { type: "audio/mpeg" }));
+  const oversized = new File([new Uint8Array([0x49, 0x44, 0x33])], "huge.mp3", { type: "audio/mpeg" });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
   try {
@@ -1075,12 +1092,60 @@ test("oversized MP3 request bodies are rejected before buffering and R2 writes",
         origin: "https://example.test",
         "cf-access-jwt-assertion": fixture.assertion,
         "content-length": String(27 * 1024 * 1024),
+        ...AUDIO_UPLOAD_HEADERS,
       },
       body: oversized,
     }), { ...fixture.env, GUESTBOOK_DB: invitationDatabase(), WEDDING_MEDIA: bucket });
     assert.equal(response.status, 413);
     assert.equal((await response.json()).code, "MEDIA_TOO_LARGE");
     assert.equal(putCount, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("media uploads stream a framed raw body without multipart buffering", async () => {
+  assert.doesNotMatch(workerSource, /\.formData\s*\(/);
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const bucket = memoryMediaBucket();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const multipart = new FormData();
+    multipart.set("slot", "pastel-hero");
+    const multipartResponse = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
+      body: multipart,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(multipartResponse.status, 415);
+    assert.equal((await multipartResponse.json()).code, "UNSUPPORTED_MEDIA_BODY");
+
+    const framed = await mediaUploadBody({
+      slot: "pastel-hero",
+      original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+      small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+      large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+    });
+    const truncatedResponse = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: framed.subarray(0, framed.byteLength - 1),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(truncatedResponse.status, 400);
+    assert.equal((await truncatedResponse.json()).code, "INVALID_MEDIA_BODY");
+    assert.equal(bucket.objects.size, 0);
+    assert.equal(db.mediaSets.size, 0);
+
+    const badHeader = new Uint8Array([0, 2, 0xff, 0xfe]);
+    const badHeaderResponse = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: badHeader,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(badHeaderResponse.status, 400);
+    assert.equal((await badHeaderResponse.json()).code, "INVALID_MEDIA_BODY");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1105,20 +1170,19 @@ test("media uploads fail closed before R2 writes when the 2GB project quota woul
     async get() { return null; },
     async delete() {},
   };
-  const form = new FormData();
-  form.set("slot", "pastel-hero");
-  form.set("alt", "용량 제한 검증 사진");
-  form.set("position", "50% 50%");
-  form.set("original", new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }));
-  form.set("small", new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }));
-  form.set("large", new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }));
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
   try {
     const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
       method: "POST",
-      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion },
-      body: form,
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: await mediaUploadBody({
+        slot: "pastel-hero",
+        alt: "용량 제한 검증 사진",
+        original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(response.status, 507);
     assert.equal((await response.json()).code, "MEDIA_STORAGE_LIMIT");
