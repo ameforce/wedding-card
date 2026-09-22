@@ -151,14 +151,14 @@
 .pastel-intro-cover .pastel-intro-cover__poster { opacity: 1; }
 .pastel-intro-cover .pastel-intro-cover__poster.is-hidden { opacity: 0; }
 
-.pastel-intro-cover .pastel-intro-cover__slice--center { clip-path: inset(0 var(--ribbon-edge-slice)); }
+.pastel-intro-cover .pastel-intro-cover__slice--center { clip-path: polygon(0 var(--ribbon-left-band-bottom), var(--ribbon-edge-slice) var(--ribbon-left-band-bottom), var(--ribbon-edge-slice) 0, calc(100% - var(--ribbon-edge-slice)) 0, calc(100% - var(--ribbon-edge-slice)) var(--ribbon-right-band-bottom), 100% var(--ribbon-right-band-bottom), 100% 100%, 0 100%); }
 .pastel-intro-cover .pastel-intro-cover__slice--left {
-  clip-path: inset(0 calc(100% - var(--ribbon-edge-slice)) 0 0);
+  clip-path: inset(0 calc(100% - var(--ribbon-edge-slice)) calc(100% - var(--ribbon-left-band-bottom)) 0);
   transform: scaleX(var(--ribbon-edge-scale));
   transform-origin: var(--ribbon-edge-slice) 50%;
 }
 .pastel-intro-cover .pastel-intro-cover__slice--right {
-  clip-path: inset(0 0 0 calc(100% - var(--ribbon-edge-slice)));
+  clip-path: inset(0 0 calc(100% - var(--ribbon-right-band-bottom)) calc(100% - var(--ribbon-edge-slice)));
   transform: scaleX(var(--ribbon-edge-scale));
   transform-origin: calc(100% - var(--ribbon-edge-slice)) 50%;
 }
