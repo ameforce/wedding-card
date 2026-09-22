@@ -89,11 +89,14 @@ function invitationDatabase() {
           if (sql.includes("FROM invitation_state")) return { ...state };
           if (sql.includes("FROM invitation_revisions")) return revisions.get(values[0]) || null;
           if (sql.includes("FROM invitation_media_sets")) {
-            const active = [...mediaSets.values()].filter((entry) => ["reserved", "stored"].includes(entry.status));
-            return {
-              used_bytes: active.reduce((total, entry) => total + entry.total_bytes, 0),
-              media_sets: active.length,
-            };
+            if (sql.includes("SUM(")) {
+              const active = [...mediaSets.values()].filter((entry) => ["reserved", "stored"].includes(entry.status));
+              return {
+                used_bytes: active.reduce((total, entry) => total + entry.total_bytes, 0),
+                media_sets: active.length,
+              };
+            }
+            return mediaSets.get(values[0]) || null;
           }
           return null;
         },
@@ -104,6 +107,11 @@ function invitationDatabase() {
               results.sort((left, right) => right.created_at.localeCompare(left.created_at));
               return { results: results.slice(0, 20) };
             }
+            return { results };
+          }
+          if (sql.includes("FROM invitation_media_sets")) {
+            const results = [...mediaSets.values()];
+            results.sort((left, right) => right.created_at.localeCompare(left.created_at));
             return { results };
           }
           return { results: [] };
@@ -139,14 +147,31 @@ function invitationDatabase() {
             } else {
               changes = 0;
             }
+          } else if (sql.includes("SET content_json = ?")) {
+            const [contentJson, id] = values;
+            const row = revisions.get(id);
+            if (row && row.status === "draft") {
+              row.content_json = contentJson;
+            } else {
+              changes = 0;
+            }
+          } else if (sql.includes("DELETE FROM invitation_revisions")) {
+            const [id, draftId, publishedId] = values;
+            changes = id !== (draftId || "") && id !== (publishedId || "") && revisions.delete(id) ? 1 : 0;
           } else if (sql.includes("DELETE FROM invitation_media_sets")) {
             const row = mediaSets.get(values[0]);
-            changes = row?.status === "reserved" && mediaSets.delete(values[0]) ? 1 : 0;
+            if (sql.includes("status = 'reserved'")) {
+              changes = row?.status === "reserved" && mediaSets.delete(values[0]) ? 1 : 0;
+            } else {
+              changes = row && mediaSets.delete(values[0]) ? 1 : 0;
+            }
           } else if (sql.includes("SET draft_revision_id = ?, updated_at = ?")) {
             [state.draft_revision_id, state.updated_at] = values;
           } else if (sql.includes("SET draft_revision_id = NULL, published_revision_id = ?")) {
             [state.published_revision_id, state.updated_at] = values;
             state.draft_revision_id = null;
+          } else if (sql.includes("SET updated_at = ?") && !sql.includes("revision_id")) {
+            [state.updated_at] = values;
           } else if (sql.includes("SET published_revision_id = ?, updated_at = ?")) {
             const [nextRevisionId, updatedAt, expectedRevisionId] = values;
             if (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId) {
@@ -1192,4 +1217,266 @@ test("media uploads fail closed before R2 writes when the 2GB project quota woul
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+function mediaRow(id, slot, bytes, createdAt = "2026-08-17T00:00:00.000Z") {
+  return { id, slot, total_bytes: bytes, status: "stored", created_at: createdAt, stored_at: createdAt };
+}
+
+function revisionRow(id, document, { status = "archived", publishedAt = null, createdAt = "2026-08-10T00:00:00.000Z" } = {}) {
+  return {
+    id,
+    content_json: JSON.stringify(document),
+    status,
+    created_at: createdAt,
+    created_by: "groom@example.test",
+    published_at: publishedAt,
+  };
+}
+
+function memoryBucket() {
+  const objects = new Map();
+  return {
+    objects,
+    async put(key, value) { objects.set(key, await storedBytes(value)); },
+    async get(key) {
+      if (!objects.has(key)) return null;
+      return { body: objects.get(key), size: objects.get(key).byteLength, etag: "test" };
+    },
+    async delete(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+    },
+  };
+}
+
+async function withAccessEnv(run) {
+  const fixture = await accessFixture();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  const headers = { "cf-access-jwt-assertion": fixture.assertion };
+  try {
+    await run(fixture, headers);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test("draft saves update the existing draft revision instead of accumulating archives", async () => {
+  const db = invitationDatabase();
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db };
+    const first = await worker.fetch(request("/api/admin/content", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ document: confirmedDocument() }),
+    }), env);
+    assert.equal(first.status, 201);
+    const { revisionId } = await first.json();
+    assert.equal(db.state.draft_revision_id, revisionId);
+    assert.equal(db.revisions.size, 1);
+
+    const updated = confirmedDocument();
+    updated.content.message = ["수정된", "초안", "문장", "입니다"];
+    const second = await worker.fetch(request("/api/admin/content", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ document: updated }),
+    }), env);
+    assert.equal(second.status, 200);
+    const secondPayload = await second.json();
+    assert.equal(secondPayload.revisionId, revisionId);
+    assert.equal(db.revisions.size, 1);
+    const row = db.revisions.get(revisionId);
+    assert.equal(row.status, "draft");
+    assert.match(row.content_json, /수정된/);
+    assert.equal([...db.revisions.values()].filter((revision) => revision.status === "archived" && !revision.published_at).length, 0);
+  });
+});
+
+test("admin media list requires Access and reports revision references", async () => {
+  const db = invitationDatabase();
+  const draftDoc = confirmedDocument();
+  const publishedDoc = confirmedDocument();
+  const archivedDoc = confirmedDocument();
+  const draftMediaId = "00000000-0000-0000-0000-000000000001";
+  const publishedMediaId = "00000000-0000-0000-0000-000000000002";
+  const archivedMediaId = "00000000-0000-0000-0000-000000000003";
+  const audioId = "00000000-0000-0000-0000-000000000004";
+  draftDoc.photos.pastel.gallery = [galleryPhoto(0)];
+  publishedDoc.photos.pastel.gallery = [{
+    ...galleryPhoto(1),
+    src: `/api/media/invitation/${publishedMediaId}/pastel-gallery-1/480.webp`,
+    srcSet: `/api/media/invitation/${publishedMediaId}/pastel-gallery-1/480.webp 480w, /api/media/invitation/${publishedMediaId}/pastel-gallery-1/960.webp 960w`,
+  }];
+  archivedDoc.photos.pastel.gallery = [{
+    ...galleryPhoto(2),
+    src: `/api/media/invitation/${archivedMediaId}/pastel-gallery-2/480.webp`,
+    srcSet: `/api/media/invitation/${archivedMediaId}/pastel-gallery-2/480.webp 480w, /api/media/invitation/${archivedMediaId}/pastel-gallery-2/960.webp 960w`,
+  }];
+  db.revisions.set("draft-1", revisionRow("draft-1", draftDoc, { status: "draft" }));
+  db.revisions.set("pub-1", revisionRow("pub-1", publishedDoc, { status: "published", publishedAt: "2026-08-15T00:00:00.000Z" }));
+  db.revisions.set("arch-1", revisionRow("arch-1", archivedDoc, { status: "archived", publishedAt: "2026-08-01T00:00:00.000Z" }));
+  db.state.draft_revision_id = "draft-1";
+  db.state.published_revision_id = "pub-1";
+  db.mediaSets.set(draftMediaId, mediaRow(draftMediaId, "pastel-gallery-0", 1000));
+  db.mediaSets.set(publishedMediaId, mediaRow(publishedMediaId, "pastel-gallery-1", 2000));
+  db.mediaSets.set(archivedMediaId, mediaRow(archivedMediaId, "pastel-gallery-2", 3000));
+  db.mediaSets.set(audioId, mediaRow(audioId, "background-music", 4000));
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: memoryBucket() };
+    const denied = await worker.fetch(request("/api/admin/media/list", { method: "GET" }), env);
+    assert.equal(denied.status, 401);
+
+    const response = await worker.fetch(request("/api/admin/media/list", { method: "GET", headers }), env);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.media.length, 4);
+    assert.equal(payload.usage.usedBytes, 10000);
+    const byId = Object.fromEntries(payload.media.map((item) => [item.mediaId, item]));
+    assert.equal(byId[draftMediaId].references.draft, true);
+    assert.equal(byId[draftMediaId].references.published, false);
+    assert.equal(byId[publishedMediaId].references.published, true);
+    assert.deepEqual(byId[archivedMediaId].references.archivedRevisions.map((revision) => revision.id), ["arch-1"]);
+    assert.equal(byId[audioId].kind, "audio");
+    assert.equal(byId[audioId].previewUrl, null);
+    assert.equal(byId[draftMediaId].previewUrl, `/api/media/invitation/${draftMediaId}/pastel-gallery-0/480.webp`);
+  });
+});
+
+test("media deletion frees quota and removes R2 objects when unreferenced", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000009";
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 5000));
+  const bucket = memoryBucket();
+  bucket.objects.set(`invitation/${mediaId}/pastel-gallery-0/original.jpg`, new Uint8Array([1]));
+  bucket.objects.set(`invitation/${mediaId}/pastel-gallery-0/480.webp`, new Uint8Array([2]));
+  bucket.objects.set(`invitation/${mediaId}/pastel-gallery-0/960.webp`, new Uint8Array([3]));
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.deleted, mediaId);
+    assert.equal(payload.freedBytes, 5000);
+    assert.equal(payload.objectsDeleted, true);
+    assert.equal(payload.usage.usedBytes, 0);
+    assert.equal(db.mediaSets.size, 0);
+    assert.equal(bucket.objects.size, 0);
+  });
+});
+
+test("media deletion strips draft references and resets music to the bundled fallback", async () => {
+  const db = invitationDatabase();
+  const photoId = "00000000-0000-0000-0000-000000000001";
+  const keepId = "00000000-0000-0000-0000-000000000002";
+  const audioId = "00000000-0000-0000-0000-000000000003";
+  const draftDoc = confirmedDocument();
+  draftDoc.photos.pastel.gallery = [galleryPhoto(0), {
+    ...galleryPhoto(1),
+    src: `/api/media/invitation/${keepId}/pastel-gallery-1/480.webp`,
+    srcSet: `/api/media/invitation/${keepId}/pastel-gallery-1/480.webp 480w, /api/media/invitation/${keepId}/pastel-gallery-1/960.webp 960w`,
+  }];
+  draftDoc.content.music = {
+    src: `/api/media/invitation/${audioId}/background-music/track.mp3`,
+    title: "업로드한 곡",
+    artist: "관리자",
+    sourceUrl: "https://example.test/source",
+    licenseLabel: "CC0",
+    licenseUrl: "https://example.test/license",
+  };
+  db.revisions.set("draft-1", revisionRow("draft-1", draftDoc, { status: "draft" }));
+  db.state.draft_revision_id = "draft-1";
+  db.mediaSets.set(photoId, mediaRow(photoId, "pastel-gallery-0", 1000));
+  db.mediaSets.set(audioId, mediaRow(audioId, "background-music", 2000));
+  const bucket = memoryBucket();
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket };
+    const photoResponse = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId: photoId }),
+    }), env);
+    assert.equal(photoResponse.status, 200);
+    let payload = await photoResponse.json();
+    assert.equal(payload.removedFromDraft, 1);
+    let draft = JSON.parse(db.revisions.get("draft-1").content_json);
+    assert.equal(draft.photos.pastel.gallery.length, 1);
+    assert.equal(draft.photos.pastel.gallery[0].src.includes(keepId), true);
+    assert.equal(draft.content.music.src.includes(audioId), true);
+
+    const audioResponse = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId: audioId }),
+    }), env);
+    assert.equal(audioResponse.status, 200);
+    payload = await audioResponse.json();
+    assert.equal(payload.removedFromDraft, 1);
+    draft = JSON.parse(db.revisions.get("draft-1").content_json);
+    assert.equal(draft.content.music.src, "/assets/audio/touching-moments-one-pulse.mp3");
+    assert.equal(draft.content.music.licenseLabel, "CC BY 4.0");
+  });
+});
+
+test("media deletion blocks while the published revision references the file", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000001";
+  const publishedDoc = confirmedDocument();
+  publishedDoc.photos.pastel.gallery = [galleryPhoto(0)];
+  db.revisions.set("pub-1", revisionRow("pub-1", publishedDoc, { status: "published", publishedAt: "2026-08-15T00:00:00.000Z" }));
+  db.state.published_revision_id = "pub-1";
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 1000));
+  const bucket = memoryBucket();
+  bucket.objects.set(`invitation/${mediaId}/pastel-gallery-0/480.webp`, new Uint8Array([1]));
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MEDIA_IN_USE");
+    assert.equal(db.mediaSets.size, 1);
+    assert.equal(bucket.objects.size, 1);
+  });
+});
+
+test("media deletion lists dependent revisions and cascades only after confirmation", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000001";
+  const archivedDoc = confirmedDocument();
+  archivedDoc.photos.pastel.gallery = [galleryPhoto(0)];
+  db.revisions.set("arch-1", revisionRow("arch-1", archivedDoc, { status: "archived", publishedAt: "2026-08-01T00:00:00.000Z" }));
+  db.revisions.set("arch-2", revisionRow("arch-2", confirmedDocument(), { status: "archived", publishedAt: "2026-08-02T00:00:00.000Z" }));
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 1000));
+  const bucket = memoryBucket();
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket };
+    const blocked = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), env);
+    assert.equal(blocked.status, 409);
+    const blockedPayload = await blocked.json();
+    assert.equal(blockedPayload.code, "MEDIA_REFERENCED");
+    assert.deepEqual(blockedPayload.dependentRevisions.map((revision) => revision.id), ["arch-1"]);
+    assert.equal(db.mediaSets.size, 1);
+    assert.equal(db.revisions.has("arch-1"), true);
+
+    const confirmed = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId, deleteRevisions: true }),
+    }), env);
+    assert.equal(confirmed.status, 200);
+    const payload = await confirmed.json();
+    assert.deepEqual(payload.deletedRevisions.map((revision) => revision.id), ["arch-1"]);
+    assert.equal(db.revisions.has("arch-1"), false);
+    assert.equal(db.revisions.has("arch-2"), true);
+    assert.equal(db.mediaSets.size, 0);
+  });
 });

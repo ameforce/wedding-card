@@ -450,7 +450,7 @@ test("development review keeps draft and published content as separate explicit 
   assert.equal((await reloaded.getAdminState()).draftRevisionId, null);
 });
 
-test("local review revision IDs remain unique within the same second", async () => {
+test("local review keeps one mutable draft revision across saves", async () => {
   const storage = memoryStorage();
   const adapter = createLocalReviewContentAdapter({
     staticContent: weddingContent,
@@ -462,12 +462,12 @@ test("local review revision IDs remain unique within the same second", async () 
   const first = await adapter.saveDraft(document);
   const second = await adapter.saveDraft(document);
 
-  assert.notEqual(first.draftRevisionId, second.draftRevisionId);
-  assert.match(first.draftRevisionId, /^local-draft-20260817123456-[a-f0-9-]{36}$/i);
+  assert.equal(first.draftRevisionId, second.draftRevisionId);
+  assert.match(first.draftRevisionId, /^local-draft-/i);
   const history = (await adapter.getAdminState()).history;
-  assert.equal(new Set(history.map((revision) => revision.id)).size, 4);
+  assert.equal(new Set(history.map((revision) => revision.id)).size, history.length);
   assert.equal(history.filter((revision) => revision.status === "draft").length, 1);
-  assert.equal(history.find((revision) => revision.id === first.draftRevisionId).status, "archived");
+  assert.equal(history.filter((revision) => revision.status === "archived" && !revision.publishedAt).length, 0);
 });
 
 test("local review IDs retain a non-secure-context fallback", async () => {
@@ -638,6 +638,54 @@ test("production adapter uses the reviewed Cloudflare API paths and revision env
     ["/api/admin/content", "PUT"],
     ["/api/admin/content/publish", "POST"],
   ]);
+});
+
+test("production adapter lists and deletes stored media through admin endpoints", async () => {
+  const calls = [];
+  const fetchImpl = async (path, options = {}) => {
+    calls.push([path, options.method || "GET", options.body ? JSON.parse(options.body) : null]);
+    if (path === "/api/admin/media/list") {
+      return Response.json({
+        usage: { usedBytes: 10 },
+        media: [{ mediaId: "00000000-0000-0000-0000-000000000001", kind: "photo" }],
+      });
+    }
+    if (path === "/api/admin/media/delete") {
+      return Response.json({ deleted: "00000000-0000-0000-0000-000000000001", freedBytes: 10, usage: { usedBytes: 0 } });
+    }
+    return Response.json({}, { status: 404 });
+  };
+  const adapter = createCloudflareContentAdapter({ staticContent: weddingContent, fetchImpl });
+  const list = await adapter.getMediaList();
+  assert.equal(list.media[0].mediaId, "00000000-0000-0000-0000-000000000001");
+  const deleted = await adapter.deleteMedia("00000000-0000-0000-0000-000000000001", { deleteRevisions: true });
+  assert.equal(deleted.freedBytes, 10);
+  assert.deepEqual(calls, [
+    ["/api/admin/media/list", "GET", null],
+    ["/api/admin/media/delete", "POST", { mediaId: "00000000-0000-0000-0000-000000000001", deleteRevisions: true }],
+  ]);
+
+  const referencing = createCloudflareContentAdapter({
+    staticContent: weddingContent,
+    fetchImpl: async () => Response.json(
+      { code: "MEDIA_REFERENCED", message: "참조 중", dependentRevisions: [{ id: "arch-1", status: "archived" }] },
+      { status: 409 },
+    ),
+  });
+  await assert.rejects(
+    () => referencing.deleteMedia("00000000-0000-0000-0000-000000000001"),
+    (error) => error.code === "MEDIA_REFERENCED" && error.dependentRevisions[0].id === "arch-1",
+  );
+});
+
+test("local review adapter exposes an empty media manager surface", async () => {
+  const local = createLocalReviewContentAdapter({
+    staticContent: weddingContent,
+    storage: memoryStorage(),
+    eventTarget: new EventTarget(),
+  });
+  assert.deepEqual(await local.getMediaList(), { usage: (await local.getMediaUsage()), media: [] });
+  await assert.rejects(() => local.deleteMedia("any"), /로컬 검토/);
 });
 
 test("production and local adapters accept only bounded MP3 uploads", async () => {
@@ -1168,5 +1216,21 @@ test("content administration exposes four line inputs and document-only gallery 
   assert.match(source, /moveGalleryPhoto/);
   assert.match(source, /removeGalleryPhoto/);
   assert.match(source, /pastel-gallery-new/);
-  assert.doesNotMatch(source, /deletePhoto|deleteMedia|removeObject/);
+  assert.doesNotMatch(source, /deletePhoto|removeObject/);
+  const removeBody = source.match(/const removeGalleryPhoto = \(index\) => \{[\s\S]*?\n {2}\};/);
+  assert.ok(removeBody, "removeGalleryPhoto 구현을 찾지 못했습니다.");
+  assert.doesNotMatch(removeBody[0], /deleteMedia|getMediaList|media\/delete/);
+});
+
+test("media manager UI lists stored media with reference-aware deletion", async () => {
+  const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
+  assert.match(source, /저장된 미디어/);
+  assert.match(source, /adapter\.getMediaList\(\)/);
+  assert.match(source, /adapter\.deleteMedia\(/);
+  assert.match(source, /function MediaDeleteDialog/);
+  assert.match(source, /리비전과 함께 삭제/);
+  assert.match(source, /현재 공개본 사용 중/);
+  assert.match(source, /현재 초안 사용 중/);
+  assert.match(source, /미적용 변경사항이 이 미디어를 참조하고 있습니다/);
+  assert.match(source, /disabled=\{Boolean\(refs\.published\)/);
 });

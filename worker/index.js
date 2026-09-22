@@ -1017,22 +1017,25 @@ async function saveInvitationDraft(request, env) {
   const payload = await readJson(request, MAX_CONTENT_BODY_BYTES);
   const contentJson = validateInvitationDocument(payload.document, { write: true });
   const state = await getInvitationState(db);
-  const revisionId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  const statements = [];
   if (state?.draft_revision_id) {
-    statements.push(db.prepare("UPDATE invitation_revisions SET status = 'archived' WHERE id = ? AND status = 'draft'")
-      .bind(state.draft_revision_id));
+    const updated = await db.prepare(
+      "UPDATE invitation_revisions SET content_json = ? WHERE id = ? AND status = 'draft'",
+    ).bind(contentJson, state.draft_revision_id).run();
+    if (updated?.meta?.changes) {
+      await db.prepare("UPDATE invitation_state SET updated_at = ? WHERE singleton_id = 1").bind(createdAt).run();
+      return json({ revisionId: state.draft_revision_id, savedAt: createdAt });
+    }
   }
-  statements.push(
+  const revisionId = crypto.randomUUID();
+  await runDatabaseBatch(db, [
     db.prepare(
       "INSERT INTO invitation_revisions (id, content_json, status, created_at, created_by, published_at) VALUES (?, ?, 'draft', ?, ?, NULL)",
     ).bind(revisionId, contentJson, createdAt, adminEmail),
     db.prepare(
       "UPDATE invitation_state SET draft_revision_id = ?, updated_at = ? WHERE singleton_id = 1",
     ).bind(revisionId, createdAt),
-  );
-  await runDatabaseBatch(db, statements);
+  ]);
   return json({ revisionId, savedAt: createdAt }, 201);
 }
 
@@ -1250,6 +1253,178 @@ async function releaseMediaStorage(db, mediaId) {
 async function commitMediaStorage(db, mediaId) {
   await db.prepare("UPDATE invitation_media_sets SET status = 'stored', stored_at = ? WHERE id = ? AND status = 'reserved'")
     .bind(new Date().toISOString(), mediaId).run();
+}
+
+const BUNDLED_MUSIC_FALLBACK = {
+  src: "/assets/audio/touching-moments-one-pulse.mp3",
+  title: "Touching Moments One - Pulse",
+  artist: "Kevin MacLeod",
+  sourceUrl: "https://incompetech.com/music/royalty-free/index.html?Search=Search&isrc=USUAN1100039",
+  licenseLabel: "CC BY 4.0",
+  licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+};
+
+async function listRevisionsForMediaScan(db) {
+  const result = await db.prepare(
+    "SELECT id, status, created_at, published_at, content_json FROM invitation_revisions",
+  ).all();
+  return result.results || [];
+}
+
+function revisionsReferencing(revisions, mediaId) {
+  const needle = `invitation/${mediaId}/`;
+  return revisions.filter((revision) => typeof revision.content_json === "string" && revision.content_json.includes(needle));
+}
+
+function describeRevisionRef(revision) {
+  return {
+    id: revision.id,
+    status: revision.status,
+    createdAt: revision.created_at,
+    publishedAt: revision.published_at,
+  };
+}
+
+function mediaReferenceSummary(referencing, state) {
+  return {
+    draft: referencing.some((revision) => revision.id === state?.draft_revision_id),
+    published: referencing.some((revision) => revision.id === state?.published_revision_id),
+    archivedRevisions: referencing
+      .filter((revision) => revision.id !== state?.draft_revision_id && revision.id !== state?.published_revision_id)
+      .map(describeRevisionRef),
+  };
+}
+
+async function getAdminMediaList(request, env) {
+  const db = requireContentDatabase(env);
+  await requireAdminEmail(request, env);
+  requireMediaBucket(env);
+  const state = await getInvitationState(db);
+  const sets = (await db.prepare(
+    "SELECT id, slot, total_bytes, status, created_at FROM invitation_media_sets ORDER BY created_at DESC",
+  ).all()).results || [];
+  const revisions = await listRevisionsForMediaScan(db);
+  const usage = await getMediaUsageFromDatabase(db);
+  const media = sets.map((row) => {
+    const kind = row.slot === "background-music" ? "audio" : "photo";
+    return {
+      mediaId: row.id,
+      slot: row.slot,
+      kind,
+      totalBytes: row.total_bytes,
+      status: row.status,
+      createdAt: row.created_at,
+      previewUrl: kind === "photo" ? `${MEDIA_API_PREFIX}/invitation/${row.id}/${row.slot}/480.webp` : null,
+      references: mediaReferenceSummary(revisionsReferencing(revisions, row.id), state),
+    };
+  });
+  return json({ usage, media });
+}
+
+function stripMediaFromDraftDocument(document, mediaId) {
+  const needle = `invitation/${mediaId}/`;
+  const photos = document?.photos?.pastel;
+  let removed = 0;
+  if (photos?.hero && JSON.stringify(photos.hero).includes(needle)) {
+    return { blocked: "대표 사진으로 사용 중입니다. 초안에서 다른 사진으로 먼저 교체해 주세요." };
+  }
+  if (Array.isArray(photos?.gallery)) {
+    const kept = photos.gallery.filter((photo) => !JSON.stringify(photo).includes(needle));
+    removed = photos.gallery.length - kept.length;
+    if (removed > 0) {
+      if (kept.length < 1) {
+        return { blocked: "갤러리에는 최소 한 장의 사진이 필요합니다. 초안에서 다른 사진을 먼저 추가해 주세요." };
+      }
+      photos.gallery = kept;
+    }
+  }
+  if (typeof document?.content?.music?.src === "string" && document.content.music.src.includes(needle)) {
+    document.content.music = { ...BUNDLED_MUSIC_FALLBACK };
+    removed += 1;
+  }
+  if (JSON.stringify(document).includes(needle)) {
+    return { blocked: "이 미디어를 참조하는 초안 항목을 정리하지 못했습니다." };
+  }
+  return { removed };
+}
+
+function mediaObjectKeys(set) {
+  if (set.slot === "background-music") {
+    return [`invitation/${set.id}/background-music/track.mp3`];
+  }
+  const base = `invitation/${set.id}/${set.slot}`;
+  return [
+    `${base}/original.jpg`,
+    `${base}/original.png`,
+    `${base}/original.webp`,
+    `${base}/480.webp`,
+    `${base}/960.webp`,
+  ];
+}
+
+async function deleteAdminMedia(request, env) {
+  requireSameOrigin(request);
+  const db = requireContentDatabase(env);
+  await requireAdminEmail(request, env);
+  const bucket = requireMediaBucket(env);
+  if (typeof bucket.delete !== "function") {
+    throw { status: 503, code: "MEDIA_UNAVAILABLE", message: "미디어 저장소가 아직 연결되지 않았습니다." };
+  }
+  const payload = await readJson(request);
+  const mediaId = String(payload?.mediaId || "").trim().toLowerCase();
+  if (!/^[a-f0-9-]{36}$/.test(mediaId)) {
+    return apiError(400, "INVALID_MEDIA", "미디어 식별자를 확인해 주세요.");
+  }
+  const set = await db.prepare(
+    "SELECT id, slot, total_bytes, status FROM invitation_media_sets WHERE id = ?",
+  ).bind(mediaId).first();
+  if (!set) return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
+  const state = await getInvitationState(db);
+  const revisions = await listRevisionsForMediaScan(db);
+  const referencing = revisionsReferencing(revisions, mediaId);
+  if (referencing.some((revision) => revision.id === state?.published_revision_id)) {
+    return apiError(409, "MEDIA_IN_USE", "현재 공개본이 이 미디어를 사용 중입니다. 먼저 다른 콘텐츠로 교체해 주세요.");
+  }
+  const archivedRefs = referencing.filter((revision) => revision.id !== state?.draft_revision_id);
+  if (archivedRefs.length && payload?.deleteRevisions !== true) {
+    return apiError(409, "MEDIA_REFERENCED", "과거 리비전이 이 미디어를 참조하고 있습니다. 함께 삭제할지 확인해 주세요.", {
+      dependentRevisions: archivedRefs.map(describeRevisionRef),
+    });
+  }
+  const statements = [];
+  let removedFromDraft = 0;
+  const draftRevision = referencing.find((revision) => revision.id === state?.draft_revision_id);
+  if (draftRevision) {
+    const draftDocument = JSON.parse(draftRevision.content_json);
+    const strip = stripMediaFromDraftDocument(draftDocument, mediaId);
+    if (strip.blocked) return apiError(409, "MEDIA_IN_USE", strip.blocked);
+    removedFromDraft = strip.removed;
+    statements.push(db.prepare(
+      "UPDATE invitation_revisions SET content_json = ? WHERE id = ? AND status = 'draft'",
+    ).bind(JSON.stringify(draftDocument), draftRevision.id));
+  }
+  for (const revision of archivedRefs) {
+    statements.push(db.prepare(
+      "DELETE FROM invitation_revisions WHERE id = ? AND id <> COALESCE(?, '') AND id <> COALESCE(?, '')",
+    ).bind(revision.id, state?.draft_revision_id, state?.published_revision_id));
+  }
+  statements.push(db.prepare("DELETE FROM invitation_media_sets WHERE id = ?").bind(mediaId));
+  await runDatabaseBatch(db, statements);
+  const keys = mediaObjectKeys(set);
+  let objectsDeleted = true;
+  try {
+    await bucket.delete(keys);
+  } catch {
+    objectsDeleted = false;
+  }
+  return json({
+    deleted: mediaId,
+    freedBytes: set.total_bytes,
+    removedFromDraft,
+    deletedRevisions: archivedRefs.map(describeRevisionRef),
+    objectsDeleted,
+    usage: await getMediaUsageFromDatabase(db),
+  });
 }
 
 async function uploadInvitationMedia(request, env) {
@@ -1504,6 +1679,12 @@ async function handleContent(request, env, url) {
     }
     if (url.pathname === `${ADMIN_API_PREFIX}/media/audio` && request.method === "POST") {
       return await uploadInvitationAudio(request, env);
+    }
+    if (url.pathname === `${ADMIN_API_PREFIX}/media/list` && request.method === "GET") {
+      return await getAdminMediaList(request, env);
+    }
+    if (url.pathname === `${ADMIN_API_PREFIX}/media/delete` && request.method === "POST") {
+      return await deleteAdminMedia(request, env);
     }
     if (url.pathname === `${ADMIN_API_PREFIX}/media/usage` && request.method === "GET") {
       return await getAdminMediaUsage(request, env);
