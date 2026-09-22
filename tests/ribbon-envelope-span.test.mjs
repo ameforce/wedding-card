@@ -69,20 +69,35 @@ test("ribbon reaches only the envelope folds through the initial poster and canv
           const canvases = Array.from({ length: 2 }, () => Object.assign(document.createElement("canvas"), { width: manifest.width, height: manifest.height }));
           const [original, corrected] = canvases.map((canvas) => canvas.getContext("2d", { willReadFrequently: true }));
           let checked = 0;
+          let foldSamples = 0;
           for (const name of manifest.frames) {
             const image = await createImageBitmap(await (await fetch(`/assets/design/ribbon-sequence/${name}`)).blob());
             original.clearRect(0, 0, manifest.width, manifest.height);
             original.drawImage(image, 0, 0);
             drawRibbonFrame(corrected, image, manifest);
-            const a = original.getImageData(24, 0, 432, manifest.height).data;
-            const b = corrected.getImageData(24, 0, 432, manifest.height).data;
+            const a = original.getImageData(72, 0, 336, manifest.height).data;
+            const b = corrected.getImageData(72, 0, 336, manifest.height).data;
             for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return { checked, mismatch: name };
+            // The Blender paper is 11.9 units wide in a 14-unit camera. While
+            // cloth crosses either physical fold, its visible coverage must
+            // reach the corresponding web envelope edge, not stop inside it.
+            for (const [fold, edge] of [[36, 0], [443, 479]]) {
+              const source = original.getImageData(fold - 1, 0, 3, manifest.height).data;
+              const output = corrected.getImageData(edge, 0, 1, manifest.height).data;
+              for (let y = 0; y < manifest.height; y += 1) {
+                if ([3, 7, 11].every((offset) => source[y * 12 + offset] >= 250)) {
+                  if (output[y * 4 + 3] < 245) return { checked, foldMismatch: { name, fold, y } };
+                  foldSamples += 1;
+                }
+              }
+            }
             image.close();
             checked += 1;
           }
-          return { checked, expected: manifest.frames.length };
+          return { checked, expected: manifest.frames.length, foldSamples };
         });
         assert.equal(preservation.checked, preservation.expected, `every frame preserves the authored center: ${JSON.stringify(preservation)}`);
+        assert.ok(preservation.foldSamples > 1000, "physical fold coverage is exercised throughout the sequence");
         evidence.push({ preservation });
       }
     } finally {
