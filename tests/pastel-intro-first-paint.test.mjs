@@ -243,17 +243,24 @@ test("early poster exemptions and tap-to-open handoff work while the main bundle
       }
     });
   }
-  await t.test("pre-main tap keeps the poster until the opening control is ready", async () => {
+  await t.test("pre-main tap preserves the poster until readiness or the shared deadline", async () => {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    await page.route("**/src/main.jsx*", async (route) => { await new Promise((resolve) => setTimeout(resolve, 3000)); await route.continue().catch(() => {}); });
+    let releaseMain;
+    const mainGate = new Promise((resolve) => { releaseMain = resolve; });
+    await page.route("**/src/main.jsx*", async (route) => { await mainGate; await route.continue().catch(() => {}); });
     try {
       await page.goto(baseUrl, { waitUntil: "commit" });
       await page.locator("#pastel-intro-early-poster").click({ position: { x: 10, y: 10 }, timeout: 1500 });
       assert.equal(await page.locator("#pastel-intro-early-poster:visible").count(), 1);
-      await page.locator(".pastel-intro-cover__start").click({ timeout: 10_000 });
-      await page.waitForFunction(() => !document.querySelector("#pastel-intro-early-poster, .pastel-intro-cover"), null, { timeout: 10_000 });
+      releaseMain();
+      await page.waitForFunction(() => document.querySelector(".pastel-intro-cover__start")
+        || !document.querySelector("#pastel-intro-early-poster, .pastel-intro-cover"), null, { timeout: 10_000 });
+      if (await page.locator(".pastel-intro-cover__start").count()) {
+        await page.locator(".pastel-intro-cover__start").click();
+        await page.waitForFunction(() => !document.querySelector("#pastel-intro-early-poster, .pastel-intro-cover"), null, { timeout: 10_000 });
+      }
       assert.equal(await page.evaluate(() => [document.documentElement, document.body].some((element) => getComputedStyle(element).overflow === "hidden")), false);
-    } finally { await page.unrouteAll({ behavior: "wait" }); await page.close(); }
+    } finally { releaseMain(); await page.unrouteAll({ behavior: "wait" }); await page.close(); }
   });
 });
 
