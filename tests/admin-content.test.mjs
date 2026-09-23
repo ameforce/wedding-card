@@ -1317,6 +1317,8 @@ test("media manager UI lists stored media with reference-aware deletion", async 
   assert.match(source, /adapter\.getMediaList\(\)/);
   assert.match(source, /adapter\.deleteMedia\(/);
   assert.match(source, /function MediaDeleteDialog/);
+  assert.match(source, /deletionPending/);
+  assert.match(source, /삭제 재시도/);
   assert.match(source, /리비전과 함께 삭제/);
   assert.match(source, /현재 공개본 사용 중/);
   assert.match(source, /현재 초안 사용 중/);

@@ -64,27 +64,68 @@ function invitationDatabase() {
   const revisions = new Map();
   const mediaSets = new Map();
   const legacyMediaSets = new Map();
+  const mediaDeletionJobs = new Map();
   const queries = [];
+  let beforeMediaDeletionClaim = null;
+  let beforeBatch = null;
+  const referencesPendingMedia = (contentJson) => [...mediaDeletionJobs.keys()]
+    .some((mediaId) => String(contentJson || "").toLowerCase().includes(`invitation/${mediaId}/`));
   return {
     state,
     revisions,
     mediaSets,
     legacyMediaSets,
+    mediaDeletionJobs,
     queries,
+    injectBeforeMediaDeletionClaim(callback) { beforeMediaDeletionClaim = callback; },
+    injectBeforeBatch(kind, callback) { beforeBatch = { kind, callback }; },
     async batch(statements) {
+      if (beforeBatch && statements.some((statement) => statement.sql?.includes(`/* ${beforeBatch.kind} */`))) {
+        const inject = beforeBatch.callback;
+        beforeBatch = null;
+        inject();
+      }
+      if (beforeMediaDeletionClaim && statements.some((statement) => statement.sql?.startsWith("INSERT INTO invitation_media_deletion_jobs_v1"))) {
+        const inject = beforeMediaDeletionClaim;
+        beforeMediaDeletionClaim = null;
+        inject();
+      }
+      const stateBefore = { ...state };
+      const copy = (rows) => new Map([...rows].map(([key, value]) => [key, structuredClone(value)]));
+      const revisionsBefore = copy(revisions);
+      const mediaSetsBefore = copy(mediaSets);
+      const jobsBefore = copy(mediaDeletionJobs);
       const results = [];
-      for (const statement of statements) results.push(await statement.run());
-      return results;
+      try {
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      } catch (error) {
+        Object.assign(state, stateBefore);
+        for (const [target, previous] of [[revisions, revisionsBefore], [mediaSets, mediaSetsBefore], [mediaDeletionJobs, jobsBefore]]) {
+          target.clear();
+          for (const [key, value] of previous) target.set(key, value);
+        }
+        throw error;
+      }
     },
     prepare(sql) {
       queries.push(sql);
       let values = [];
       return {
+        sql,
         bind(...nextValues) {
           values = nextValues;
           return this;
         },
         async first() {
+          if (sql.includes("FROM invitation_media_deletion_jobs_v1")) {
+            return values.map((id) => mediaDeletionJobs.get(id)).find(Boolean) || null;
+          }
+          if (sql.includes("FROM invitation_revisions") && sql.includes("instr(lower(content_json)")) {
+            const needle = String(values[0] || "").toLowerCase();
+            const match = [...revisions.values()].find((row) => String(row.content_json || "").toLowerCase().includes(needle));
+            return match ? { id: match.id } : null;
+          }
           if (sql.includes("JOIN invitation_revisions AS revision")) {
             return state.published_revision_id ? revisions.get(state.published_revision_id) || null : null;
           }
@@ -103,6 +144,9 @@ function invitationDatabase() {
           return null;
         },
         async all() {
+          if (sql.includes("FROM invitation_media_deletion_jobs_v1")) {
+            return { results: [...mediaDeletionJobs.values()] };
+          }
           if (sql.includes("FROM invitation_revisions")) {
             const results = [...revisions.values()];
             if (sql.includes("ORDER BY created_at DESC LIMIT 20")) {
@@ -125,17 +169,47 @@ function invitationDatabase() {
         },
         async run() {
           let changes = 1;
-          if (sql.startsWith("INSERT INTO invitation_revisions")) {
+          if (sql.startsWith("SELECT CASE WHEN") && sql.includes("AS mutation_guard")) {
+            let allowed = false;
+            if (sql.includes("/* publish */")) {
+              const [draftId, publishedId, contentJson] = values;
+              const draft = revisions.get(draftId);
+              allowed = state.draft_revision_id === draftId && state.published_revision_id === publishedId
+                && draft?.status === "draft" && draft.content_json === contentJson
+                && (!publishedId || revisions.get(publishedId)?.status === "published")
+                && !referencesPendingMedia(contentJson);
+            } else if (sql.includes("/* rollback */")) {
+              const [targetId, publishedId, targetStatus, contentJson] = values;
+              const target = revisions.get(targetId);
+              allowed = state.published_revision_id === publishedId && revisions.get(publishedId)?.status === "published"
+                && target?.status === targetStatus && target.content_json === contentJson
+                && !referencesPendingMedia(contentJson);
+            } else if (sql.includes("/* delete-claim */")) {
+              const [mediaId, claimToken] = values;
+              allowed = mediaDeletionJobs.get(mediaId)?.claim_token === claimToken;
+            } else if (sql.includes("/* delete-final */")) {
+              const [mediaId, claimToken, needle] = values;
+              allowed = mediaDeletionJobs.get(mediaId)?.claim_token === claimToken
+                && ![...revisions.values()].some((revision) => String(revision.content_json || "").toLowerCase().includes(String(needle).toLowerCase()));
+            }
+            if (!allowed) throw new Error("malformed JSON");
+            changes = 0;
+          } else if (sql.startsWith("INSERT INTO invitation_revisions")) {
             const [id, contentJson, createdAt, createdBy] = values;
-            revisions.set(id, {
-              id,
-              content_json: contentJson,
-              status: "draft",
-              created_at: createdAt,
-              created_by: createdBy,
-              published_at: null,
-            });
+            const pending = sql.includes("invitation_media_deletion_jobs_v1")
+              && referencesPendingMedia(contentJson);
+            if (pending) changes = 0;
+            else revisions.set(id, {
+                id,
+                content_json: contentJson,
+                status: "draft",
+                created_at: createdAt,
+                created_by: createdBy,
+                published_at: null,
+              });
           } else if (sql.startsWith("CREATE TABLE IF NOT EXISTS invitation_media_sets_v2")) {
+            changes = 0;
+          } else if (sql.startsWith("CREATE TABLE IF NOT EXISTS invitation_media_deletion_jobs_v1")) {
             changes = 0;
           } else if (sql.includes("INSERT OR IGNORE INTO invitation_media_sets_v2")) {
             changes = 0;
@@ -158,6 +232,21 @@ function invitationDatabase() {
             } else {
               changes = 0;
             }
+          } else if (sql.startsWith("INSERT INTO invitation_media_deletion_jobs_v1")) {
+            const [mediaId, slot, claimToken, requestedAt, setId, cutoff, existingJobId, needle] = values;
+            const set = mediaSets.get(setId);
+            const published = revisions.get(state.published_revision_id);
+            const publishedRef = published?.content_json?.toLowerCase().includes(String(needle).toLowerCase());
+            const capturedReferences = [...revisions.keys()].filter((id) => values.includes(id));
+            const unexpectedReference = [...revisions.values()].some((revision) =>
+              String(revision.content_json || "").toLowerCase().includes(String(needle).toLowerCase())
+                && !capturedReferences.includes(revision.id));
+            const deletable = set && (set.status === "stored" || (set.status === "reserved" && set.created_at < cutoff));
+            if (!deletable || mediaDeletionJobs.has(existingJobId) || publishedRef || unexpectedReference) {
+              changes = 0;
+            } else {
+              mediaDeletionJobs.set(mediaId, { media_id: mediaId, slot, claim_token: claimToken, requested_at: requestedAt });
+            }
           } else if (sql.includes("SET status = 'stored'")) {
             const [storedAt, id] = values;
             const row = mediaSets.get(id);
@@ -175,7 +264,13 @@ function invitationDatabase() {
             const row = revisions.get(id);
             const isCurrentDraft = !sql.includes("invitation_state") || state.draft_revision_id === id;
             const contentMatches = !hasContentGuard || row?.content_json === third;
-            if (row && row.status === "draft" && isCurrentDraft && contentMatches) {
+            const guardedContent = sql.includes("AND NOT EXISTS (SELECT 1 FROM invitation_media_deletion_jobs_v1")
+              ? values.at(-1)
+              : null;
+            const referencesPending = guardedContent && referencesPendingMedia(guardedContent);
+            const requiresJob = sql.includes("AND EXISTS (SELECT 1 FROM invitation_media_deletion_jobs_v1")
+              && !mediaDeletionJobs.has(values.at(-1));
+            if (row && row.status === "draft" && isCurrentDraft && contentMatches && !referencesPending && !requiresJob) {
               row.content_json = contentJson;
               if (hasCreatedAt) row.created_at = idOrCreatedAt;
             } else {
@@ -185,7 +280,9 @@ function invitationDatabase() {
             const [id] = values;
             const isCurrentPointer = sql.includes("invitation_state")
               && (state.draft_revision_id === id || state.published_revision_id === id);
-            changes = !isCurrentPointer && revisions.delete(id) ? 1 : 0;
+            const requiresJob = sql.includes("invitation_media_deletion_jobs_v1")
+              && !mediaDeletionJobs.has(values.at(-1));
+            changes = !isCurrentPointer && !requiresJob && revisions.delete(id) ? 1 : 0;
           } else if (sql.includes("DELETE FROM invitation_media_sets")) {
             if (sql.includes("id IN (SELECT id FROM invitation_media_sets_v2)")) {
               changes = 0;
@@ -195,6 +292,11 @@ function invitationDatabase() {
                   changes += 1;
                 }
               }
+            } else if (sql.includes("EXISTS (SELECT 1 FROM invitation_media_deletion_jobs_v1")) {
+              const [id, jobId, needle] = values;
+              const referenced = [...revisions.values()]
+                .some((revision) => typeof revision.content_json === "string" && revision.content_json.toLowerCase().includes(String(needle).toLowerCase()));
+              changes = mediaSets.has(id) && mediaDeletionJobs.has(jobId) && !referenced && mediaSets.delete(id) ? 1 : 0;
             } else if (sql.includes("LIKE '%' || ? || '%'")) {
               const row = mediaSets.get(values[0]);
               const [id, cutoffIso, needle] = values;
@@ -208,29 +310,60 @@ function invitationDatabase() {
             } else {
               changes = mediaSets.delete(values[0]) ? 1 : 0;
             }
+          } else if (sql.startsWith("DELETE FROM invitation_media_deletion_jobs_v1")) {
+            const [mediaId, setId, needle] = values;
+            const referenced = [...revisions.values()]
+              .some((revision) => typeof revision.content_json === "string" && revision.content_json.toLowerCase().includes(String(needle).toLowerCase()));
+            changes = mediaDeletionJobs.has(mediaId) && !mediaSets.has(setId) && !referenced && mediaDeletionJobs.delete(mediaId) ? 1 : 0;
           } else if (sql.includes("SET draft_revision_id = ?, updated_at = ?")) {
-            [state.draft_revision_id, state.updated_at] = values;
+            const [revisionId, updatedAt] = values;
+            const canSet = !sql.includes("EXISTS (SELECT 1 FROM invitation_revisions WHERE id = ?")
+              || revisions.get(values[2])?.status === "draft";
+            if (canSet) [state.draft_revision_id, state.updated_at] = [revisionId, updatedAt];
+            else changes = 0;
           } else if (sql.includes("SET draft_revision_id = NULL, published_revision_id = ?")) {
-            [state.published_revision_id, state.updated_at] = values;
-            state.draft_revision_id = null;
+            const [revisionId, updatedAt, expectedDraftId, expectedPublishedId, candidateId, contentJson] = values;
+            const candidate = revisions.get(candidateId);
+            if (state.draft_revision_id === expectedDraftId && state.published_revision_id === expectedPublishedId
+              && candidate?.status === "published" && !referencesPendingMedia(contentJson)) {
+              [state.published_revision_id, state.updated_at] = [revisionId, updatedAt];
+              state.draft_revision_id = null;
+            } else {
+              changes = 0;
+            }
           } else if (sql.includes("SET updated_at = ?") && !sql.includes("revision_id")) {
             [state.updated_at] = values;
           } else if (sql.includes("SET published_revision_id = ?, updated_at = ?")) {
-            const [nextRevisionId, updatedAt, expectedRevisionId] = values;
-            if (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId) {
+            const [nextRevisionId, updatedAt, expectedRevisionId, candidateId, contentJson] = values;
+            const candidate = revisions.get(candidateId);
+            if ((expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)
+              && (!candidateId || candidate?.status === "published") && !referencesPendingMedia(contentJson)) {
               [state.published_revision_id, state.updated_at] = [nextRevisionId, updatedAt];
             } else {
               changes = 0;
             }
           } else if (sql.includes("SET status = 'archived'")) {
             const [id, expectedRevisionId] = values;
+            const hasDraftGuard = sql.includes("draft_revision_id = ?");
+            const expectedDraftId = hasDraftGuard ? values[2] : undefined;
+            const contentJson = values.at(-1);
             const row = revisions.get(id);
-            if (row && (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)) row.status = "archived";
+            if (row && (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)
+              && (expectedDraftId === undefined || state.draft_revision_id === expectedDraftId)
+              && !referencesPendingMedia(contentJson)) row.status = "archived";
             else changes = 0;
           } else if (sql.includes("SET status = 'published'")) {
-            const [publishedAt, id, expectedRevisionId] = values;
+            const [publishedAt, id] = values;
+            const hasContentGuard = sql.includes("AND content_json = ?");
+            const expectedContent = hasContentGuard ? values[2] : null;
+            const expectedRevisionId = hasContentGuard ? values[3] : values[2];
+            const contentJson = values.at(-1);
             const row = revisions.get(id);
-            if (row && (expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId)) {
+            const pointerMatches = sql.includes("draft_revision_id = ?")
+              ? state.draft_revision_id === expectedRevisionId
+              : expectedRevisionId === undefined || state.published_revision_id === expectedRevisionId;
+            if (row && pointerMatches && (!hasContentGuard || row.content_json === expectedContent)
+              && !referencesPendingMedia(contentJson)) {
               row.status = "published";
               row.published_at = publishedAt;
             } else {
@@ -558,9 +691,10 @@ test("Access-authenticated admins can save a draft and publish an immutable revi
 
 test("rollback rejects archived drafts that were never public", async () => {
   assert.match(workerSource, /!target\.publishedAt/);
-  assert.match(workerSource, /const rollbackResults = await db\.batch\(statements\)/);
-  assert.match(workerSource, /published_revision_id = \?\)"/);
-  assert.match(workerSource, /rollbackResults\.at\(-1\)\?\.meta\?\.changes/);
+  assert.match(workerSource, /rollbackResults = await db\.batch\(statements\)/);
+  assert.match(workerSource, /mutationGuard\(db, "rollback"/);
+  assert.match(workerSource, /published_revision_id = \?\)/);
+  assert.match(workerSource, /applied\.slice\(1\)\.every\(\(changes\) => changes === 1\)/);
 });
 
 test("rollback rejects a stale public pointer before replacing another administrator's publication", async () => {
@@ -1099,23 +1233,43 @@ test("authenticated AAC M4A and PCM WAV uploads preserve formats through HEAD an
     Buffer.from(payload).copy(result, 8);
     return result;
   };
+  const descriptor = (tag, payload) => Buffer.concat([Buffer.from([tag, payload.length]), payload]);
   const ftyp = box("ftyp", Buffer.from("M4A \u0000\u0000\u0000\u0000isom", "ascii"));
-  const esds = box("esds", Buffer.from([0, 0, 0, 0, 0x03, 0x05, 0, 0, 0, 0, 0x04, 0x01, 0x40]));
-  const stsd = box("stsd", Buffer.concat([Buffer.from([0, 0, 0, 0, 0, 0, 0, 1]), box("mp4a", Buffer.concat([Buffer.alloc(28), esds]))]));
   const handler = box("hdlr", Buffer.concat([Buffer.alloc(8), Buffer.from("soun"), Buffer.alloc(4)]));
-  const m4a = Buffer.concat([ftyp, box("moov", box("trak", box("mdia", Buffer.concat([handler, box("minf", box("stbl", stsd))])))), box("mdat", Buffer.from([1, 2, 3, 4]))]);
+  const decoderConfigHeader = Buffer.from([0x40, 0x15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const makeM4a = (decoderConfig) => {
+    const esds = box("esds", Buffer.concat([Buffer.alloc(4), descriptor(0x03,
+      Buffer.concat([Buffer.from([0, 1, 0]), decoderConfig]))]));
+    const stsd = box("stsd", Buffer.concat([Buffer.from([0, 0, 0, 0, 0, 0, 0, 1]), box("mp4a", Buffer.concat([Buffer.alloc(28), esds]))]));
+    return Buffer.concat([ftyp, box("moov", box("trak", box("mdia", Buffer.concat([handler, box("minf", box("stbl", stsd))])))), box("mdat", Buffer.from([1, 2, 3, 4]))]);
+  };
+  const aacSpecificInfo = descriptor(0x05, Buffer.from([0x12, 0x10]));
+  const aacConfig = descriptor(0x04, Buffer.concat([decoderConfigHeader, aacSpecificInfo]));
+  const m4a = makeM4a(aacConfig);
+  const noAacConfig = makeM4a(descriptor(0x04, decoderConfigHeader));
+  const invalidAacObjectType = makeM4a(descriptor(0x04, Buffer.concat([decoderConfigHeader, descriptor(0x05, Buffer.from([0x00, 0x10]))])));
   const wav = Buffer.alloc(46);
   wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
   wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
   wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28);
   wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(2, 40);
+  const extensibleWav = Buffer.alloc(70);
+  extensibleWav.write("RIFF", 0); extensibleWav.writeUInt32LE(extensibleWav.length - 8, 4); extensibleWav.write("WAVEfmt ", 8);
+  extensibleWav.writeUInt32LE(40, 16); extensibleWav.writeUInt16LE(0xfffe, 20); extensibleWav.writeUInt16LE(1, 22);
+  extensibleWav.writeUInt32LE(8000, 24); extensibleWav.writeUInt32LE(16000, 28);
+  extensibleWav.writeUInt16LE(2, 32); extensibleWav.writeUInt16LE(16, 34); extensibleWav.writeUInt16LE(22, 36);
+  extensibleWav.writeUInt16LE(16, 38); extensibleWav.writeUInt32LE(1, 40);
+  Buffer.from([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71]).copy(extensibleWav, 44);
+  extensibleWav.write("data", 60); extensibleWav.writeUInt32LE(2, 64);
+  const nonPcmExtensibleWav = Buffer.from(extensibleWav);
+  nonPcmExtensibleWav[44] = 0x03;
   const fixture = await accessFixture();
   const db = invitationDatabase();
   const bucket = memoryMediaBucket();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json(fixture.jwks);
   try {
-    for (const [mimeType, extension, bytes] of [["audio/mp4", "m4a", m4a], ["audio/wav", "wav", wav]]) {
+    for (const [mimeType, extension, bytes] of [["audio/mp4", "m4a", m4a], ["audio/wav", "wav", wav], ["audio/wav", "wav", extensibleWav]]) {
       const response = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
         method: "POST", headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, "content-type": mimeType }, body: bytes,
       }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
@@ -1132,15 +1286,18 @@ test("authenticated AAC M4A and PCM WAV uploads preserve formats through HEAD an
       assert.deepEqual(new Uint8Array(await range.arrayBuffer()), new Uint8Array(bytes.subarray(0, 4)));
     }
     const nonAac = Buffer.from(m4a);
-    nonAac[nonAac.indexOf(Buffer.from([0x04, 0x01, 0x40])) + 2] = 0x69;
+    nonAac[nonAac.indexOf(aacConfig) + 2] = 0x69;
     const invalidFiles = [
       ["audio/mp4", Buffer.concat([ftyp, box("mdat", Buffer.from([1, 2, 3, 4]))])],
       ["audio/mp4", Buffer.from(m4a.toString("binary").replace("soun", "vide"), "binary")],
       ["audio/mp4", nonAac],
+      ["audio/mp4", noAacConfig],
+      ["audio/mp4", invalidAacObjectType],
       ["audio/mp4", wav],
       ["audio/wav", m4a],
       ["audio/wav", Buffer.from([82, 73, 70, 70, 4, 0, 0, 0, 87, 65, 86, 69])],
       ["audio/wav", Buffer.from(wav.map((byte, index) => index === 20 ? 6 : byte))],
+      ["audio/wav", nonPcmExtensibleWav],
     ];
     for (const [mimeType, bytes] of invalidFiles) {
       const response = await worker.fetch(new Request("https://example.test/api/admin/media/audio", {
@@ -1149,8 +1306,8 @@ test("authenticated AAC M4A and PCM WAV uploads preserve formats through HEAD an
       assert.equal(response.status, 400);
       assert.equal((await response.json()).code, "INVALID_AUDIO_SIGNATURE");
     }
-    assert.equal(db.mediaSets.size, 2);
-    assert.equal(bucket.objects.size, 2);
+    assert.equal(db.mediaSets.size, 3);
+    assert.equal(bucket.objects.size, 3);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -1508,6 +1665,221 @@ test("media deletion frees quota and removes R2 objects when unreferenced", asyn
     assert.equal(payload.usage.usedBytes, 0);
     assert.equal(db.mediaSets.size, 0);
     assert.equal(bucket.objects.size, 0);
+  });
+});
+
+test("publish leaves the current public revision intact when the draft changes before the D1 batch", async () => {
+  const db = invitationDatabase();
+  const draftId = "draft-concurrent-edit";
+  const publishedId = "current-public";
+  const draft = confirmedDocument();
+  const publicDocument = confirmedDocument();
+  db.revisions.set(draftId, revisionRow(draftId, draft, { status: "draft" }));
+  db.revisions.set(publishedId, revisionRow(publishedId, publicDocument, {
+    status: "published", publishedAt: "2026-08-20T00:00:00.000Z",
+  }));
+  db.state.draft_revision_id = draftId;
+  db.state.published_revision_id = publishedId;
+  db.injectBeforeBatch("publish", () => {
+    const changed = confirmedDocument();
+    changed.content.message = ["수정된", "초안", "문장", "입니다"];
+    db.revisions.get(draftId).content_json = JSON.stringify(changed);
+  });
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/content/publish", {
+      method: "POST", headers, body: JSON.stringify({ revisionId: draftId }),
+    }), { ...fixture.env, GUESTBOOK_DB: db });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "STALE_DRAFT");
+    assert.equal(db.state.published_revision_id, publishedId);
+    assert.equal(db.state.draft_revision_id, draftId);
+    assert.equal(db.revisions.get(publishedId).status, "published");
+    assert.equal(db.revisions.get(draftId).status, "draft");
+    assert.match(db.revisions.get(draftId).content_json, /수정된/);
+  });
+});
+
+test("rollback preserves a concurrent publication when the public pointer changes before its D1 batch", async () => {
+  const db = invitationDatabase();
+  const document = confirmedDocument();
+  const publishedAt = "2026-08-20T00:00:00.000Z";
+  for (const [id, status] of [["current-public", "published"], ["older-public", "archived"], ["new-public", "archived"]]) {
+    db.revisions.set(id, revisionRow(id, document, { status, publishedAt }));
+  }
+  db.state.published_revision_id = "current-public";
+  db.injectBeforeBatch("rollback", () => {
+    db.revisions.get("current-public").status = "archived";
+    db.revisions.get("new-public").status = "published";
+    db.state.published_revision_id = "new-public";
+  });
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/content/rollback", {
+      method: "POST", headers,
+      body: JSON.stringify({ revisionId: "older-public", expectedPublishedRevisionId: "current-public" }),
+    }), { ...fixture.env, GUESTBOOK_DB: db });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "STALE_PUBLISHED_REVISION");
+    assert.equal(db.state.published_revision_id, "new-public");
+    assert.equal(db.revisions.get("new-public").status, "published");
+    assert.equal(db.revisions.get("older-public").status, "archived");
+  });
+});
+
+test("R2 deletion failure retains quota and a retryable media deletion job", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000019";
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 5000));
+  const bucket = memoryBucket();
+  const objectKeys = [
+    `invitation/${mediaId}/pastel-gallery-0/original.jpg`,
+    `invitation/${mediaId}/pastel-gallery-0/480.webp`,
+    `invitation/${mediaId}/pastel-gallery-0/960.webp`,
+  ];
+  for (const [index, key] of objectKeys.entries()) bucket.objects.set(key, new Uint8Array([index + 1]));
+  const deleteObjects = bucket.delete.bind(bucket);
+  let deleteAttempts = 0;
+  bucket.delete = async (keys) => {
+    deleteAttempts += 1;
+    if (deleteAttempts === 1) {
+      bucket.objects.delete(objectKeys[0]);
+      throw new Error("simulated R2 delete failure after partial cleanup");
+    }
+    return deleteObjects(keys);
+  };
+
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket };
+    const requestDelete = () => worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), env);
+    const failed = await requestDelete();
+    assert.equal(failed.status, 503);
+    const failedPayload = await failed.json();
+    assert.equal(failedPayload.code, "MEDIA_DELETE_PENDING");
+    assert.equal(failedPayload.deletionPending, true);
+    assert.equal(failedPayload.usage.usedBytes, 5000);
+    assert.equal(db.mediaSets.has(mediaId), true);
+    assert.equal(db.mediaDeletionJobs.has(mediaId), true);
+    assert.equal(bucket.objects.size, 2);
+
+    const listed = await worker.fetch(request("/api/admin/media/list", { method: "GET", headers }), env);
+    const listPayload = await listed.json();
+    assert.equal(listPayload.media.find((item) => item.mediaId === mediaId).deletionPending, true);
+    assert.equal(listPayload.usage.usedBytes, 5000);
+
+    const retried = await requestDelete();
+    assert.equal(retried.status, 200);
+    const retryPayload = await retried.json();
+    assert.equal(retryPayload.deleted, mediaId);
+    assert.equal(retryPayload.freedBytes, 5000);
+    assert.equal(retryPayload.objectsDeleted, true);
+    assert.equal(retryPayload.usage.usedBytes, 0);
+    assert.equal(db.mediaSets.has(mediaId), false);
+    assert.equal(db.mediaDeletionJobs.has(mediaId), false);
+    assert.equal(bucket.objects.size, 0);
+    assert.equal(deleteAttempts, 2);
+  });
+});
+
+test("media deletion refuses an unobserved revision reference before deleting R2 objects", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000039";
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "pastel-gallery-0", 5000));
+  const bucket = memoryBucket();
+  const objectKey = `invitation/${mediaId}/pastel-gallery-0/480.webp`;
+  bucket.objects.set(objectKey, new Uint8Array([7]));
+  db.injectBeforeMediaDeletionClaim(() => {
+    const document = confirmedDocument();
+    document.photos.pastel.gallery = [{
+      ...galleryPhoto(0),
+      src: objectKey.replace("invitation/", "/api/media/invitation/").replace("/pastel-gallery-0/480.webp", "/pastel-gallery-0/480.webp"),
+      srcSet: `${objectKey.replace("invitation/", "/api/media/invitation/")} 480w`,
+    }];
+    db.state.draft_revision_id = "draft-added-during-delete";
+    db.revisions.set(db.state.draft_revision_id, revisionRow(db.state.draft_revision_id, document, { status: "draft" }));
+  });
+
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/media/delete", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mediaId }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MEDIA_IN_USE");
+    assert.equal(db.mediaDeletionJobs.has(mediaId), false);
+    assert.equal(db.mediaSets.has(mediaId), true);
+    assert.equal(bucket.objects.has(objectKey), true);
+  });
+});
+
+test("draft save and publish reject media while its storage deletion is pending", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000029";
+  const document = confirmedDocument();
+  document.content.music.src = `/api/media/invitation/${mediaId}/background-music/track.wav`;
+  const draftId = "draft-pending-delete";
+  db.state.draft_revision_id = draftId;
+  db.revisions.set(draftId, revisionRow(draftId, document, { status: "draft" }));
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "background-music", 1000));
+  db.mediaDeletionJobs.set(mediaId, { media_id: mediaId, slot: "background-music", requested_at: new Date().toISOString() });
+
+  await withAccessEnv(async (fixture, headers) => {
+    const env = { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: memoryBucket() };
+    const saved = await worker.fetch(request("/api/admin/content", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ document }),
+    }), env);
+    assert.equal(saved.status, 409);
+    assert.equal((await saved.json()).code, "MEDIA_DELETE_PENDING");
+    assert.equal(db.revisions.get(draftId).status, "draft");
+
+    const published = await worker.fetch(request("/api/admin/content/publish", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ revisionId: draftId }),
+    }), env);
+    assert.equal(published.status, 409);
+    assert.equal((await published.json()).code, "MEDIA_DELETE_PENDING");
+    assert.equal(db.state.published_revision_id, null);
+    assert.equal(db.state.draft_revision_id, draftId);
+    assert.equal(db.revisions.get(draftId).status, "draft");
+  });
+});
+
+test("rollback rejects archived content that references media being deleted", async () => {
+  const db = invitationDatabase();
+  const mediaId = "00000000-0000-0000-0000-000000000039";
+  const currentId = "published-current";
+  const archivedId = "archived-locked-media";
+  const archivedDocument = confirmedDocument();
+  archivedDocument.content.music.src = `/api/media/invitation/${mediaId}/background-music/track.m4a`;
+  db.state.published_revision_id = currentId;
+  db.revisions.set(currentId, revisionRow(currentId, confirmedDocument(), {
+    status: "published",
+    publishedAt: "2026-09-01T00:00:00.000Z",
+  }));
+  db.revisions.set(archivedId, revisionRow(archivedId, archivedDocument, {
+    status: "archived",
+    publishedAt: "2026-08-01T00:00:00.000Z",
+  }));
+  db.mediaSets.set(mediaId, mediaRow(mediaId, "background-music", 1000));
+  db.mediaDeletionJobs.set(mediaId, { media_id: mediaId, slot: "background-music", requested_at: new Date().toISOString() });
+
+  await withAccessEnv(async (fixture, headers) => {
+    const response = await worker.fetch(request("/api/admin/content/rollback", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ revisionId: archivedId, expectedPublishedRevisionId: currentId }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: memoryBucket() });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MEDIA_DELETE_PENDING");
+    assert.equal(db.state.published_revision_id, currentId);
+    assert.equal(db.revisions.get(currentId).status, "published");
+    assert.equal(db.revisions.get(archivedId).status, "archived");
   });
 });
 
