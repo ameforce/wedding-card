@@ -56,6 +56,7 @@ test("actual paper handoff is neutral on both faces and turning activates scoped
         delete document.visibilityState;
         document.dispatchEvent(new Event("visibilitychange"));
       });
+      await page.locator(".pastel-intro-cover__start").click();
       await page.waitForFunction(() => {
         const root = document.querySelector(".pastel-intro-cover");
         if (!root) return false;

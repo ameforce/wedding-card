@@ -1110,7 +1110,7 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.match(source, /controls preload="metadata"/);
   assert.match(source, /checked=\{music\.autoPlayOnOpen === true\}/);
   assert.match(source, /\["content", "music", "autoPlayOnOpen"\]/);
-  assert.match(source, /브라우저에서 자동 재생을 차단할 수 있습니다/);
+  assert.match(source, /방문자가 리본을 탭하면 음악을 준비하고, 봉투가 완전히 열린 뒤 재생합니다/);
   assert.doesNotMatch(source, /<audio\b[^>]*\sautoPlay(?:\s|=|>)/);
   assert.match(source, /미디어 저장 공간\(사진·음악\)/);
   assert.match(source, /사진과 음악 합계가 2GB에 도달하면 추가 업로드가 자동으로 차단/);
@@ -1139,7 +1139,10 @@ test("public music controls and credits resolve from runtime content and reset o
   assert.match(source, /href=\{music\.sourceUrl\}/);
   assert.match(source, /href=\{music\.licenseUrl\}/);
   assert.match(source, /preload=\{allowOpeningPlayback && music\.autoPlayOnOpen === true \? "auto" : "none"\}[\s\S]*loop/);
-  assert.match(source, /PASTEL_INTRO_PAPER_OPENING_EVENT/);
+  assert.match(source, /PASTEL_INTRO_RIBBON_START_EVENT/);
+  assert.match(source, /PASTEL_INTRO_OPENED_EVENT/);
+  assert.match(source, /createMediaElementSource\(audio\)/);
+  assert.match(source, /gain\.gain\.value = 0/);
   assert.match(source, /allowOpeningPlayback=\{variant === "pastel" && runtime\.source !== "admin-live-preview"\}/);
   assert.match(source, /if \(!allowOpeningPlayback \|\| music\.autoPlayOnOpen !== true\) return undefined/);
   assert.doesNotMatch(source, /src="\/assets\/audio\/touching-moments-one-pulse\.mp3"/);
