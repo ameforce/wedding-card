@@ -334,8 +334,10 @@ function MediaDeleteDialog({ media, dependentRevisions, error, busy, onCancel, o
     }}>
       <section ref={dialogRef} className="admin-dialog is-compact" role="dialog" aria-modal="true" aria-labelledby="media-delete-title" tabIndex="-1">
         <button type="button" className="admin-dialog-close" onClick={onCancel} disabled={busy} aria-label="미디어 삭제 확인 닫기"><X aria-hidden="true" /></button>
-        <h2 id="media-delete-title">저장된 미디어를 삭제할까요?</h2>
-        <p>선택한 {media.kind === "audio" ? "음악" : "사진"} 파일({formatStorage(media.totalBytes || 0)})을 저장소에서 영구 삭제하고 저장 공간을 회수합니다.</p>
+        <h2 id="media-delete-title">{media.deletionPending ? "저장소 삭제를 다시 시도할까요?" : "저장된 미디어를 삭제할까요?"}</h2>
+        {media.deletionPending
+          ? <p>초안과 과거 리비전에서는 분리했지만 저장소 파일 정리가 끝나지 않았습니다. 다시 시도하면 파일을 정리하고 저장 공간을 회수합니다.</p>
+          : <p>선택한 {media.kind === "audio" ? "음악" : "사진"} 파일({formatStorage(media.totalBytes || 0)})을 저장소에서 영구 삭제하고 저장 공간을 회수합니다.</p>}
         {media.references?.draft && <p>현재 초안이 이 미디어를 사용 중입니다. 삭제하면 초안의 해당 항목이 자동으로 제거됩니다.</p>}
         {cascade && (
           <>
@@ -347,11 +349,11 @@ function MediaDeleteDialog({ media, dependentRevisions, error, busy, onCancel, o
             </ul>
           </>
         )}
-        <div className="admin-dialog-warning"><Warning aria-hidden="true" weight="fill" /><span>삭제된 파일과 리비전은 복구할 수 없습니다.</span></div>
+        <div className="admin-dialog-warning"><Warning aria-hidden="true" weight="fill" /><span>{media.deletionPending ? "삭제가 완료될 때까지 이 미디어의 저장 공간은 계속 예약됩니다." : "삭제된 파일과 리비전은 복구할 수 없습니다."}</span></div>
         {error ? <p className="is-error" role="alert">{error}</p> : null}
         <div className="admin-dialog-actions">
           <button type="button" onClick={onCancel} disabled={busy}>취소</button>
-          <button type="button" className="is-destructive" onClick={onConfirm} disabled={busy}>{busy ? "삭제 중…" : cascade ? "리비전과 함께 삭제" : "영구 삭제"}</button>
+          <button type="button" className="is-destructive" onClick={onConfirm} disabled={busy}>{busy ? "삭제 중…" : media.deletionPending ? "삭제 재시도" : cascade ? "리비전과 함께 삭제" : "영구 삭제"}</button>
         </div>
       </section>
     </div>, document.body,
@@ -668,6 +670,17 @@ export function ContentAdmin() {
         setMediaDeleteTarget((current) => current && { ...current, dependentRevisions: error.dependentRevisions, error: error.message || "" });
         return;
       }
+      if (error?.code === "MEDIA_DELETE_PENDING") {
+        const refreshed = await refreshMediaList();
+        const pendingMedia = refreshed?.media?.find((item) => item.mediaId === target.media.mediaId);
+        setMediaDeleteTarget((current) => current && {
+          ...current,
+          media: { ...current.media, ...pendingMedia, deletionPending: true },
+          dependentRevisions: [],
+          error: error.message || "저장소 삭제를 완료하지 못했습니다. 다시 시도해 주세요.",
+        });
+        return;
+      }
       if (isAdminAuthRequiredError(error)) {
         setMediaDeleteTarget(null);
         showAdminError(error, "미디어를 삭제하지 못했습니다.");
@@ -780,7 +793,7 @@ export function ContentAdmin() {
       update(["content", "music", "src"], result.audio.src);
       setMediaUsage(result.usage || await adapter.getMediaUsage());
       await refreshMediaList();
-      setStatus({ tone: "success", message: "새 MP3와 곡 정보를 초안에 넣었습니다. 미리듣기 후 임시 적용해 주세요." });
+      setStatus({ tone: "success", message: "새 음악과 곡 정보를 초안에 넣었습니다. 미리듣기 후 임시 적용해 주세요." });
       return true;
     } catch (error) {
       showAdminError(error, "배경 음악을 처리하지 못했습니다.");
@@ -948,6 +961,11 @@ export function ContentAdmin() {
                 <Field label="라이선스명" value={music.licenseLabel} error={musicErrors.licenseLabel} onChange={(value) => update(["content", "music", "licenseLabel"], value)} />
                 <Field label="라이선스 URL" wide type="url" value={music.licenseUrl} error={musicErrors.licenseUrl} onChange={(value) => update(["content", "music", "licenseUrl"], value)} hint="HTTPS 주소만 사용할 수 있습니다." />
               </div>
+              <label className="content-admin-music-autoplay">
+                <input type="checkbox" checked={music.autoPlayOnOpen === true} aria-describedby="content-admin-music-autoplay-hint" onChange={(event) => update(["content", "music", "autoPlayOnOpen"], event.target.checked)} />
+                <span>봉투가 열릴 때 음악 재생 시도</span>
+              </label>
+              <small id="content-admin-music-autoplay-hint" className="content-admin-music-hint">브라우저에서 자동 재생을 차단할 수 있습니다. 차단되면 방문자가 재생 버튼을 눌러 들을 수 있습니다.</small>
               <div className="content-admin-music-upload">
                 <div>
                   <strong>현재 곡 미리듣기</strong>
@@ -955,15 +973,15 @@ export function ContentAdmin() {
                 </div>
                 <audio key={music.src} className="content-admin-music-preview" controls preload="metadata" src={music.src} aria-label={`${music.title} 미리듣기`} />
                 <label className={`content-admin-file ${musicReady ? "" : "is-disabled"}`}>
-                  <span>{uploadingSlot === "background-music" ? "MP3 업로드 중…" : "MP3 교체"}</span>
-                  <input type="file" accept="audio/mpeg,.mp3" disabled={Boolean(uploadingSlot) || !musicReady} onChange={async (event) => {
+                  <span>{uploadingSlot === "background-music" ? "음악 업로드 중…" : "음악 교체"}</span>
+                  <input type="file" accept="audio/mpeg,audio/mp4,audio/wav,.mp3,.m4a,.wav" disabled={Boolean(uploadingSlot) || !musicReady} onChange={async (event) => {
                     const file = event.target.files?.[0];
                     if (file) await uploadAudio(file);
                     event.target.value = "";
                   }} />
                 </label>
                 {uploadProgress?.slot === "background-music" && <UploadProgress progress={uploadProgress} />}
-                <small>MP3(audio/mpeg), 최대 25MB · 업로드만으로는 공개되지 않습니다.</small>
+                <small>MP3, M4A(AAC), WAV(PCM), 최대 25MB · 업로드만으로는 공개되지 않습니다.</small>
               </div>
             </div>
           </CollapsibleSection>
@@ -987,7 +1005,8 @@ export function ContentAdmin() {
                   {mediaList.map((item) => {
                     const refs = item.references || {};
                     const archivedCount = refs.archivedRevisions?.length || 0;
-                    const statusLabel = item.abandoned ? "업로드 중단됨"
+                    const statusLabel = item.deletionPending ? "저장소 삭제 대기 중"
+                      : item.abandoned ? "업로드 중단됨"
                       : refs.published ? "현재 공개본 사용 중"
                         : refs.draft ? "현재 초안 사용 중"
                           : archivedCount > 0 ? `과거 리비전 ${archivedCount}개 참조`

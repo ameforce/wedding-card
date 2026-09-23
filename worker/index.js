@@ -24,6 +24,7 @@ const MAX_AUDIO_BODY_BYTES = 26 * 1024 * 1024;
 const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 const MEDIA_SETS_TABLE = "invitation_media_sets_v2";
 const LEGACY_MEDIA_SETS_TABLE = "invitation_media_sets";
+const MEDIA_DELETION_JOBS_TABLE = "invitation_media_deletion_jobs_v1";
 const REQUIRED_COPY_LINES = 4;
 const MIN_GALLERY_PHOTOS = 1;
 const GUESTBOOK_RETENTION = "permanent";
@@ -633,8 +634,8 @@ function requireAccountNumber(value, path) {
 
 function requireMusicSource(value) {
   requireText(value, "content.music.src", 2048);
-  if (!/^(?:\/assets\/audio\/[a-z0-9._-]+\.mp3|\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3)$/i.test(value)) {
-    throw { status: 400, code: "INVALID_CONTENT", message: "content.music.src 값은 업로드된 MP3 경로여야 합니다." };
+  if (!/^(?:\/assets\/audio\/[a-z0-9._-]+\.mp3|\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.(?:mp3|m4a|wav))$/i.test(value)) {
+    throw { status: 400, code: "INVALID_CONTENT", message: "content.music.src 값은 업로드된 음악 경로여야 합니다." };
   }
 }
 
@@ -759,6 +760,9 @@ function validateInvitationDocument(document, { publish = false, write = false }
   if (document.schemaVersion === 2) {
     const music = requirePlainObject(content.music, "content.music");
     requireMusicSource(music.src);
+    if (music.autoPlayOnOpen !== undefined && typeof music.autoPlayOnOpen !== "boolean") {
+      throw { status: 400, code: "INVALID_CONTENT", message: "content.music.autoPlayOnOpen 값은 참 또는 거짓이어야 합니다." };
+    }
     requireText(music.title, "content.music.title", 80);
     requireText(music.artist, "content.music.artist", 80);
     requireHttpsUrl(music.sourceUrl, "content.music.sourceUrl");
@@ -968,6 +972,16 @@ async function runDatabaseBatch(db, statements) {
   return results;
 }
 
+function mutationGuard(db, name, predicate, values) {
+  return db.prepare(
+    `SELECT CASE WHEN ${predicate} THEN 1 ELSE json_extract('mutation-guard-failed', '$') END AS mutation_guard /* ${name} */`,
+  ).bind(...values);
+}
+
+function isMutationGuardFailure(error) {
+  return /malformed json/i.test(String(error?.message || error || ""));
+}
+
 async function getPublishedInvitation(env) {
   const published = await getPublishedInvitationPayload(env);
   if (!published) return apiError(503, "CONTENT_NOT_PUBLISHED", "공개된 초대장 콘텐츠가 아직 없습니다.");
@@ -1012,32 +1026,62 @@ async function getAdminInvitation(request, env) {
   });
 }
 
+async function pendingMediaDeletionForContent(db, contentJson) {
+  const mediaIds = [...new Set([...String(contentJson || "").toLowerCase().matchAll(/invitation\/([0-9a-f-]{36})\//g)]
+    .map((match) => match[1]))];
+  for (let offset = 0; offset < mediaIds.length; offset += 100) {
+    const chunk = mediaIds.slice(offset, offset + 100);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const pending = await db.prepare(
+      `SELECT media_id FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id IN (${placeholders}) LIMIT 1`,
+    ).bind(...chunk).first();
+    if (pending?.media_id) return pending.media_id;
+  }
+  return null;
+}
+
+function mediaDeletionConflict(mediaId) {
+  return apiError(409, "MEDIA_DELETE_PENDING", "저장소에서 삭제 대기 중인 미디어입니다. 완료될 때까지 초안이나 공개본에서 사용할 수 없습니다.", { mediaId });
+}
+
 async function saveInvitationDraft(request, env) {
   requireSameOrigin(request);
   const db = requireContentDatabase(env);
   const adminEmail = await requireAdminEmail(request, env);
   const payload = await readJson(request, MAX_CONTENT_BODY_BYTES);
   const contentJson = validateInvitationDocument(payload.document, { write: true });
+  await migrateLegacyMediaSets(db);
+  const pendingMediaId = await pendingMediaDeletionForContent(db, contentJson);
+  if (pendingMediaId) return mediaDeletionConflict(pendingMediaId);
   const state = await getInvitationState(db);
   const createdAt = new Date().toISOString();
   if (state?.draft_revision_id) {
     const updated = await db.prepare(
-      "UPDATE invitation_revisions SET content_json = ?, created_at = ? WHERE id = ? AND status = 'draft'",
-    ).bind(contentJson, createdAt, state.draft_revision_id).run();
+      `UPDATE invitation_revisions SET content_json = ?, created_at = ? WHERE id = ? AND status = 'draft'
+       AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+         WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)`,
+    ).bind(contentJson, createdAt, state.draft_revision_id, contentJson).run();
     if (updated?.meta?.changes) {
       await db.prepare("UPDATE invitation_state SET updated_at = ? WHERE singleton_id = 1").bind(createdAt).run();
       return json({ revisionId: state.draft_revision_id, savedAt: createdAt });
     }
   }
   const revisionId = crypto.randomUUID();
-  await runDatabaseBatch(db, [
+  const saveResults = await runDatabaseBatch(db, [
     db.prepare(
-      "INSERT INTO invitation_revisions (id, content_json, status, created_at, created_by, published_at) VALUES (?, ?, 'draft', ?, ?, NULL)",
-    ).bind(revisionId, contentJson, createdAt, adminEmail),
+      `INSERT INTO invitation_revisions (id, content_json, status, created_at, created_by, published_at)
+       SELECT ?, ?, 'draft', ?, ?, NULL
+       WHERE NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+         WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)`,
+    ).bind(revisionId, contentJson, createdAt, adminEmail, contentJson),
     db.prepare(
-      "UPDATE invitation_state SET draft_revision_id = ?, updated_at = ? WHERE singleton_id = 1",
-    ).bind(revisionId, createdAt),
+      "UPDATE invitation_state SET draft_revision_id = ?, updated_at = ? WHERE singleton_id = 1 AND EXISTS (SELECT 1 FROM invitation_revisions WHERE id = ? AND status = 'draft')",
+    ).bind(revisionId, createdAt, revisionId),
   ]);
+  if (!saveResults?.[0]?.meta?.changes) {
+    const pending = await pendingMediaDeletionForContent(db, contentJson);
+    return pending ? mediaDeletionConflict(pending) : apiError(409, "STALE_DRAFT", "초안이 변경되었습니다. 최신 상태를 다시 불러와 주세요.");
+  }
   return json({ revisionId, savedAt: createdAt }, 201);
 }
 
@@ -1054,20 +1098,57 @@ async function publishInvitationDraft(request, env) {
   const draft = await getInvitationRevision(db, revisionId);
   if (!draft || draft.status !== "draft") return apiError(409, "STALE_DRAFT", "공개할 임시 적용본이 없습니다.");
   validateInvitationDocument(draft.document, { publish: true });
+  await migrateLegacyMediaSets(db);
+  const contentJson = JSON.stringify(draft.document);
+  const pendingMediaId = await pendingMediaDeletionForContent(db, contentJson);
+  if (pendingMediaId) return mediaDeletionConflict(pendingMediaId);
   const publishedAt = new Date().toISOString();
-  const statements = [];
+  const statements = [mutationGuard(db, "publish", `
+    EXISTS (SELECT 1 FROM invitation_state s JOIN invitation_revisions r ON r.id = s.draft_revision_id
+      WHERE s.singleton_id = 1 AND s.draft_revision_id = ? AND s.published_revision_id IS ?
+        AND r.status = 'draft' AND r.content_json = ?)
+    AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+      WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)
+    ${state.published_revision_id ? "AND EXISTS (SELECT 1 FROM invitation_revisions WHERE id = ? AND status = 'published')" : ""}
+  `, [revisionId, state.published_revision_id, contentJson, contentJson,
+    ...(state.published_revision_id ? [state.published_revision_id] : [])])];
   if (state.published_revision_id) {
-    statements.push(db.prepare("UPDATE invitation_revisions SET status = 'archived' WHERE id = ? AND status = 'published'")
-      .bind(state.published_revision_id));
+    statements.push(db.prepare(
+      `UPDATE invitation_revisions SET status = 'archived' WHERE id = ? AND status = 'published'
+       AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND published_revision_id = ? AND draft_revision_id = ?)
+       AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+         WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)`,
+    ).bind(state.published_revision_id, state.published_revision_id, revisionId, contentJson));
   }
   statements.push(
-    db.prepare("UPDATE invitation_revisions SET status = 'published', published_at = ? WHERE id = ?")
-      .bind(publishedAt, revisionId),
     db.prepare(
-      "UPDATE invitation_state SET draft_revision_id = NULL, published_revision_id = ?, updated_at = ? WHERE singleton_id = 1",
-    ).bind(revisionId, publishedAt),
+      `UPDATE invitation_revisions SET status = 'published', published_at = ? WHERE id = ? AND status = 'draft' AND content_json = ?
+       AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND draft_revision_id = ?)
+       AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+         WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)`,
+    ).bind(publishedAt, revisionId, contentJson, revisionId, contentJson),
+    db.prepare(
+      `UPDATE invitation_state SET draft_revision_id = NULL, published_revision_id = ?, updated_at = ?
+       WHERE singleton_id = 1 AND draft_revision_id = ? AND published_revision_id IS ?
+       AND EXISTS (SELECT 1 FROM invitation_revisions WHERE id = ? AND status = 'published')
+       AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+         WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)`,
+    ).bind(revisionId, publishedAt, revisionId, state.published_revision_id, revisionId, contentJson),
   );
-  await runDatabaseBatch(db, statements);
+  let publishResults;
+  try {
+    publishResults = await runDatabaseBatch(db, statements);
+  } catch (error) {
+    if (!isMutationGuardFailure(error)) throw error;
+    const pending = await pendingMediaDeletionForContent(db, contentJson);
+    return pending ? mediaDeletionConflict(pending) : apiError(409, "STALE_DRAFT", "초안이 변경되었습니다. 최신 상태를 다시 불러와 공개해 주세요.");
+  }
+  const applied = (Array.isArray(publishResults) ? publishResults : publishResults?.results || [])
+    .map((result) => result?.meta?.changes ?? 0);
+  if (applied.length !== statements.length || !applied.slice(1).every((changes) => changes === 1)) {
+    const pending = await pendingMediaDeletionForContent(db, contentJson);
+    return pending ? mediaDeletionConflict(pending) : apiError(409, "STALE_DRAFT", "초안이 변경되었습니다. 최신 상태를 다시 불러와 공개해 주세요.");
+  }
   return json({ revisionId, publishedAt });
 }
 
@@ -1083,26 +1164,58 @@ async function rollbackInvitation(request, env) {
     return apiError(404, "REVISION_NOT_FOUND", "되돌릴 콘텐츠 버전을 찾을 수 없습니다.");
   }
   validateInvitationDocument(target.document, { publish: true });
+  await migrateLegacyMediaSets(db);
+  const contentJson = JSON.stringify(target.document);
+  const pendingMediaId = await pendingMediaDeletionForContent(db, contentJson);
+  if (pendingMediaId) return mediaDeletionConflict(pendingMediaId);
   if (!expectedPublishedRevisionId || typeof db.batch !== "function") {
     return apiError(409, "STALE_PUBLISHED_REVISION", "공개본이 변경되었습니다. 최신 상태를 다시 확인해 주세요.");
   }
   const publishedAt = new Date().toISOString();
-  const statements = [];
+  const statements = [mutationGuard(db, "rollback", `
+    EXISTS (SELECT 1 FROM invitation_state s JOIN invitation_revisions current ON current.id = s.published_revision_id
+      JOIN invitation_revisions target ON target.id = ?
+      WHERE s.singleton_id = 1 AND s.published_revision_id = ? AND current.status = 'published'
+        AND target.status = ? AND target.content_json = ?)
+    AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+      WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)
+  `, [revisionId, expectedPublishedRevisionId, expectedPublishedRevisionId === revisionId ? "published" : "archived", contentJson, contentJson])];
   if (expectedPublishedRevisionId !== revisionId) {
     statements.push(db.prepare(
-      "UPDATE invitation_revisions SET status = 'archived' WHERE id = ? AND status = 'published' AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND published_revision_id = ?)",
-    ).bind(expectedPublishedRevisionId, expectedPublishedRevisionId));
+      `UPDATE invitation_revisions SET status = 'archived' WHERE id = ? AND status = 'published'
+       AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND published_revision_id = ?)
+       AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+         WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)`,
+    ).bind(expectedPublishedRevisionId, expectedPublishedRevisionId, contentJson));
   }
   statements.push(
     db.prepare(
-      "UPDATE invitation_revisions SET status = 'published', published_at = ? WHERE id = ? AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND published_revision_id = ?)",
-    ).bind(publishedAt, revisionId, expectedPublishedRevisionId),
+      `UPDATE invitation_revisions SET status = 'published', published_at = ? WHERE id = ?
+       AND EXISTS (SELECT 1 FROM invitation_state WHERE singleton_id = 1 AND published_revision_id = ?)
+       AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+         WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)`,
+    ).bind(publishedAt, revisionId, expectedPublishedRevisionId, contentJson),
     db.prepare(
-      "UPDATE invitation_state SET published_revision_id = ?, updated_at = ? WHERE singleton_id = 1 AND published_revision_id = ?",
-    ).bind(revisionId, publishedAt, expectedPublishedRevisionId),
+      `UPDATE invitation_state SET published_revision_id = ?, updated_at = ?
+       WHERE singleton_id = 1 AND published_revision_id = ?
+       AND EXISTS (SELECT 1 FROM invitation_revisions WHERE id = ? AND status = 'published')
+       AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} job
+         WHERE instr(lower(?), lower('invitation/' || job.media_id || '/')) > 0)`,
+    ).bind(revisionId, publishedAt, expectedPublishedRevisionId, revisionId, contentJson),
   );
-  const rollbackResults = await db.batch(statements);
-  if (Number(rollbackResults.at(-1)?.meta?.changes) !== 1) {
+  let rollbackResults;
+  try {
+    rollbackResults = await db.batch(statements);
+  } catch (error) {
+    if (!isMutationGuardFailure(error)) throw error;
+    const pending = await pendingMediaDeletionForContent(db, contentJson);
+    return pending ? mediaDeletionConflict(pending) : apiError(409, "STALE_PUBLISHED_REVISION", "공개본이 변경되었습니다. 최신 상태를 다시 확인해 주세요.");
+  }
+  const applied = (Array.isArray(rollbackResults) ? rollbackResults : rollbackResults?.results || [])
+    .map((result) => result?.meta?.changes ?? 0);
+  if (applied.length !== statements.length || !applied.slice(1).every((changes) => changes === 1)) {
+    const pending = await pendingMediaDeletionForContent(db, contentJson);
+    if (pending) return mediaDeletionConflict(pending);
     return apiError(409, "STALE_PUBLISHED_REVISION", "공개본이 변경되었습니다. 최신 상태를 다시 확인해 주세요.");
   }
   return json({ revisionId, publishedAt });
@@ -1235,6 +1348,14 @@ async function migrateLegacyMediaSets(db) {
        )`,
     ),
     db.prepare(
+      `CREATE TABLE IF NOT EXISTS ${MEDIA_DELETION_JOBS_TABLE} (
+         media_id TEXT PRIMARY KEY,
+         slot TEXT NOT NULL CHECK (length(slot) BETWEEN 1 AND 40),
+         claim_token TEXT NOT NULL,
+         requested_at TEXT NOT NULL
+       )`,
+    ),
+    db.prepare(
       `INSERT OR IGNORE INTO ${MEDIA_SETS_TABLE} (id, slot, total_bytes, status, created_at, stored_at)
        SELECT id, slot, total_bytes, status, created_at, stored_at FROM ${LEGACY_MEDIA_SETS_TABLE}`,
     ),
@@ -1293,6 +1414,7 @@ async function commitMediaStorage(db, mediaId) {
 
 const BUNDLED_MUSIC_FALLBACK = {
   src: "/assets/audio/touching-moments-one-pulse.mp3",
+  autoPlayOnOpen: false,
   title: "Touching Moments One - Pulse",
   artist: "Kevin MacLeod",
   sourceUrl: "https://incompetech.com/music/royalty-free/index.html?Search=Search&isrc=USUAN1100039",
@@ -1352,6 +1474,16 @@ async function getAdminMediaList(request, env) {
      WHERE status = 'stored' OR (status = 'reserved' AND created_at < ?)
      ORDER BY created_at DESC`,
   ).bind(staleReservationCutoff()).all()).results || [];
+  const deletionJobs = (await db.prepare(
+    `SELECT media_id, slot, requested_at FROM ${MEDIA_DELETION_JOBS_TABLE}`,
+  ).all()).results || [];
+  const pendingDeletionIds = new Set(deletionJobs.map((job) => job.media_id));
+  const listedIds = new Set(sets.map((row) => row.id));
+  for (const job of deletionJobs) {
+    if (!listedIds.has(job.media_id)) {
+      sets.push({ id: job.media_id, slot: job.slot, total_bytes: 0, status: "deleting", created_at: job.requested_at });
+    }
+  }
   const revisions = await listRevisionsForMediaScan(db);
   const usage = await getMediaUsageFromDatabase(db);
   const media = sets.map((row) => {
@@ -1363,6 +1495,7 @@ async function getAdminMediaList(request, env) {
       totalBytes: row.total_bytes,
       status: row.status,
       abandoned: row.status === "reserved",
+      deletionPending: pendingDeletionIds.has(row.id),
       createdAt: row.created_at,
       previewUrl: kind === "photo" ? `${MEDIA_API_PREFIX}/invitation/${row.id}/${row.slot}/480.webp` : null,
       references: mediaReferenceSummary(revisionsReferencing(revisions, row.id), state),
@@ -1400,7 +1533,7 @@ function stripMediaFromDraftDocument(document, mediaId) {
 
 function mediaObjectKeys(set) {
   if (set.slot === "background-music") {
-    return [`invitation/${set.id}/background-music/track.mp3`];
+    return ["mp3", "m4a", "wav"].map((extension) => `invitation/${set.id}/background-music/track.${extension}`);
   }
   const base = `invitation/${set.id}/${set.slot}`;
   return [
@@ -1410,6 +1543,58 @@ function mediaObjectKeys(set) {
     `${base}/480.webp`,
     `${base}/960.webp`,
   ];
+}
+
+function mediaDeletionPendingError(mediaId, usage) {
+  return apiError(503, "MEDIA_DELETE_PENDING", "R2 파일 정리가 끝나지 않았습니다. 미디어 목록에서 삭제를 다시 시도할 수 있으며, 완료 전까지 저장 공간은 계속 예약됩니다.", {
+    mediaId,
+    deletionPending: true,
+    usage,
+  });
+}
+
+async function finishAdminMediaDeletion(db, bucket, set, { removedFromDraft = 0, deletedRevisions = [] } = {}) {
+  const mediaId = set.id;
+  let usage;
+  try {
+    const reference = await db.prepare(
+      "SELECT id FROM invitation_revisions WHERE instr(lower(content_json), lower(?)) > 0 LIMIT 1",
+    ).bind(`invitation/${mediaId}/`).first();
+    if (reference) {
+      usage = await getMediaUsageFromDatabase(db);
+      return mediaDeletionPendingError(mediaId, usage);
+    }
+    await bucket.delete(mediaObjectKeys(set));
+    const cleanup = await runDatabaseBatch(db, [
+      db.prepare(
+        `DELETE FROM ${MEDIA_SETS_TABLE} WHERE id = ?
+         AND EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?)
+         AND NOT EXISTS (SELECT 1 FROM invitation_revisions r WHERE instr(lower(r.content_json), lower(?)) > 0)`,
+      ).bind(mediaId, mediaId, `invitation/${mediaId}/`),
+      db.prepare(
+        `DELETE FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?
+         AND NOT EXISTS (SELECT 1 FROM ${MEDIA_SETS_TABLE} WHERE id = ?)
+         AND NOT EXISTS (SELECT 1 FROM invitation_revisions r WHERE instr(lower(r.content_json), lower(?)) > 0)`,
+      ).bind(mediaId, mediaId, `invitation/${mediaId}/`),
+    ]);
+    const changes = (Array.isArray(cleanup) ? cleanup : cleanup?.results || [])
+      .map((result) => result?.meta?.changes ?? 0);
+    if (changes.length !== 2 || ![0, 1].includes(changes[0]) || changes[1] !== 1) {
+      usage = await getMediaUsageFromDatabase(db);
+      return mediaDeletionPendingError(mediaId, usage);
+    }
+  } catch {
+    try { usage = await getMediaUsageFromDatabase(db); } catch { usage = null; }
+    return mediaDeletionPendingError(mediaId, usage);
+  }
+  return json({
+    deleted: mediaId,
+    freedBytes: set.total_bytes,
+    removedFromDraft,
+    deletedRevisions,
+    objectsDeleted: true,
+    usage: await getMediaUsageFromDatabase(db),
+  });
 }
 
 async function deleteAdminMedia(request, env) {
@@ -1426,9 +1611,17 @@ async function deleteAdminMedia(request, env) {
     return apiError(400, "INVALID_MEDIA", "미디어 식별자를 확인해 주세요.");
   }
   await migrateLegacyMediaSets(db);
-  const set = await db.prepare(
+  const pendingJob = await db.prepare(
+    `SELECT media_id, slot, requested_at FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?`,
+  ).bind(mediaId).first();
+  const storedSet = await db.prepare(
     `SELECT id, slot, total_bytes, status, created_at FROM ${MEDIA_SETS_TABLE} WHERE id = ?`,
   ).bind(mediaId).first();
+  if (pendingJob) {
+    const retrySet = storedSet || { id: mediaId, slot: pendingJob.slot, total_bytes: 0, status: "deleting", created_at: pendingJob.requested_at };
+    return finishAdminMediaDeletion(db, bucket, retrySet);
+  }
+  const set = storedSet;
   if (!set) return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
   if (set.status !== "stored" && !isStaleReservation(set)) {
     return apiError(409, "MEDIA_IN_USE", "업로드가 진행 중인 미디어입니다. 업로드가 끝난 뒤 다시 시도해 주세요.");
@@ -1461,8 +1654,9 @@ async function deleteAdminMedia(request, env) {
     removedFromDraft = strip.removed;
     statements.push(db.prepare(
       `UPDATE invitation_revisions SET content_json = ? WHERE id = ? AND status = 'draft' AND content_json = ?
-       AND EXISTS (SELECT 1 FROM invitation_state s WHERE s.singleton_id = 1 AND s.draft_revision_id = invitation_revisions.id)`,
-    ).bind(JSON.stringify(draftDocument), draftRevision.id, draftRevision.content_json));
+       AND EXISTS (SELECT 1 FROM invitation_state s WHERE s.singleton_id = 1 AND s.draft_revision_id = invitation_revisions.id)
+       AND EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?)`,
+    ).bind(JSON.stringify(draftDocument), draftRevision.id, draftRevision.content_json, mediaId));
     expectedChanges.push(1);
   }
   for (const revision of archivedRefs) {
@@ -1470,38 +1664,72 @@ async function deleteAdminMedia(request, env) {
       `DELETE FROM invitation_revisions WHERE id = ? AND NOT EXISTS (
          SELECT 1 FROM invitation_state s WHERE s.singleton_id = 1
            AND (s.draft_revision_id = invitation_revisions.id OR s.published_revision_id = invitation_revisions.id)
-       )`,
-    ).bind(revision.id));
+       ) AND EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?)`,
+    ).bind(revision.id, mediaId));
     expectedChanges.push(1);
   }
-  statements.push(db.prepare(
-    `DELETE FROM ${MEDIA_SETS_TABLE} WHERE id = ?
-       AND (status = 'stored' OR (status = 'reserved' AND created_at < ?))
-       AND NOT EXISTS (
-         SELECT 1 FROM invitation_revisions r WHERE lower(r.content_json) LIKE '%' || ? || '%'
-       )`,
-  ).bind(mediaId, staleReservationCutoff(), `invitation/${mediaId}/`));
-  expectedChanges.push(1);
-  const results = await runDatabaseBatch(db, statements);
+  const claimToken = crypto.randomUUID();
+  let claimSql = `INSERT INTO ${MEDIA_DELETION_JOBS_TABLE} (media_id, slot, claim_token, requested_at)
+    SELECT ?, ?, ?, ?
+    WHERE EXISTS (SELECT 1 FROM ${MEDIA_SETS_TABLE} WHERE id = ?
+      AND (status = 'stored' OR (status = 'reserved' AND created_at < ?)))
+      AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM invitation_state s JOIN invitation_revisions r ON r.id = s.published_revision_id
+        WHERE s.singleton_id = 1 AND instr(lower(r.content_json), lower(?)) > 0)`;
+  const claimValues = [mediaId, set.slot, claimToken, new Date().toISOString(), mediaId, staleReservationCutoff(), mediaId, `invitation/${mediaId}/`];
+  if (draftRevision) {
+    claimSql += ` AND EXISTS (SELECT 1 FROM invitation_state s JOIN invitation_revisions r ON r.id = s.draft_revision_id
+      WHERE s.singleton_id = 1 AND r.id = ? AND r.status = 'draft' AND r.content_json = ?)`;
+    claimValues.push(draftRevision.id, draftRevision.content_json);
+  }
+  for (const revision of archivedRefs) {
+    claimSql += ` AND EXISTS (SELECT 1 FROM invitation_revisions r WHERE r.id = ?
+      AND NOT EXISTS (SELECT 1 FROM invitation_state s WHERE s.singleton_id = 1
+        AND (s.draft_revision_id = r.id OR s.published_revision_id = r.id)))`;
+    claimValues.push(revision.id);
+  }
+  const capturedReferenceIds = [...new Set([
+    ...(draftRevision ? [draftRevision.id] : []),
+    ...archivedRefs.map((revision) => revision.id),
+  ])];
+  const capturedReferencePredicate = capturedReferenceIds.length
+    ? `r.id NOT IN (${capturedReferenceIds.map(() => "?").join(", ")})`
+    : "1 = 1";
+  claimSql += ` AND NOT EXISTS (SELECT 1 FROM invitation_revisions r
+    WHERE instr(lower(r.content_json), lower(?)) > 0 AND ${capturedReferencePredicate})`;
+  claimValues.push(`invitation/${mediaId}/`, ...capturedReferenceIds);
+  statements.unshift(db.prepare(claimSql).bind(...claimValues));
+  expectedChanges.unshift(1);
+  statements.splice(1, 0, mutationGuard(db, "delete-claim",
+    `EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ? AND claim_token = ?)`,
+    [mediaId, claimToken]));
+  expectedChanges.splice(1, 0, 0);
+  statements.push(mutationGuard(db, "delete-final", `
+    EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ? AND claim_token = ?)
+    AND NOT EXISTS (SELECT 1 FROM invitation_revisions WHERE instr(lower(content_json), lower(?)) > 0)
+  `, [mediaId, claimToken, `invitation/${mediaId}/`]));
+  expectedChanges.push(0);
+  let results;
+  try {
+    results = await runDatabaseBatch(db, statements);
+  } catch (error) {
+    if (!isMutationGuardFailure(error)) throw error;
+    return apiError(409, "MEDIA_IN_USE", "삭제 중 다른 변경이 감지되어 미디어를 삭제하지 않았습니다. 다시 시도해 주세요.");
+  }
   const applied = (Array.isArray(results) ? results : results?.results || [])
     .map((result) => result?.meta?.changes ?? 0);
   if (applied.length !== expectedChanges.length || !applied.every((changes, index) => changes === expectedChanges[index])) {
+    const racedJob = await db.prepare(
+      `SELECT media_id FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?`,
+    ).bind(mediaId).first();
+    if (racedJob) {
+      return apiError(409, "MEDIA_DELETE_PENDING", "다른 삭제 요청이 이 미디어를 처리 중입니다. 목록을 새로고침한 뒤 필요하면 재시도해 주세요.", { mediaId, deletionPending: true });
+    }
     return apiError(409, "MEDIA_IN_USE", "삭제 중 다른 변경이 감지되어 미디어를 삭제하지 않았습니다. 다시 시도해 주세요.");
   }
-  const keys = mediaObjectKeys(set);
-  let objectsDeleted = true;
-  try {
-    await bucket.delete(keys);
-  } catch {
-    objectsDeleted = false;
-  }
-  return json({
-    deleted: mediaId,
-    freedBytes: set.total_bytes,
+  return finishAdminMediaDeletion(db, bucket, set, {
     removedFromDraft,
     deletedRevisions: archivedRefs.map(describeRevisionRef),
-    objectsDeleted,
-    usage: await getMediaUsageFromDatabase(db),
   });
 }
 
@@ -1617,32 +1845,196 @@ function hasMp3Signature(bytes) {
   return hasMpegFrameHeader(bytes.subarray(frameOffset, frameOffset + 4));
 }
 
+function mediaBoxes(bytes, start, end) {
+  const boxes = [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = start;
+  while (offset + 8 <= end && boxes.length < 512) {
+    let size = view.getUint32(offset);
+    let headerSize = 8;
+    if (size === 1) {
+      if (offset + 16 > end) return null;
+      size = view.getUint32(offset + 8) * 2 ** 32 + view.getUint32(offset + 12);
+      headerSize = 16;
+    } else if (size === 0) size = end - offset;
+    if (!Number.isSafeInteger(size) || size < headerSize || size > end - offset) return null;
+    boxes.push({ type: String.fromCharCode(...bytes.subarray(offset + 4, offset + 8)), start: offset + headerSize, end: offset + size });
+    offset += size;
+  }
+  return offset === end ? boxes : null;
+}
+
+function mediaDescriptors(bytes, start, end) {
+  const descriptors = [];
+  let offset = start;
+  while (offset < end) {
+    const tag = bytes[offset++];
+    let length = 0;
+    let complete = false;
+    for (let part = 0; part < 4 && offset < end; part += 1) {
+      const value = bytes[offset++];
+      length = length * 128 + (value & 0x7f);
+      if (length > end - offset) return null;
+      if ((value & 0x80) === 0) {
+        complete = true;
+        break;
+      }
+    }
+    if (!complete || length === 0) return null;
+    descriptors.push({ tag, start: offset, end: offset + length });
+    offset += length;
+  }
+  return offset === end ? descriptors : null;
+}
+
+function isAacAudioSpecificConfig(bytes, start, end) {
+  let bitOffset = 0;
+  const readBits = (count) => {
+    if (count < 1 || bitOffset + count > (end - start) * 8) return null;
+    let value = 0;
+    for (let index = 0; index < count; index += 1) {
+      const byte = bytes[start + (bitOffset >> 3)];
+      value = (value << 1) | ((byte >> (7 - (bitOffset & 7))) & 1);
+      bitOffset += 1;
+    }
+    return value;
+  };
+  const readAudioObjectType = () => {
+    const objectType = readBits(5);
+    if (objectType === null) return null;
+    return objectType === 31 ? 32 + (readBits(6) ?? 0) : objectType;
+  };
+  const readSamplingFrequency = () => {
+    const index = readBits(4);
+    if (index === null || index >= 13 && index !== 15) return false;
+    return index !== 15 || readBits(24) !== null;
+  };
+  const aacTypes = new Set([1, 2, 3, 4, 5, 6, 17, 19, 20, 21, 22, 23, 29, 39, 42]);
+  let objectType = readAudioObjectType();
+  if (objectType === null || !readSamplingFrequency()) return false;
+  const channelConfig = readBits(4);
+  if (channelConfig === null) return false;
+  if (objectType === 5 || objectType === 29) {
+    if (!readSamplingFrequency()) return false;
+    objectType = readAudioObjectType();
+    if (objectType === null) return false;
+  }
+  return aacTypes.has(objectType);
+}
+
+function hasAacDescriptor(bytes, start, end) {
+  if (end - start < 4) return false;
+  const esDescriptors = mediaDescriptors(bytes, start + 4, end);
+  if (!esDescriptors) return false;
+  for (const esDescriptor of esDescriptors.filter((descriptor) => descriptor.tag === 0x03)) {
+    if (esDescriptor.end - esDescriptor.start < 3) continue;
+    let cursor = esDescriptor.start + 2;
+    const flags = bytes[cursor++];
+    if (flags & 0x80) cursor += 2;
+    if (flags & 0x40) {
+      if (cursor >= esDescriptor.end) continue;
+      cursor += 1 + bytes[cursor];
+    }
+    if (flags & 0x20) cursor += 2;
+    if (cursor > esDescriptor.end) continue;
+    const configDescriptors = mediaDescriptors(bytes, cursor, esDescriptor.end);
+    if (!configDescriptors) continue;
+    for (const config of configDescriptors.filter((descriptor) => descriptor.tag === 0x04)) {
+      if (config.end - config.start < 13 || bytes[config.start] !== 0x40 || ((bytes[config.start + 1] >> 2) & 0x3f) !== 5) continue;
+      const specificDescriptors = mediaDescriptors(bytes, config.start + 13, config.end);
+      if (specificDescriptors?.some((descriptor) => descriptor.tag === 0x05
+        && isAacAudioSpecificConfig(bytes, descriptor.start, descriptor.end))) return true;
+    }
+  }
+  return false;
+}
+
+function hasAacM4aSignature(bytes) {
+  const boxes = mediaBoxes(bytes, 0, bytes.length);
+  const ftyp = boxes?.[0];
+  if (ftyp?.type !== "ftyp" || ftyp.end - ftyp.start < 8 || !["M4A ", "isom", "iso2", "mp41", "mp42"].includes(String.fromCharCode(...bytes.subarray(ftyp.start, ftyp.start + 4)))) return false;
+  if (!boxes.some((box) => box.type === "mdat" && box.end > box.start)) return false;
+  const moov = boxes.find((box) => box.type === "moov");
+  const tracks = moov && mediaBoxes(bytes, moov.start, moov.end)?.filter((box) => box.type === "trak");
+  if (!tracks || tracks.length !== 1) return false;
+  const mdia = mediaBoxes(bytes, tracks[0].start, tracks[0].end)?.find((box) => box.type === "mdia");
+  const media = mdia && mediaBoxes(bytes, mdia.start, mdia.end);
+  const handler = media?.find((box) => box.type === "hdlr");
+  if (!handler || handler.end - handler.start < 12 || String.fromCharCode(...bytes.subarray(handler.start + 8, handler.start + 12)) !== "soun") return false;
+  const minf = media.find((box) => box.type === "minf");
+  const stbl = minf && mediaBoxes(bytes, minf.start, minf.end)?.find((box) => box.type === "stbl");
+  const stsd = stbl && mediaBoxes(bytes, stbl.start, stbl.end)?.find((box) => box.type === "stsd");
+  if (!stsd || stsd.end - stsd.start < 8 || new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(stsd.start + 4) !== 1) return false;
+  const entries = mediaBoxes(bytes, stsd.start + 8, stsd.end);
+  const entry = entries?.[0];
+  if (entries?.length !== 1 || entry.type !== "mp4a" || entry.end - entry.start < 28) return false;
+  const esds = mediaBoxes(bytes, entry.start + 28, entry.end)?.find((box) => box.type === "esds");
+  return Boolean(esds && hasAacDescriptor(bytes, esds.start, esds.end));
+}
+
+function hasPcmWavSignature(bytes) {
+  if (bytes.length < 44 || String.fromCharCode(...bytes.subarray(0, 4)) !== "RIFF" || String.fromCharCode(...bytes.subarray(8, 12)) !== "WAVE") return false;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(4, true) + 8 !== bytes.length) return false;
+  let formatValid = false;
+  let dataValid = false;
+  let blockAlign = 0;
+  for (let offset = 12; offset + 8 <= bytes.length;) {
+    const length = view.getUint32(offset + 4, true);
+    const start = offset + 8;
+    if (length > bytes.length - start) return false;
+    const type = String.fromCharCode(...bytes.subarray(offset, offset + 4));
+    if (type === "fmt " && length >= 16) {
+      const channels = view.getUint16(start + 2, true);
+      const rate = view.getUint32(start + 4, true);
+      const bits = view.getUint16(start + 14, true);
+      const frameSize = channels * bits / 8;
+      const format = view.getUint16(start, true);
+      let pcm = format === 1;
+      if (format === 0xfffe && length >= 40 && view.getUint16(start + 16, true) >= 22
+        && length >= 18 + view.getUint16(start + 16, true)) {
+        const validBits = view.getUint16(start + 18, true);
+        const pcmSubtype = [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
+          0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71];
+        pcm = validBits > 0 && validBits <= bits
+          && pcmSubtype.every((value, index) => bytes[start + 24 + index] === value);
+      }
+      blockAlign = frameSize;
+      formatValid = pcm && [1, 2].includes(channels) && rate >= 8000 && rate <= 192000
+        && [8, 16, 24, 32].includes(bits) && view.getUint16(start + 12, true) === frameSize && view.getUint32(start + 8, true) === rate * frameSize;
+    }
+    if (type === "data" && length > 0) dataValid = blockAlign > 0 && length % blockAlign === 0;
+    offset = start + length + (length & 1);
+    if (offset === bytes.length) return formatValid && dataValid;
+  }
+  return false;
+}
+
 async function uploadInvitationAudio(request, env) {
   requireSameOrigin(request);
   await requireAdminEmail(request, env);
   const db = requireContentDatabase(env);
   const length = Number(request.headers.get("content-length") || 0);
-  if (length > MAX_AUDIO_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "MP3는 25MB 이하만 업로드할 수 있습니다.");
+  if (length > MAX_AUDIO_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "음악 파일은 25MB 이하만 업로드할 수 있습니다.");
   const bucket = requireMediaBucket(env);
   const contentType = (request.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
-  if (contentType !== "audio/mpeg") {
-    return apiError(415, "UNSUPPORTED_MEDIA_BODY", "MP3(audio/mpeg) 파일만 업로드할 수 있습니다.");
-  }
+  const format = {
+    "audio/mpeg": { extension: "mp3", valid: hasMp3Signature },
+    "audio/mp4": { extension: "m4a", valid: hasAacM4aSignature },
+    "audio/wav": { extension: "wav", valid: hasPcmWavSignature },
+  }[contentType];
+  if (!format) return apiError(415, "UNSUPPORTED_MEDIA_BODY", "MP3, M4A(AAC) 또는 WAV(PCM) 파일만 업로드할 수 있습니다.");
   const body = createRequestBodyReader(request, MAX_AUDIO_BODY_BYTES,
-    { status: 413, code: "MEDIA_TOO_LARGE", message: "MP3는 25MB 이하만 업로드할 수 있습니다." });
+    { status: 413, code: "MEDIA_TOO_LARGE", message: "음악 파일은 25MB 이하만 업로드할 수 있습니다." });
   const file = await body.readRest(MAX_AUDIO_FILE_BYTES,
-    { status: 400, code: "INVALID_AUDIO", message: "MP3(audio/mpeg) 파일만 25MB 이하로 업로드할 수 있습니다." });
-  if (file.byteLength === 0) {
-    return apiError(400, "INVALID_AUDIO", "MP3(audio/mpeg) 파일만 25MB 이하로 업로드할 수 있습니다.");
-  }
-  if (!hasMp3Signature(file)) {
-    return apiError(400, "INVALID_AUDIO_SIGNATURE", "파일 내용이 올바른 MP3 형식이 아닙니다.");
-  }
+    { status: 400, code: "INVALID_AUDIO", message: "음악 파일은 25MB 이하만 업로드할 수 있습니다." });
+  if (file.byteLength === 0) return apiError(400, "INVALID_AUDIO", "음악 파일은 25MB 이하만 업로드할 수 있습니다.");
+  if (!format.valid(file)) return apiError(400, "INVALID_AUDIO_SIGNATURE", "파일 내용이 선택한 음악 형식과 맞지 않습니다.");
   const mediaId = crypto.randomUUID();
-  const key = `invitation/${mediaId}/background-music/track.mp3`;
+  const key = `invitation/${mediaId}/background-music/track.${format.extension}`;
   await reserveMediaStorage(db, { mediaId, slot: "background-music", totalBytes: file.byteLength });
   try {
-    await bucket.put(key, file, { httpMetadata: { contentType: "audio/mpeg" } });
+    await bucket.put(key, file, { httpMetadata: { contentType } });
     await commitMediaStorage(db, mediaId);
   } catch (error) {
     await Promise.allSettled([
@@ -1656,7 +2048,7 @@ async function uploadInvitationAudio(request, env) {
     usage: await getMediaUsageFromDatabase(db),
     audio: {
       src: `${MEDIA_API_PREFIX}/${key}`,
-      mimeType: "audio/mpeg",
+      mimeType: contentType,
       sizeBytes: file.byteLength,
     },
   }, 201);
@@ -1697,17 +2089,17 @@ async function getInvitationMedia(request, env, url) {
   const bucket = requireMediaBucket(env);
   const key = decodeURIComponent(url.pathname.slice(`${MEDIA_API_PREFIX}/`.length));
   const isImage = /^invitation\/[a-f0-9-]{36}\/[a-z0-9-]{1,40}\/(?:480|960)\.webp$/.test(key);
-  const isAudio = /^invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3$/.test(key);
-  if (!isImage && !isAudio) {
+  const audioExtension = /^invitation\/[a-f0-9-]{36}\/background-music\/track\.(mp3|m4a|wav)$/.exec(key)?.[1];
+  if (!isImage && !audioExtension) {
     return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
   }
-  if (isAudio) {
+  if (audioExtension) {
     if (typeof bucket.head !== "function") {
       throw { status: 503, code: "MEDIA_UNAVAILABLE", message: "미디어 스트리밍 저장소가 아직 연결되지 않았습니다." };
     }
     const metadata = await bucket.head(key);
     if (!metadata) return apiError(404, "MEDIA_NOT_FOUND", "미디어를 찾을 수 없습니다.");
-    const headers = immutableMediaHeaders(metadata, "audio/mpeg");
+    const headers = immutableMediaHeaders(metadata, { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav" }[audioExtension]);
     headers.set("accept-ranges", "bytes");
     const size = Number(metadata.size) || 0;
     const range = parseByteRange(request.headers.get("range"), size);

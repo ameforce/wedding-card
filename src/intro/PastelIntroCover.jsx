@@ -3,6 +3,7 @@ import { INVITATION_MAX_WIDTH, assertRibbonFrameDimensions, calculatePanelHingeT
 import "./pastel-intro.css";
 import { drawRibbonFrame, ribbonSpanStyle } from "./ribbon-span.mjs";
 
+export const PASTEL_INTRO_PAPER_OPENING_EVENT = "pastel-intro-paper-opening";
 const MANIFEST_URL = "/assets/design/ribbon-sequence/manifest.json";
 const ASSET_WAIT_MS = 5_000;
 const FRAME_STALL_MS = 1_500;
@@ -243,6 +244,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
         }
         if (!panelOpeningRef.current) {
           panelOpeningRef.current = true;
+          document.dispatchEvent(new Event(PASTEL_INTRO_PAPER_OPENING_EVENT));
           // The closed-poster seam belongs only to the folded cover. Once the
           // panels begin turning, leaving a fixed sibling at x=50% would draw
           // a line over the newly exposed invitation instead of moving with a
