@@ -314,9 +314,18 @@ function assertValidMusic(document, options) {
 }
 
 function validAudioFile(file) {
-  if (!file || file.type !== "audio/mpeg") throw new Error("MP3(audio/mpeg) 파일만 업로드할 수 있습니다.");
-  if (file.size < 1 || file.size > MAX_AUDIO_FILE_BYTES) throw new Error("MP3 파일은 25MB 이하만 업로드할 수 있습니다.");
-  return file;
+  const formats = {
+    mp3: ["audio/mpeg", "audio/mp3"],
+    m4a: ["audio/mp4", "audio/x-m4a", "audio/m4a"],
+    wav: ["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"],
+  };
+  const extension = file?.name?.split(".").at(-1)?.toLowerCase();
+  const accepted = formats[extension];
+  if (!accepted || (file.type && file.type !== "application/octet-stream" && !accepted.includes(file.type.toLowerCase()))) {
+    throw new Error("MP3, M4A(AAC) 또는 WAV(PCM) 파일만 업로드할 수 있습니다.");
+  }
+  if (file.size < 1 || file.size > MAX_AUDIO_FILE_BYTES) throw new Error("음악 파일은 25MB 이하만 업로드할 수 있습니다.");
+  return accepted[0];
 }
 
 async function optimizedFiles(file) {
@@ -511,7 +520,7 @@ export function createLocalReviewContentAdapter({
       };
     },
     async uploadAudio({ file, onProgress }) {
-      validAudioFile(file);
+      const mimeType = validAudioFile(file);
       onProgress?.({ phase: "prepare" });
       const id = randomToken();
       const reference = `${LOCAL_AUDIO_REFERENCE_PREFIX}${id}`;
@@ -523,7 +532,7 @@ export function createLocalReviewContentAdapter({
       return {
         audio: {
           src: source,
-          mimeType: "audio/mpeg",
+          mimeType,
           sizeBytes: file.size,
         },
         usage: emptyMediaUsage(true),
@@ -618,9 +627,9 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl, xhrIm
       return { photo: payload.photo, usage: payload.usage };
     },
     async uploadAudio({ file, onProgress }) {
-      validAudioFile(file);
+      const mimeType = validAudioFile(file);
       onProgress?.({ phase: "prepare" });
-      const payload = await postBody({ path: "/api/admin/media/audio", body: file, contentType: file.type || "audio/mpeg", fetchImpl: resolvedFetch, xhrImpl: resolvedXhr, onProgress });
+      const payload = await postBody({ path: "/api/admin/media/audio", body: file, contentType: mimeType, fetchImpl: resolvedFetch, xhrImpl: resolvedXhr, onProgress });
       return { audio: payload.audio, usage: payload.usage };
     },
     subscribe() {

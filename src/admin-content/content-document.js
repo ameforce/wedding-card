@@ -144,7 +144,8 @@ function displayDiffValue(value, counterpart, current) {
   if (Array.isArray(value)) return value.map((item, index) => displayDiffValue(item, counterpart?.[index], current)).join(" / ");
   if (value && typeof value === "object") {
     if (typeof value.title === "string") {
-      return [value.title, value.artist, mediaLabel(value.src, counterpart?.src, current), value.sourceUrl, value.licenseLabel, value.licenseUrl]
+      const openingPlayback = `개봉 재생 시도 ${value.autoPlayOnOpen === true ? "켜짐" : "꺼짐"}`;
+      return [value.title, value.artist, mediaLabel(value.src, counterpart?.src, current), openingPlayback, value.sourceUrl, value.licenseLabel, value.licenseUrl]
         .filter(Boolean)
         .join(" · ");
     }
@@ -383,14 +384,15 @@ function musicSrc(value, allowLocalPreview) {
   if (allowLocalPreview && /^blob:/i.test(value)) return value;
   if (allowLocalPreview && /^local-review-audio:[a-f0-9-]{36}$/i.test(value)) return value;
   if (value.length > MAX_LENGTH.url) return null;
-  return /^(?:\/assets\/audio\/[a-z0-9._-]+\.mp3|\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.mp3)$/i.test(value)
+  return /^(?:\/assets\/audio\/[a-z0-9._-]+\.mp3|\/api\/media\/invitation\/[a-f0-9-]{36}\/background-music\/track\.(?:mp3|m4a|wav))$/i.test(value)
     ? value
     : null;
 }
 
 export function validateMusicContent(music, { allowLocalPreview = false } = {}) {
   const errors = {};
-  if (!musicSrc(music?.src, allowLocalPreview)) errors.src = "업로드한 MP3 파일을 선택해 주세요.";
+  if (!musicSrc(music?.src, allowLocalPreview)) errors.src = "업로드한 음악 파일을 선택해 주세요.";
+  if (music?.autoPlayOnOpen !== undefined && typeof music.autoPlayOnOpen !== "boolean") errors.autoPlayOnOpen = "봉투 개봉 음악 설정을 확인해 주세요.";
   if (typeof music?.title !== "string" || !music.title.trim() || music.title.length > MAX_LENGTH.short) errors.title = "곡명을 80자 이내로 입력해 주세요.";
   if (typeof music?.artist !== "string" || !music.artist.trim() || music.artist.length > MAX_LENGTH.short) errors.artist = "아티스트를 80자 이내로 입력해 주세요.";
   if (!httpsUrl(music?.sourceUrl)) errors.sourceUrl = "출처 URL은 HTTPS 주소여야 합니다.";
@@ -402,6 +404,7 @@ export function validateMusicContent(music, { allowLocalPreview = false } = {}) 
 function normalizeMusic(value, fallback, { allowLocalPreview = false } = {}) {
   return {
     src: musicSrc(value?.src, allowLocalPreview) ?? fallback.src,
+    autoPlayOnOpen: value?.autoPlayOnOpen === undefined ? fallback.autoPlayOnOpen : value.autoPlayOnOpen,
     title: text(value?.title, fallback.title, MAX_LENGTH.short),
     artist: text(value?.artist, fallback.artist, MAX_LENGTH.short),
     sourceUrl: httpsUrl(value?.sourceUrl) ?? fallback.sourceUrl,

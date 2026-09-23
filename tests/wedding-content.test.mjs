@@ -287,12 +287,13 @@ test("Pastel gallery assigns complete deterministic rows for every supported pho
   ]);
 });
 
-test("music control stays in document flow and is omitted from capture mode", () => {
-  assert.match(app, /className="music-control-slot"/);
-  assert.match(app, /showMusic=\{!captureMode\}/);
-  assert.doesNotMatch(app, /!captureMode && <MusicControl/);
-  assert.match(css, /\.music-control\s*\{[^}]*position:\s*static/);
-  assert.doesNotMatch(css, /\.music-control\s*\{[^}]*position:\s*fixed/);
+test("one music control follows scrolling at the invitation's top right without covering the lightbox", () => {
+  assert.equal(app.match(/<MusicControl\b/g)?.length, 1);
+  assert.match(app, /!captureMode && <div className="music-control-slot">/);
+  assert.match(css, /\.music-control-slot\s*\{[^}]*position:\s*fixed/);
+  assert.match(css, /\.music-control-slot\s*\{[^}]*430px/);
+  assert.match(css, /\.music-control-slot\s*\{[^}]*z-index:\s*\d+/);
+  assert.doesNotMatch(app, /showMusic=/);
 });
 
 test("Pastel hero uses a breathing-room inset photo frame without a heavy treatment", () => {
@@ -346,8 +347,9 @@ test("Pastel uses one continuous watercolor surface and an opt-in licensed audio
   assert.doesNotMatch(css, /radial-gradient/);
   assert.match(css, /\.pastel-invitation::after\s*\{[^}]*pastel-paper-fibers\.webp[^}]*234px 234px/);
   assert.match(css, /\.pastel-invitation > \*\s*\{[^}]*z-index:\s*1/);
-  assert.match(app, /<audio[\s\S]*preload="none"[\s\S]*loop/);
-  assert.doesNotMatch(app, /autoPlay|autoplay/);
+  assert.match(app, /<audio[\s\S]*preload=\{allowOpeningPlayback && music\.autoPlayOnOpen === true \? "auto" : "none"\}[\s\S]*loop/);
+  assert.doesNotMatch(app, /<audio\b[^>]*\sautoPlay(?:\s|=|>)/);
+  assert.equal(weddingContent.music.autoPlayOnOpen, false);
   assert.equal(weddingContent.music.title, "Touching Moments One - Pulse");
   assert.equal(weddingContent.music.artist, "Kevin MacLeod");
   assert.equal(weddingContent.music.licenseUrl, "https://creativecommons.org/licenses/by/4.0/");

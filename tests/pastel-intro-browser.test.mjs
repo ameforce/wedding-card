@@ -9,6 +9,8 @@ import { chromium } from "playwright";
 import { build, createServer, preview } from "vite";
 import sharp from "sharp";
 import { createEarlyPosterMarkup } from "../scripts/intro/early-poster.mjs";
+import { createContentDocument } from "../src/admin-content/content-document.js";
+import { weddingContent } from "../src/content.js";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const manifest = JSON.parse(await readFile(new URL("../public/assets/design/ribbon-sequence/manifest.json", import.meta.url), "utf8"));
@@ -294,6 +296,18 @@ test("real invitation ribbon preserves every frame and restores access across lo
     return page;
   }
 
+  async function servePublishedMusic(page, autoPlayOnOpen) {
+    const document = createContentDocument(weddingContent);
+    document.content.music.autoPlayOnOpen = autoPlayOnOpen;
+    const payload = Buffer.from(JSON.stringify({ schemaVersion: 1, source: "cloudflare-published", revisionId: "music-opening", publishedAt: null, document })).toString("base64url");
+    await page.route(`${baseUrl}/`, async (route) => {
+      const response = await route.fetch();
+      const html = await response.text();
+      assert.match(html, /<!-- WEDDING_PUBLIC_BOOTSTRAP -->/);
+      await route.fulfill({ response, body: html.replace("<!-- WEDDING_PUBLIC_BOOTSTRAP -->", `<template id="wedding-public-bootstrap" data-schema-version="1">${payload}</template>`) });
+    });
+  }
+
   await scenarioTest(`all ${manifest.frames.length} real frames precede paper opening; reload mounts again even with reduced motion`, async () => {
     const page = await newPage({ reducedMotion: "reduce" });
     try {
@@ -313,6 +327,116 @@ test("real invitation ribbon preserves every frame and restores access across lo
       await page.locator(".pastel-intro-cover").click({ position: { x: 10, y: 10 } });
       assertAccessible(await finalState(page));
     } finally { await page.close(); }
+  });
+
+  await scenarioTest("opening music attempts once without a gesture and keeps the invitation usable when blocked", async () => {
+    for (const [enabled, blocked, skip, failAssets] of [[false, false, false, false], [true, false, false, false], [true, true, false, false], [true, false, true, false], [true, false, false, true]]) {
+      const page = await newPage();
+      await page.addInitScript((shouldBlock) => {
+        window.__musicQA = { calls: [], blocked: shouldBlock, interactions: 0 };
+        for (const type of ["mousedown", "pointerup", "touchend", "keydown"]) {
+          document.addEventListener(type, () => { window.__musicQA.interactions += 1; }, { capture: true });
+        }
+        HTMLMediaElement.prototype.play = function () {
+          window.__musicQA.calls.push({ at: performance.now(), interactions: window.__musicQA.interactions });
+          this.dispatchEvent(new Event("play"));
+          return window.__musicQA.blocked ? Promise.reject(new DOMException("Autoplay denied", "NotAllowedError")) : Promise.resolve();
+        };
+      }, blocked);
+      await servePublishedMusic(page, enabled);
+      if (failAssets) await page.route("**/ribbon-sequence/manifest.json", (route) => route.fulfill({ status: 503, body: "Unavailable" }));
+      try {
+        await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+        if (skip) await page.locator(".pastel-intro-cover, #pastel-intro-early-poster").first().click({ position: { x: 10, y: 10 } });
+        if (skip || failAssets) {
+          await page.waitForFunction(() => !document.querySelector(".pastel-intro-cover, #pastel-intro-early-poster"));
+          assert.equal(await page.evaluate(() => window.__musicQA.calls.length), 0);
+          assert.equal(await page.locator(".music-control button").getAttribute("aria-pressed"), "false");
+          continue;
+        }
+        await page.waitForFunction(() => window.__ribbonQA?.openedAt !== null && !document.querySelector(".pastel-intro-cover"), null, { timeout: 12_000 });
+        const result = await page.evaluate(() => ({
+          calls: window.__musicQA.calls,
+          lastRibbonFrameAt: window.__ribbonQA.draws.at(-1)?.at,
+          paperOpenedAt: window.__ribbonQA.openedAt,
+          pressed: document.querySelector(".music-control button")?.getAttribute("aria-pressed"),
+          toast: document.querySelector(".toast")?.textContent,
+        }));
+        assert.equal(result.calls.length, enabled ? 1 : 0);
+        if (enabled) {
+          assert.equal(result.calls[0].interactions, 0);
+          assert.ok(result.calls[0].at >= result.lastRibbonFrameAt);
+          assert.ok(result.calls[0].at <= result.paperOpenedAt + 100);
+        }
+        assert.equal(result.pressed, enabled && !blocked ? "true" : "false");
+        assert.equal(result.toast?.includes("재생하지 못했습니다"), false);
+        if (blocked) {
+          await page.evaluate(() => { window.__musicQA.blocked = false; });
+          await page.locator(".music-control button").click();
+          assert.equal(await page.locator(".music-control button").getAttribute("aria-pressed"), "true");
+          assert.equal(await page.evaluate(() => window.__musicQA.calls.length), 2);
+        }
+      } finally { await page.close(); }
+    }
+  });
+
+  await scenarioTest("native Chromium reports whether opening music was allowed without a gesture", async () => {
+    const page = await newPage();
+    await page.addInitScript(() => {
+      const play = HTMLMediaElement.prototype.play;
+      window.__nativeMusicQA = { attempts: 0, playing: 0, rejections: [] };
+      HTMLMediaElement.prototype.play = function (...args) {
+        window.__nativeMusicQA.attempts += 1;
+        const result = play.apply(this, args);
+        result?.catch((error) => window.__nativeMusicQA.rejections.push(error.name));
+        return result;
+      };
+      document.addEventListener("playing", () => { window.__nativeMusicQA.playing += 1; }, true);
+    });
+    await servePublishedMusic(page, true);
+    try {
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__ribbonQA?.openedAt !== null && !document.querySelector(".pastel-intro-cover"), null, { timeout: 12_000 });
+      const result = await page.evaluate(() => ({
+        ...window.__nativeMusicQA,
+        paused: document.querySelector(".music-control audio")?.paused,
+        pressed: document.querySelector(".music-control button")?.getAttribute("aria-pressed"),
+        scrollLocked: document.body.classList.contains("intro-lock"),
+      }));
+      assert.equal(result.attempts, 1);
+      assert.equal(result.scrollLocked, false);
+      assert.equal(result.pressed, result.paused ? "false" : "true");
+      t.diagnostic(`native browser opening audio: playing=${result.playing}, rejections=${result.rejections.join(",") || "none"}`);
+    } finally { await page.close(); }
+  });
+
+  await scenarioTest("fixed music stays inside the invitation across scrolling and behind the lightbox", async () => {
+    for (const width of [360, 390, 430, 768, 1440]) {
+      const page = await newPage({ viewport: { width, height: 900 } });
+      try {
+        await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+        await page.locator(".pastel-intro-cover, #pastel-intro-early-poster").first().click({ position: { x: 10, y: 10 } });
+        await page.waitForFunction(() => !document.querySelector(".pastel-intro-cover, #pastel-intro-early-poster") && document.querySelector(".music-control button"));
+        const geometry = () => page.evaluate(() => {
+          const slot = document.querySelector(".music-control-slot");
+          const button = slot.querySelector("button").getBoundingClientRect();
+          const paper = document.querySelector(".invitation-stage").getBoundingClientRect();
+          return { position: getComputedStyle(slot).position, top: button.top, right: button.right, left: button.left, paperLeft: paper.left, paperRight: paper.right };
+        });
+        const before = await geometry();
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2));
+        const after = await geometry();
+        assert.equal(before.position, "fixed");
+        assert.ok(before.left >= before.paperLeft && before.right <= before.paperRight, `music at ${width}px must stay inside the invitation`);
+        assert.ok(Math.abs(after.top - before.top) < 1 && Math.abs(after.right - before.right) < 1, `music at ${width}px must follow scrolling`);
+        await page.locator(".pastel-gallery-item").first().click();
+        assert.equal(await page.evaluate(() => {
+          const button = document.querySelector(".music-control button").getBoundingClientRect();
+          return Boolean(document.elementFromPoint(button.left + button.width / 2, button.top + button.height / 2)?.closest(".gallery-lightbox"));
+        }), true);
+        await page.locator(".lightbox-close").click();
+      } finally { await page.close(); }
+    }
   });
 
   for (const width of [360, 390, 430, 768, 1440]) {
