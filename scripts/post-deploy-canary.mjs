@@ -243,6 +243,15 @@ export async function verifyGuestbookDeleteUi(baseUrl, identity, {
     invariant(expectedWorkerVersion, "삭제 UI 검증에 기대 Worker version이 없습니다.");
     invariant(documentResponse.headers()["x-wedding-worker-tag"] === expectedWorkerTag, "삭제 UI 문서의 Worker tag가 배포 SHA와 다릅니다.");
     invariant(documentResponse.headers()["x-wedding-worker-version"] === expectedWorkerVersion, "삭제 UI 문서의 Worker version이 활성 버전과 다릅니다.");
+    // The render canary checks the intro itself. Clear the public cover before
+    // exercising the guestbook, including its valid readiness-timeout fallback.
+    await page.waitForFunction(() => document.querySelector(".pastel-intro-cover__start")
+      || !document.querySelector("#pastel-intro-early-poster, .pastel-intro-cover"), null, { timeout: HTTP_TIMEOUT_MS });
+    const introStart = page.locator(".pastel-intro-cover__start");
+    if (await introStart.count()) {
+      await introStart.click({ position: { x: 10, y: 10 } });
+      await page.locator(".pastel-intro-cover").waitFor({ state: "detached", timeout: HTTP_TIMEOUT_MS });
+    }
     const guestbook = page.locator(".guestbook-section");
     await guestbook.getByRole("button", { name: "내 글 수정", exact: true }).click();
     await guestbook.getByLabel("이름", { exact: true }).fill(identity.name);
