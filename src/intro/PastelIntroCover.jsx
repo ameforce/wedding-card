@@ -4,11 +4,13 @@ import "./pastel-intro.css";
 import { drawRibbonFrame, ribbonSpanStyle } from "./ribbon-span.mjs";
 
 export const PASTEL_INTRO_PAPER_OPENING_EVENT = "pastel-intro-paper-opening";
+export const PASTEL_INTRO_RIBBON_START_EVENT = "pastel-intro-ribbon-start";
+export const PASTEL_INTRO_OPENED_EVENT = "pastel-intro-opened";
+export const PASTEL_INTRO_TERMINATED_EVENT = "pastel-intro-terminated";
 const MANIFEST_URL = "/assets/design/ribbon-sequence/manifest.json";
 const ASSET_WAIT_MS = 5_000;
 const FRAME_STALL_MS = 1_500;
 const PLAYBACK_SLACK_MS = 2_500;
-const MINIMUM_POSTER_HOLD_MS = 800;
 
 function drawFrame(canvas, frame, manifest, frameIndex = 0) {
   assertRibbonFrameDimensions(frame, manifest);
@@ -115,6 +117,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
   const finishRef = useRef(onFinish);
   const sessionRef = useRef(null);
   const skipRef = useRef(() => {});
+  const startRef = useRef(() => {});
   const panelOpeningRef = useRef(false);
   const [posterSource] = useState(() => document.querySelector("#pastel-intro-early-poster img")?.currentSrc || "");
   const [posterSlices] = useState(() => document.getElementById("pastel-intro-early-poster")?.dataset.ribbonSchema === "2" ? ["center", "left", "right"] : ["full"]);
@@ -128,6 +131,8 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
   const [paperImage] = useState(handoffPaperImage);
   const [frameLive, setFrameLive] = useState(false);
   const [panelsOpen, setPanelsOpen] = useState(false);
+  const [readyToOpen, setReadyToOpen] = useState(false);
+  const [openingStarted, setOpeningStarted] = useState(false);
   const [panelDurationMs, setPanelDurationMs] = useState(1400);
 
   useEffect(() => { finishRef.current = onFinish; }, [onFinish]);
@@ -160,6 +165,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
       let panelDelayRemaining = 0;
       let stallGate;
       let firstDrawn = false;
+      let started = false;
       const prepared = new Map();
       const ready = new Map();
       const manifestController = new AbortController();
@@ -176,6 +182,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
       };
       const finish = (reason = "finished") => {
         if (!active) return;
+        document.dispatchEvent(new Event(reason === "finished" ? PASTEL_INTRO_OPENED_EVENT : PASTEL_INTRO_TERMINATED_EVENT));
         active = false;
         cancelRuntime();
         if (reason !== "early" && early?.status !== "consumed") early?.consume?.(reason);
@@ -299,16 +306,9 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
         }
         animationFrame = window.requestAnimationFrame(animate);
       };
-      const startPlayback = (initialFrames) => {
+      const prepareOpening = (initialFrames) => {
         window.clearTimeout(assetTimer);
         assetTimer = 0;
-        const now = performance.now();
-        const posterShownAt = early?.shownAt ?? now;
-        const manifestHoldUntil = posterShownAt + Math.max(manifest.holdMs, MINIMUM_POSTER_HOLD_MS);
-        // Early boot extends this deadline by hidden preparation time. It
-        // therefore measures visible poster hold instead of wall-clock time.
-        const residualHold = Math.max(0, Math.max(manifestHoldUntil, early?.minimumHoldUntil || 0) - now);
-        const scheduledManifest = { ...manifest, holdMs: residualHold };
         initialFrames.slice(1).forEach((frame, offset) => ready.set(offset + 1, frame));
         drawFrame(canvasRef.current, initialFrames[0], manifest);
         applyRootTranslation(0);
@@ -320,16 +320,24 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
           finish("duplicate-claim");
           return;
         }
-        playbackDeadline = performance.now()
-          + residualHold
-          + manifest.frames.length * (1000 / manifest.fps)
-          + manifest.panelDelayMs
-          + manifest.panelDurationMs
-          + PLAYBACK_SLACK_MS;
-        armPlaybackWatchdog();
-        stallGate = createFrameStallGate({ timeoutMs: FRAME_STALL_MS, schedule: window.setTimeout, cancelSchedule: window.clearTimeout, onTimeout: () => finish("asset-stall") });
-        scheduler = createSequentialRibbonScheduler(scheduledManifest, { startedAt: performance.now() });
-        animationFrame = window.requestAnimationFrame(animate);
+        startRef.current = () => {
+          if (!active || started || document.hidden) return;
+          started = true;
+          setOpeningStarted(true);
+          // This event is dispatched synchronously from the visitor's tap so
+          // the music control can unlock playback before mobile activation ends.
+          document.dispatchEvent(new Event(PASTEL_INTRO_RIBBON_START_EVENT));
+          playbackDeadline = performance.now()
+            + manifest.frames.length * (1000 / manifest.fps)
+            + manifest.panelDelayMs
+            + manifest.panelDurationMs
+            + PLAYBACK_SLACK_MS;
+          armPlaybackWatchdog();
+          stallGate = createFrameStallGate({ timeoutMs: FRAME_STALL_MS, schedule: window.setTimeout, cancelSchedule: window.clearTimeout, onTimeout: () => finish("asset-stall") });
+          scheduler = createSequentialRibbonScheduler({ ...manifest, holdMs: 0 }, { startedAt: performance.now() });
+          animationFrame = window.requestAnimationFrame(animate);
+        };
+        setReadyToOpen(true);
       };
       const start = async () => {
         try {
@@ -351,7 +359,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
           if (!active) return;
           preparationComplete = true;
           early?.preparationReady?.();
-          startPlayback(initialFrames);
+          prepareOpening(initialFrames);
         } catch { if (active) finish("asset-error"); }
       };
       const onEarlyFinish = () => finish("early");
@@ -405,22 +413,24 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
   }, [loaderFactory, manifestUrl]);
 
   return (
-    <div ref={coverRef} className={`pastel-intro-cover${panelsOpen ? " pastel-intro-cover--opening-panels" : ""}`} style={{ "--pastel-intro-panel-duration": `${panelDurationMs}ms`, "--pastel-intro-paper-image": paperImage }} aria-hidden="true" onPointerDown={() => {
+    <div ref={coverRef} className={`pastel-intro-cover${readyToOpen && !openingStarted ? " pastel-intro-cover--ready" : ""}${panelsOpen ? " pastel-intro-cover--opening-panels" : ""}`} style={{ "--pastel-intro-panel-duration": `${panelDurationMs}ms`, "--pastel-intro-paper-image": paperImage }} onPointerDown={() => {
+      if (!openingStarted) return;
       const early = earlyIntroState();
       if (early?.consume) early.consume("skip");
       else skipRef.current();
     }}>
-      <div className="pastel-intro-cover__envelope">
+      <div className="pastel-intro-cover__envelope" aria-hidden="true">
         <div className="pastel-intro-cover__panel pastel-intro-cover__panel--left" />
         <div className="pastel-intro-cover__panel pastel-intro-cover__panel--right" />
         <div className="pastel-intro-cover__seam" />
       </div>
-      <div className="pastel-intro-cover__ribbon-window" style={ribbonSpanStyle}>
+      <div className="pastel-intro-cover__ribbon-window" style={ribbonSpanStyle} aria-hidden="true">
         <div ref={ribbonTrackRef} className="pastel-intro-cover__ribbon-track" style={{ aspectRatio: `${posterDimensions.width} / ${posterDimensions.height}` }}>
           {posterSource && posterSlices.map((slice) => <img key={slice} className={`pastel-intro-cover__poster pastel-intro-cover__slice--${slice}${frameLive ? " is-hidden" : ""}`} src={posterSource} width={posterDimensions.width} height={posterDimensions.height} alt="" />)}
           <canvas ref={canvasRef} className="pastel-intro-cover__ribbon" width={posterDimensions.width} height={posterDimensions.height} />
         </div>
       </div>
+      {readyToOpen && !openingStarted && <button type="button" className="pastel-intro-cover__start" onClick={() => startRef.current()}><span>리본을 탭해 열기</span></button>}
     </div>
   );
 }

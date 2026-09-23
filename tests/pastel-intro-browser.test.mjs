@@ -226,7 +226,7 @@ function assertCompletePlayback(state, { interrupted = false } = {}) {
   }
 }
 
-test("real invitation ribbon preserves every frame and restores access across loading failures and viewports", { timeout: 240_000 }, async (t) => {
+test("real invitation ribbon preserves every frame and restores access across loading failures and viewports", { timeout: 360_000 }, async (t) => {
   const artifactDir = process.env.RIBBON_QA_DIR;
   // Public motion acceptance runs the compiled entry, so Vite's dev transform
   // latency cannot consume the production preparation budget before React mounts.
@@ -270,9 +270,11 @@ test("real invitation ribbon preserves every frame and restores access across lo
   const timingDiagnostic = process.env.RIBBON_QA_TIMING_DIAGNOSTIC === "1";
   const scenarioTest = (name, run) => t.test(name, { skip: Boolean(scenarioFilter && !scenarioFilter.test(name)) }, async () => { currentScenario = name; await run(); });
   async function newPage(options = {}) {
-    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, ...options });
+    const { autoTap = true, ...browserOptions } = options;
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, ...browserOptions });
     assert.equal(await page.evaluate(() => innerWidth), options.viewport?.width ?? 390, "Viewport setup must take effect before loading App.");
     await page.addInitScript(instrumentIntro, { frameNames: manifest.frames, framePack: manifest.framePack, terminalIndex: manifest.frames.length - 1, diagnostic: timingDiagnostic });
+    if (autoTap) page.on("domcontentloaded", () => { void page.locator(".pastel-intro-cover__start").click({ position: { x: 10, y: 10 }, timeout: 8_000 }).catch(() => {}); });
     const network = { responses: [], failures: [], errors: [] };
     page.on("response", (response) => { if (response.url().includes("/ribbon-sequence/")) network.responses.push({ path: new URL(response.url()).pathname, status: response.status() }); });
     page.on("requestfailed", (request) => network.failures.push({ path: new URL(request.url()).pathname, error: request.failure()?.errorText }));
@@ -329,17 +331,16 @@ test("real invitation ribbon preserves every frame and restores access across lo
     } finally { await page.close(); }
   });
 
-  await scenarioTest("opening music attempts once without a gesture and keeps the invitation usable when blocked", async () => {
+  await scenarioTest("a trusted ribbon tap primes music silently and reveals it only after opening", async () => {
     for (const [enabled, blocked, skip, failAssets] of [[false, false, false, false], [true, false, false, false], [true, true, false, false], [true, false, true, false], [true, false, false, true]]) {
-      const page = await newPage();
+      const page = await newPage({ autoTap: false });
       await page.addInitScript((shouldBlock) => {
-        window.__musicQA = { calls: [], blocked: shouldBlock, interactions: 0 };
-        for (const type of ["mousedown", "pointerup", "touchend", "keydown"]) {
-          document.addEventListener(type, () => { window.__musicQA.interactions += 1; }, { capture: true });
-        }
+        window.__musicQA = { calls: [], blocked: shouldBlock };
         HTMLMediaElement.prototype.play = function () {
-          window.__musicQA.calls.push({ at: performance.now(), interactions: window.__musicQA.interactions });
-          this.dispatchEvent(new Event("play"));
+          window.__musicQA.calls.push({ at: performance.now(), active: navigator.userActivation?.isActive });
+          this.__qaPaused = window.__musicQA.blocked;
+          Object.defineProperty(this, "paused", { configurable: true, get: () => this.__qaPaused });
+          if (!window.__musicQA.blocked) this.dispatchEvent(new Event("play"));
           return window.__musicQA.blocked ? Promise.reject(new DOMException("Autoplay denied", "NotAllowedError")) : Promise.resolve();
         };
       }, blocked);
@@ -347,29 +348,30 @@ test("real invitation ribbon preserves every frame and restores access across lo
       if (failAssets) await page.route("**/ribbon-sequence/manifest.json", (route) => route.fulfill({ status: 503, body: "Unavailable" }));
       try {
         await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-        if (skip) await page.locator(".pastel-intro-cover, #pastel-intro-early-poster").first().click({ position: { x: 10, y: 10 } });
+        if (skip) await page.keyboard.press("Escape");
         if (skip || failAssets) {
           await page.waitForFunction(() => !document.querySelector(".pastel-intro-cover, #pastel-intro-early-poster"));
           assert.equal(await page.evaluate(() => window.__musicQA.calls.length), 0);
           assert.equal(await page.locator(".music-control button").getAttribute("aria-pressed"), "false");
           continue;
         }
+        await page.locator(".pastel-intro-cover__start").waitFor();
+        assert.equal(await page.evaluate(() => window.__musicQA.calls.length), 0);
+        await page.locator(".pastel-intro-cover__start").click();
         await page.waitForFunction(() => window.__ribbonQA?.openedAt !== null && !document.querySelector(".pastel-intro-cover"), null, { timeout: 12_000 });
         const result = await page.evaluate(() => ({
           calls: window.__musicQA.calls,
           lastRibbonFrameAt: window.__ribbonQA.draws.at(-1)?.at,
-          paperOpenedAt: window.__ribbonQA.openedAt,
           pressed: document.querySelector(".music-control button")?.getAttribute("aria-pressed"),
           toast: document.querySelector(".toast")?.textContent,
         }));
         assert.equal(result.calls.length, enabled ? 1 : 0);
         if (enabled) {
-          assert.equal(result.calls[0].interactions, 0);
-          assert.ok(result.calls[0].at >= result.lastRibbonFrameAt);
-          assert.ok(result.calls[0].at <= result.paperOpenedAt + 100);
+          assert.equal(result.calls[0].active, true);
+          assert.ok(result.calls[0].at < result.lastRibbonFrameAt);
         }
         assert.equal(result.pressed, enabled && !blocked ? "true" : "false");
-        assert.equal(result.toast?.includes("재생하지 못했습니다"), false);
+        assert.equal(result.toast?.includes("음악이 차단되었습니다"), blocked);
         if (blocked) {
           await page.evaluate(() => { window.__musicQA.blocked = false; });
           await page.locator(".music-control button").click();
@@ -380,8 +382,8 @@ test("real invitation ribbon preserves every frame and restores access across lo
     }
   });
 
-  await scenarioTest("native Chromium reports whether opening music was allowed without a gesture", async () => {
-    const page = await newPage();
+  await scenarioTest("native Chromium accepts ribbon-tap music and keeps it silent until opening completes", async () => {
+    const page = await newPage({ autoTap: false });
     await page.addInitScript(() => {
       const play = HTMLMediaElement.prototype.play;
       window.__nativeMusicQA = { attempts: 0, playing: 0, rejections: [] };
@@ -396,6 +398,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     await servePublishedMusic(page, true);
     try {
       await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+      await page.locator(".pastel-intro-cover__start").click();
       await page.waitForFunction(() => window.__ribbonQA?.openedAt !== null && !document.querySelector(".pastel-intro-cover"), null, { timeout: 12_000 });
       const result = await page.evaluate(() => ({
         ...window.__nativeMusicQA,
@@ -717,8 +720,8 @@ test("real invitation ribbon preserves every frame and restores access across lo
     }, hidden);
   }
 
-  await scenarioTest("boundary: preparation completed while hidden waits for visible start and preserves the 800ms visible poster hold", async () => {
-    const page = await newPage();
+  await scenarioTest("boundary: preparation completed while hidden waits for a visible visitor tap", async () => {
+    const page = await newPage({ autoTap: false });
     await page.addInitScript(() => {
       window.__qaDecodedWhileHidden = 0;
       const decode = window.createImageBitmap;
@@ -741,16 +744,19 @@ test("real invitation ribbon preserves every frame and restores access across lo
       const hiddenState = await page.evaluate(() => ({ draws: window.__ribbonQA.draws.length, status: window.__pastelIntroEarly.status, shownAt: window.__pastelIntroEarly.shownAt, decoded: window.__qaDecodedWhileHidden }));
       assert.equal(hiddenState.draws, 0, "Prepared frames must not start their scheduler or draw while hidden.");
       assert.equal(hiddenState.status, "poster");
-      assert.ok(hiddenAt - hiddenState.shownAt < 600, "The fixture must hide before the 800ms hold has been consumed.");
-      const resumedAt = await page.evaluate(() => performance.now());
+      assert.ok(hiddenAt - hiddenState.shownAt < 600, "The fixture must hide during preparation.");
       await setHidden(page, false);
+      await page.locator(".pastel-intro-cover__start").waitFor();
+      await page.waitForTimeout(800);
+      assert.equal(await page.evaluate(() => window.__ribbonQA.draws.length), 1, "The ribbon must stay tied until tapped.");
+      const tapAt = await page.evaluate(() => performance.now());
+      await page.locator(".pastel-intro-cover__start").click();
       const state = await finalState(page);
       assertAccessible(state);
       assertCompletePlayback(state);
-      const visibleHold = state.draws[1].at - hiddenState.shownAt - (resumedAt - hiddenAt);
-      assert.ok(visibleHold >= 795, `The tied poster must remain visible for 800ms excluding hidden time (5ms measurement allowance); observed ${visibleHold}ms.`);
+      assert.ok(state.draws[1].at >= tapAt, "The first moving ribbon frame must follow the tap.");
       assert.equal(state.early.reason, "finished");
-      if (artifactDir) await writeFile(join(artifactDir, "hidden-preparation-hold.json"), JSON.stringify({ hiddenAt, resumedAt, hiddenState, firstDrawAt: state.draws[0].at, firstMovingFrameAt: state.draws[1].at, visibleHold, frames: state.draws.length, finalReason: state.early.reason }, null, 2));
+      if (artifactDir) await writeFile(join(artifactDir, "hidden-preparation-hold.json"), JSON.stringify({ hiddenAt, tapAt, hiddenState, firstDrawAt: state.draws[0].at, firstMovingFrameAt: state.draws[1].at, frames: state.draws.length, finalReason: state.early.reason }, null, 2));
     } finally { await page.close(); }
   });
 

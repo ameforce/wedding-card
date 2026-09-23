@@ -60,9 +60,8 @@
     armDeadline();
   });
   if (!document.hidden) armDeadline();
-  document.addEventListener("pointerdown", function (event) {
-    if (event.target?.closest?.("#pastel-intro-early-poster")) consume("skip");
-  }, { capture: true });
+  // The poster is a loading surface. The runtime cover exposes the opening
+  // button only after the first ribbon frames and published content are ready.
   window.addEventListener("keydown", function (event) {
     if (event.key === "Escape") consume("skip");
   });

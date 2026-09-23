@@ -849,6 +849,14 @@ async function readRenderState(page) {
   });
 }
 
+async function tapReadyRibbon(page) {
+  const button = page.locator(".pastel-intro-cover__start");
+  await button.waitFor({ timeout: RENDER_TIMEOUT_MS });
+  const frameCount = await page.evaluate(() => window.__weddingIntroEvidence?.draws?.length);
+  invariant(frameCount === 1, `방문자 탭 전에 리본이 움직였습니다: ${frameCount ?? "missing"}`);
+  await button.click({ position: { x: 10, y: 10 } });
+}
+
 export async function collectScenario({
   name,
   browser,
@@ -908,6 +916,7 @@ export async function collectScenario({
     invariant(page.url() === baseUrl.href, `공개 초대장 최종 URL이 HTTPS 기준 URL과 다릅니다: ${page.url()}`);
     if (warm) {
       if (ribbonExpectation) {
+        await tapReadyRibbon(page);
         // Warm-cache must first finish the same published cover that a visitor
         // sees. Reloading at DOMContentLoaded aborts its frame fetches and
         // would turn this scenario into another cold request set.
@@ -952,6 +961,7 @@ export async function collectScenario({
       return Boolean(root && image?.complete && image.naturalWidth > 0);
     }, null, { timeout: RENDER_TIMEOUT_MS });
     if (ribbonExpectation) {
+      await tapReadyRibbon(page);
       await page.waitForFunction((frameCount) => {
         const intro = window.__weddingIntroEvidence;
         return intro?.draws?.length >= Math.min(3, frameCount - 2) && intro.draws.length < frameCount - 1;

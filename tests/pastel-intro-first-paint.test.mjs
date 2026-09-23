@@ -26,6 +26,8 @@ test("public fallback paths and a top-level draft query retain the initial cover
     assert.equal(await page.evaluate(() => window.__pastelIntroEarly?.status), "poster", path);
     assert.equal(await page.locator("#pastel-intro-early-poster").isVisible(), true, path);
     await page.locator("#pastel-intro-early-poster").click({ position: { x: 10, y: 10 } });
+    assert.equal(await page.evaluate(() => window.__pastelIntroEarly.reason), null, path);
+    await page.keyboard.press("Escape");
     assert.equal(await page.evaluate(() => window.__pastelIntroEarly.reason), "skip", path);
     assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).overflow), "hidden", path);
     await page.close();
@@ -79,6 +81,7 @@ test("a page initially hidden preserves preparation and starts after visibility 
     document.dispatchEvent(new Event("visibilitychange"));
   });
   await page.waitForFunction(() => window.__pastelIntroEarly?.status === "claimed", null, { timeout: 3000 });
+  await page.locator(".pastel-intro-cover__start").click();
   await page.waitForFunction(() => window.__pastelIntroEarly?.reason === "finished", null, { timeout: 8000 });
   assert.equal(await page.locator(".pastel-intro-cover").count(), 0);
   assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).overflow), "hidden");
@@ -101,6 +104,7 @@ test("blocked early boot still permits runtime skip and restores invitation acce
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`, { waitUntil: "domcontentloaded" });
   await page.locator(".pastel-intro-cover").waitFor({ state: "visible" });
   assert.equal(await page.evaluate(() => window.__pastelIntroEarly), undefined);
+  await page.locator(".pastel-intro-cover__start").click();
   await page.locator(".pastel-intro-cover").click({ position: { x: 30, y: 30 } });
   await page.waitForFunction(() => !document.querySelector(".pastel-intro-cover") && !document.body.classList.contains("intro-lock"), null, { timeout: 3000 });
   assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).overflow), "hidden");
@@ -125,6 +129,8 @@ test("production CSP admits the exact inline controller and rejects unrelated in
   assert.equal(await page.evaluate(() => window.__pastelIntroEarly?.status), "poster");
   assert.equal(await page.evaluate(() => window.__untrustedInlineExecuted), undefined);
   await page.locator("#pastel-intro-early-poster").click({ position: { x: 10, y: 10 } });
+  assert.equal(await page.evaluate(() => window.__pastelIntroEarly.reason), null);
+  await page.keyboard.press("Escape");
   assert.equal(await page.evaluate(() => window.__pastelIntroEarly.reason), "skip");
 });
 
@@ -212,7 +218,7 @@ test("cold first paint shows the tied poster before the delayed main bundle and 
   assert.equal(diagnostics.visual.bodyLocked, true, "The early cover must own the temporary scroll lock.");
 });
 
-test("early poster exemptions and tap-to-skip work while the main bundle is still delayed", { timeout: 60_000 }, async (t) => {
+test("early poster exemptions and tap-to-open handoff work while the main bundle is delayed", { timeout: 60_000 }, async (t) => {
   const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
   let browser;
   t.after(async () => { await browser?.close(); await server.close(); });
@@ -237,16 +243,16 @@ test("early poster exemptions and tap-to-skip work while the main bundle is stil
       }
     });
   }
-  await t.test("pre-main tap removes poster and suppresses a later React remount", async () => {
+  await t.test("pre-main tap keeps the poster until the opening control is ready", async () => {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.route("**/src/main.jsx*", async (route) => { await new Promise((resolve) => setTimeout(resolve, 3000)); await route.continue().catch(() => {}); });
     try {
       await page.goto(baseUrl, { waitUntil: "commit" });
       await page.locator("#pastel-intro-early-poster").click({ position: { x: 10, y: 10 }, timeout: 1500 });
-      await page.waitForFunction(() => !document.querySelector("#pastel-intro-early-poster"), null, { timeout: 1000 });
+      assert.equal(await page.locator("#pastel-intro-early-poster:visible").count(), 1);
+      await page.locator(".pastel-intro-cover__start").click({ timeout: 10_000 });
+      await page.waitForFunction(() => !document.querySelector("#pastel-intro-early-poster, .pastel-intro-cover"), null, { timeout: 10_000 });
       assert.equal(await page.evaluate(() => [document.documentElement, document.body].some((element) => getComputedStyle(element).overflow === "hidden")), false);
-      await page.waitForFunction(() => document.querySelector(".pastel-hero-photo img")?.complete, null, { timeout: 10_000 });
-      assert.equal(await page.locator("#pastel-intro-early-poster:visible, .pastel-intro-cover:visible").count(), 0, "A skip before main must persist through the React handoff for this load.");
     } finally { await page.unrouteAll({ behavior: "wait" }); await page.close(); }
   });
 });
