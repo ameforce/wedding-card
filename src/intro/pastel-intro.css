@@ -139,6 +139,48 @@
   will-change: transform;
 }
 
+.pastel-intro-cover--ready .pastel-intro-cover__ribbon-track {
+  animation: pastel-intro-ribbon-gleam 3.4s ease-in-out infinite;
+}
+
+@keyframes pastel-intro-ribbon-gleam {
+  0%, 100% { filter: brightness(1); }
+  48% { filter: brightness(1.065); }
+}
+
+.pastel-intro-cover .pastel-intro-cover__start {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #765d4e;
+  cursor: pointer;
+  font: inherit;
+  touch-action: manipulation;
+}
+
+.pastel-intro-cover .pastel-intro-cover__start span {
+  position: absolute;
+  top: calc(50% + clamp(116px, 32vw, 144px));
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 10px 18px;
+  border: 1px solid rgba(155, 126, 107, .35);
+  border-radius: 999px;
+  background: rgba(255, 252, 247, .84);
+  font-size: 14px;
+  letter-spacing: .04em;
+}
+
+.pastel-intro-cover .pastel-intro-cover__start:focus-visible span {
+  outline: 2px solid #765d4e;
+  outline-offset: 3px;
+}
+
 .pastel-intro-cover .pastel-intro-cover__ribbon,
 .pastel-intro-cover .pastel-intro-cover__poster {
   position: absolute;

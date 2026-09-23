@@ -29,7 +29,7 @@ import { pastelGalleryLayout } from "./gallery-layout.js";
 import { fallbackPhotoSource, findPhotoIndexBySource, movePhotoSource } from "./gallery-state.js";
 import { createGuestbookEntry, deleteGuestbookEntry, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
 import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
-import { PASTEL_INTRO_PAPER_OPENING_EVENT, PastelIntroCover } from "./intro/PastelIntroCover.jsx";
+import { PASTEL_INTRO_OPENED_EVENT, PASTEL_INTRO_RIBBON_START_EVENT, PASTEL_INTRO_TERMINATED_EVENT, PastelIntroCover } from "./intro/PastelIntroCover.jsx";
 
 const VARIANTS = {
   quiet: {
@@ -654,6 +654,8 @@ function MusicControl({ notify, allowOpeningPlayback = false }) {
 
 function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
   const audioRef = useRef(null);
+  const audioGraphRef = useRef(null);
+  const openingStageRef = useRef("idle");
   const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
@@ -662,18 +664,95 @@ function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
       audio?.pause();
       if (audio) audio.currentTime = 0;
       audio?.load();
+      const graph = audioGraphRef.current;
+      audioGraphRef.current = null;
+      graph?.source.disconnect();
+      graph?.gain.disconnect();
+      if (graph) void graph.context.close();
+      openingStageRef.current = "idle";
     };
   }, [music.src]);
 
   useEffect(() => {
     if (!allowOpeningPlayback || music.autoPlayOnOpen !== true) return undefined;
-    const attemptOpeningPlayback = () => {
-      const playback = audioRef.current?.play();
-      playback?.catch(() => setPlaying(false));
+    const armOpeningPlayback = () => {
+      const audio = audioRef.current;
+      const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+      if (!audio || !AudioContextConstructor || openingStageRef.current !== "idle") return;
+      let context;
+      try {
+        context = new AudioContextConstructor();
+        const source = context.createMediaElementSource(audio);
+        const gain = context.createGain();
+        gain.gain.value = 0;
+        source.connect(gain);
+        gain.connect(context.destination);
+        audioGraphRef.current = { context, source, gain };
+        openingStageRef.current = "armed";
+        // Both calls happen inside the trusted tap. The element streams in
+        // silence until the completed paper turn releases the gain.
+        const resumed = context.resume();
+        const playback = audio.play();
+        Promise.all([resumed, playback]).catch(() => {
+          if (openingStageRef.current !== "armed") return;
+          openingStageRef.current = "failed";
+          gain.gain.value = 1;
+          setPlaying(false);
+        });
+      } catch {
+        openingStageRef.current = "failed";
+        if (context && !audioGraphRef.current) void context.close();
+      }
     };
-    document.addEventListener(PASTEL_INTRO_PAPER_OPENING_EVENT, attemptOpeningPlayback);
-    return () => document.removeEventListener(PASTEL_INTRO_PAPER_OPENING_EVENT, attemptOpeningPlayback);
-  }, [allowOpeningPlayback, music.autoPlayOnOpen]);
+    const revealOpeningPlayback = () => {
+      const audio = audioRef.current;
+      const graph = audioGraphRef.current;
+      if (!audio) return;
+      if (openingStageRef.current === "armed" && graph) {
+        openingStageRef.current = "audible";
+        try { audio.currentTime = 0; } catch { /* Metadata may still be loading. */ }
+        const { gain, context } = graph;
+        gain.gain.cancelScheduledValues(context.currentTime);
+        gain.gain.setValueAtTime(0, context.currentTime);
+        gain.gain.linearRampToValueAtTime(1, context.currentTime + 0.45);
+        const resumed = context.state === "running" ? Promise.resolve() : context.resume();
+        resumed.then(() => {
+          if (openingStageRef.current === "audible" && !audio.paused) setPlaying(true);
+        }).catch(() => {
+          setPlaying(false);
+          notify("음악이 차단되었습니다. 오른쪽 위 재생 버튼을 눌러 주세요.", "error");
+        });
+        return;
+      }
+      if (openingStageRef.current === "failed") {
+        notify("음악이 차단되었습니다. 오른쪽 위 재생 버튼을 눌러 주세요.", "error");
+        return;
+      }
+      // If Web Audio was unavailable, retain the original best-effort attempt.
+      const playback = audio.play();
+      playback?.catch(() => {
+        setPlaying(false);
+        notify("음악이 차단되었습니다. 오른쪽 위 재생 버튼을 눌러 주세요.", "error");
+      });
+    };
+    const cancelOpeningPlayback = () => {
+      if (openingStageRef.current !== "armed") return;
+      openingStageRef.current = "idle";
+      if (audioGraphRef.current) audioGraphRef.current.gain.gain.value = 1;
+      const audio = audioRef.current;
+      audio?.pause();
+      if (audio) audio.currentTime = 0;
+      setPlaying(false);
+    };
+    document.addEventListener(PASTEL_INTRO_RIBBON_START_EVENT, armOpeningPlayback);
+    document.addEventListener(PASTEL_INTRO_OPENED_EVENT, revealOpeningPlayback);
+    document.addEventListener(PASTEL_INTRO_TERMINATED_EVENT, cancelOpeningPlayback);
+    return () => {
+      document.removeEventListener(PASTEL_INTRO_RIBBON_START_EVENT, armOpeningPlayback);
+      document.removeEventListener(PASTEL_INTRO_OPENED_EVENT, revealOpeningPlayback);
+      document.removeEventListener(PASTEL_INTRO_TERMINATED_EVENT, cancelOpeningPlayback);
+    };
+  }, [allowOpeningPlayback, music.autoPlayOnOpen, notify]);
 
   const togglePlayback = async () => {
     const audio = audioRef.current;
@@ -684,7 +763,9 @@ function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
       return;
     }
     try {
-      await audio.play();
+      const resumed = audioGraphRef.current?.context.resume();
+      const playback = audio.play();
+      await Promise.all([resumed, playback]);
       setPlaying(true);
     } catch {
       notify("음악을 재생하지 못했습니다. 브라우저 설정을 확인해 주세요.", "error");
@@ -703,7 +784,7 @@ function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
         preload={allowOpeningPlayback && music.autoPlayOnOpen === true ? "auto" : "none"}
         loop
         onPause={() => setPlaying(false)}
-        onPlay={() => setPlaying(true)}
+        onPlay={() => setPlaying(openingStageRef.current !== "armed")}
         onError={() => setPlaying(false)}
       />
     </div>

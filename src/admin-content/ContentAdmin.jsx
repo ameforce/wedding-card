@@ -963,9 +963,9 @@ export function ContentAdmin() {
               </div>
               <label className="content-admin-music-autoplay">
                 <input type="checkbox" checked={music.autoPlayOnOpen === true} aria-describedby="content-admin-music-autoplay-hint" onChange={(event) => update(["content", "music", "autoPlayOnOpen"], event.target.checked)} />
-                <span>봉투가 열릴 때 음악 재생 시도</span>
+                <span>리본을 탭해 열면 음악 재생</span>
               </label>
-              <small id="content-admin-music-autoplay-hint" className="content-admin-music-hint">브라우저에서 자동 재생을 차단할 수 있습니다. 차단되면 방문자가 재생 버튼을 눌러 들을 수 있습니다.</small>
+              <small id="content-admin-music-autoplay-hint" className="content-admin-music-hint">방문자가 리본을 탭하면 음악을 준비하고, 봉투가 완전히 열린 뒤 재생합니다. 브라우저가 차단하면 음악 버튼으로 다시 재생할 수 있습니다.</small>
               <div className="content-admin-music-upload">
                 <div>
                   <strong>현재 곡 미리듣기</strong>
