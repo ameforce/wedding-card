@@ -1336,7 +1336,7 @@ test("cleanup failure returns a request reference when an expected media error b
   }
 });
 
-test("media upload stores the original through a known-length stream accepted by R2", async () => {
+test("media upload stores the original through known-length bytes accepted by R2", async () => {
   const fixture = await accessFixture();
   const db = invitationDatabase();
   const objects = new Map();
@@ -1345,7 +1345,7 @@ test("media upload stores the original through a known-length stream accepted by
       if (value instanceof ReadableStream && typeof value.expectedLength !== "number") {
         throw new TypeError("Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)");
       }
-      objects.set(key, { value: await storedBytes(value), httpMetadata: options.httpMetadata, expectedLength: value?.expectedLength });
+      objects.set(key, { value: await storedBytes(value), httpMetadata: options.httpMetadata, bufferBytes: value instanceof Uint8Array ? value.byteLength : null });
     },
     async delete(keys) {
       for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
@@ -1353,14 +1353,7 @@ test("media upload stores the original through a known-length stream accepted by
     async get() { return null; },
   };
   const originalFetch = globalThis.fetch;
-  const originalFixedLengthStream = globalThis.FixedLengthStream;
   globalThis.fetch = async () => Response.json(fixture.jwks);
-  globalThis.FixedLengthStream = class extends TransformStream {
-    constructor(expectedLength) {
-      super();
-      this.readable.expectedLength = expectedLength;
-    }
-  };
   try {
     const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
       method: "POST",
@@ -1376,12 +1369,10 @@ test("media upload stores the original through a known-length stream accepted by
     assert.equal(response.status, 201);
     const originalKey = [...objects.keys()].find((key) => key.endsWith("/original.jpg"));
     assert.equal(typeof originalKey, "string");
-    assert.equal(objects.get(originalKey).expectedLength, 4);
+    assert.equal(objects.get(originalKey).bufferBytes, 4);
     assert.deepEqual(objects.get(originalKey).value, new Uint8Array([1, 2, 3, 9]));
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalFixedLengthStream === undefined) delete globalThis.FixedLengthStream;
-    else globalThis.FixedLengthStream = originalFixedLengthStream;
   }
 });
 
