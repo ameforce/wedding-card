@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { createServer } from "vite";
+import { createPublishedStaticServer } from "./fixtures/published-static-server.mjs";
 import { weddingContent } from "../src/content.js";
 import { createContentDocument } from "../src/admin-content/content-document.js";
 
@@ -32,7 +31,6 @@ const TARGET_VERSION = "11111111-2222-3333-4444-555555555555";
 const STALE_VERSION = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
-const projectRoot = new URL("..", import.meta.url);
 const measuredPanelCurve = JSON.parse(await readFile(new URL("../scripts/ribbon/reference-paper-curve.json", import.meta.url), "utf8")).panelCurve;
 const measuredMidCurvePoint = measuredPanelCurve.find((point) => (
   point.leftProgress > 0.2 && point.leftProgress < 0.8
@@ -206,7 +204,7 @@ test("packed ribbon canary binds the one observed download to the exact build by
 });
 
 async function localRibbonExpectation() {
-  const directory = new URL("../public/assets/design/ribbon-sequence/", import.meta.url);
+  const directory = new URL("../dist/client/assets/design/ribbon-sequence/", import.meta.url);
   const manifestBytes = await readFile(new URL("manifest.json", directory));
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   const frameHashes = Object.fromEntries(await Promise.all(manifest.frames.map(async (frame) => [
@@ -217,50 +215,6 @@ async function localRibbonExpectation() {
   return createRibbonExpectation(manifest, { manifestHash: hashBytes(manifestBytes), frameHashes, packHash });
 }
 
-function localPublishedWorkerPlugin(document) {
-  const payload = Buffer.from(JSON.stringify({
-    schemaVersion: 1,
-    source: "cloudflare-published",
-    revisionId: "local-published-42",
-    publishedAt: "2026-09-05T00:00:00.000Z",
-    document,
-  })).toString("base64url");
-  const bootstrap = `<template id="wedding-public-bootstrap" data-schema-version="1">${payload}</template>`;
-  const heroPrefix = "/api/media/invitation/local-published/pastel-hero/";
-  return {
-    name: "local-published-render-canary",
-    transform(code, id) {
-      if (id.replaceAll("\\", "/").endsWith("/src/admin-content/content-client.js")) {
-        return code.replace("return import.meta.env?.DEV === true;", "return false;");
-      }
-      return null;
-    },
-    transformIndexHtml(html) {
-      return html.replace("<!-- WEDDING_PUBLIC_BOOTSTRAP -->", bootstrap);
-    },
-    configureServer(server) {
-      server.middlewares.use(async (request, response, next) => {
-        response.setHeader("x-wedding-content-source", "cloudflare-published");
-        response.setHeader("x-wedding-revision", "local-published-42");
-        response.setHeader("x-wedding-worker-tag", TARGET_SHA);
-        response.setHeader("x-wedding-worker-version", TARGET_VERSION);
-        response.setHeader("content-security-policy", "connect-src 'self'");
-        const path = request.url?.split("?", 1)[0] || "";
-        if (!path.startsWith(heroPrefix)) return next();
-        const asset = path.endsWith("/960.webp") ? "pastel-hero-960.webp" : "pastel-hero-480.webp";
-        try {
-          const bytes = await readFile(new URL(`../public/assets/photos/${asset}`, import.meta.url));
-          response.statusCode = 200;
-          response.setHeader("content-type", "image/webp");
-          response.end(bytes);
-        } catch (error) {
-          next(error);
-        }
-      });
-    },
-  };
-}
-
 test("local published Worker canary proves every hash under production connect-src policy and isolates warm evidence", { timeout: 60_000 }, async (t) => {
   const document = createContentDocument(weddingContent);
   document.photos.pastel.hero = {
@@ -269,21 +223,13 @@ test("local published Worker canary proves every hash under production connect-s
     srcSet: "/api/media/invitation/local-published/pastel-hero/480.webp 480w, /api/media/invitation/local-published/pastel-hero/960.webp 960w",
   };
   const ribbon = await localRibbonExpectation();
-  const server = await createServer({
-    root: fileURLToPath(projectRoot),
-    logLevel: "silent",
-    plugins: [localPublishedWorkerPlugin(document)],
-    server: { host: "127.0.0.1", port: 0, strictPort: false },
-  });
+  const server = await createPublishedStaticServer(document, { workerTag: TARGET_SHA, workerVersion: TARGET_VERSION });
   let browser;
   t.after(async () => {
     await browser?.close();
     await server.close();
   });
-  await server.listen();
-  const address = server.httpServer.address();
-  assert.equal(typeof address, "object");
-  const baseUrl = new URL(`http://127.0.0.1:${address.port}/`);
+  const { baseUrl } = server;
   browser = await chromium.launch({ headless: true });
 
   const result = await collectScenario({
@@ -1091,4 +1037,27 @@ test("render timeout diagnostics retain the response, DOM, and network failure b
   assert.match(diagnostic, /ERR_FAILED/);
   assert.match(diagnostic, /503/);
   assert.match(diagnostic, /decode failed/);
+});
+
+test("local release fixture serves built assets without dev transforms and isolates resource-heavy suites", async (t) => {
+  const server = await createPublishedStaticServer(createContentDocument(weddingContent), {
+    workerTag: TARGET_SHA, workerVersion: TARGET_VERSION,
+  });
+  t.after(() => server.close());
+  const response = await fetch(server.baseUrl);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-wedding-worker-tag"), TARGET_SHA);
+  assert.equal(response.headers.get("content-security-policy"), "connect-src 'self'");
+  const html = await response.text();
+  assert.doesNotMatch(html, /\/@vite\/client|\/src\/main\.jsx/);
+  assert.match(html, /wedding-public-bootstrap/);
+  const script = html.match(/<script[^>]+src="([^"]+)"/);
+  assert.ok(script, "production HTML must reference its built application bundle");
+  const asset = await fetch(new URL(script[1], server.baseUrl));
+  assert.equal(asset.status, 200);
+  assert.equal(asset.headers.get("content-type"), "application/javascript");
+  assert.equal((await fetch(new URL("/@vite/client", server.baseUrl))).status, 404);
+  assert.equal((await fetch(server.baseUrl, { method: "POST" })).status, 405);
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.match(pkg.scripts["test:sites"], /--test-concurrency=1(?:\s|$)/);
 });

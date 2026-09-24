@@ -29,11 +29,13 @@ import {
   CONTENT_PREVIEW_MESSAGE_TYPE,
   CONTENT_PREVIEW_READY_MESSAGE_TYPE,
 } from "./public-content.jsx";
+import { preparePhotoSelection, uploadPhotoSelection } from "./media-batch.js";
 import { AdminShell } from "./AdminShell.jsx";
 
 function formatAdminError(error, fallbackMessage) {
   const message = error?.message || fallbackMessage;
-  return typeof error?.requestId === "string" ? `${message} (참조 번호: ${error.requestId})` : message;
+  const reference = error?.requestId || error?.rayId;
+  return typeof reference === "string" ? `${message} (참조 번호: ${reference})` : message;
 }
 
 function setAtPath(document, path, value) {
@@ -96,7 +98,7 @@ function UploadProgress({ progress }) {
   const percent = progress.phase === "upload" && progress.total > 0
     ? Math.min(100, Math.round((progress.loaded / progress.total) * 100))
     : null;
-  const label = progress.count > 1 ? `${progress.index}/${progress.count} · ${progress.fileName}` : progress.fileName;
+  const label = Number.isInteger(progress.completed) ? `${progress.completed}/${progress.count}장 처리 · ${progress.fileName}` : progress.count > 1 ? `${progress.index}/${progress.count} · ${progress.fileName}` : progress.fileName;
   const phaseText = progress.phase === "optimize" ? "이미지 처리 중…" : progress.phase === "prepare" ? "파일 준비 중…" : "업로드 중…";
   return (
     <div className="content-admin-upload-progress">
@@ -133,36 +135,49 @@ function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, fileErr
   );
 }
 
-function GalleryPhotoUploader({ onUpload, busy, disabled, progress }) {
+function GalleryPhotoUploader({ onSelect, onUpload, onClear, selection, busy, disabled, progress }) {
   const [position, setPosition] = useState("50% 50%");
   const positionMatch = position.trim().match(/^(\d{1,3})%\s+(\d{1,3})%$/);
-  const ready = Boolean(positionMatch)
-    && Number(positionMatch?.[1]) <= 100
-    && Number(positionMatch?.[2]) <= 100;
+  const ready = Boolean(positionMatch) && Number(positionMatch?.[1]) <= 100 && Number(positionMatch?.[2]) <= 100;
   return (
     <section className="content-admin-gallery-add">
       <strong>갤러리 사진 추가</strong>
-      <p>실제 승인된 사진을 한 번에 여러 장 업로드할 수 있습니다. 성공한 사진은 목록 끝에 추가되며, 임시 적용 전에 각 사진의 대체 텍스트를 입력해 주세요.</p>
+      <p>사진을 선택하면 원본과 미리보기의 총 용량을 먼저 계산합니다. 업로드는 동시에 최대 3장씩 진행하며, 선택한 순서로 추가합니다.</p>
       <div className="content-admin-grid">
-        <Field label="초점 위치" value={position} onChange={setPosition} hint="예: 50% 50% · 선택한 사진 모두에 적용되며 나중에 사진별로 바꿀 수 있습니다." />
+        <Field label="초점 위치" value={position} onChange={setPosition} hint="예: 50% 50% · 나중에 사진별로 바꿀 수 있습니다." />
       </div>
       <label className={`content-admin-file ${ready && !disabled ? "" : "is-disabled"}`}>
-        <span>{busy ? "업로드 중…" : "사진 선택 및 추가"}</span>
+        <span>{busy ? "사진 처리 중…" : "사진 선택"}</span>
         <input type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={busy || disabled || !ready} onChange={async (event) => {
-          const files = [...(event.target.files || [])];
-          if (files.length > 0) await onUpload(files, position.trim());
-          event.target.value = "";
+          const input = event.currentTarget;
+          const files = [...(input.files || [])];
+          input.value = "";
+          if (files.length > 0) await onSelect(files);
         }} />
       </label>
+      {selection && (
+        <div className="content-admin-upload-plan" role="status">
+          <strong>{selection.prepared.length}장 선택 · 저장에 필요한 용량 {formatStorage(selection.totalBytes)}</strong>
+          <span>원본 {formatStorage(selection.originalBytes)} + 480·960px 미리보기 {formatStorage(selection.totalBytes - selection.originalBytes)}</span>
+          <span>남은 공간 {selection.usage.localReview ? "로컬 검토" : formatStorage(selection.usage.remainingBytes)}</span>
+          <small>정확한 합계 {selection.totalBytes.toLocaleString("ko-KR")}바이트 · 실제 전송 직전에 서버에서 남은 용량을 다시 확인합니다. 업로드 후 각 사진의 대체 텍스트를 입력해 주세요.</small>
+          <div className="content-admin-media-actions">
+            <button type="button" disabled={busy || disabled || !ready} onClick={() => onUpload(selection, position.trim())}>{selection.prepared.length}장 업로드</button>
+            <button type="button" disabled={busy || disabled} onClick={onClear}>선택 취소</button>
+          </div>
+        </div>
+      )}
       {progress && <UploadProgress progress={progress} />}
     </section>
   );
 }
 
 function formatStorage(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  return `${Math.ceil(bytes / (1024 * 1024))} MB`;
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(2)} MiB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(2)} KiB`;
+  return `${bytes} B`;
 }
 
 function AdminReauthentication() {
@@ -339,10 +354,16 @@ function MediaDeleteDialog({ media, dependentRevisions, error, busy, onCancel, o
     }}>
       <section ref={dialogRef} className="admin-dialog is-compact" role="dialog" aria-modal="true" aria-labelledby="media-delete-title" tabIndex="-1">
         <button type="button" className="admin-dialog-close" onClick={onCancel} disabled={busy} aria-label="미디어 삭제 확인 닫기"><X aria-hidden="true" /></button>
-        <h2 id="media-delete-title">{media.deletionPending ? "저장소 삭제를 다시 시도할까요?" : "저장된 미디어를 삭제할까요?"}</h2>
+        <h2 id="media-delete-title">{media.items ? `선택한 미디어 ${media.items.length}개를 삭제할까요?` : media.deletionPending ? "저장소 삭제를 다시 시도할까요?" : "저장된 미디어를 삭제할까요?"}</h2>
         {media.deletionPending
           ? <p>초안과 과거 리비전에서는 분리했지만 저장소 파일 정리가 끝나지 않았습니다. 다시 시도하면 파일을 정리하고 저장 공간을 회수합니다.</p>
-          : <p>선택한 {media.kind === "audio" ? "음악" : "사진"} 파일({formatStorage(media.totalBytes || 0)})을 저장소에서 영구 삭제하고 저장 공간을 회수합니다.</p>}
+          : <p>선택한 {media.items ? `미디어 ${media.items.length}개` : media.kind === "audio" ? "음악 파일" : "사진 파일"}({formatStorage(media.totalBytes || 0)})을 저장소에서 영구 삭제하고 저장 공간을 회수합니다.</p>}
+        {media.items && <ul className="admin-dialog-sections content-admin-delete-selection">
+          {media.items.map((item) => <li key={item.mediaId}>
+            {item.previewUrl && <img src={item.previewUrl} alt="" loading="lazy" />}
+            <span>{item.kind === "audio" ? "음악" : "사진"} · {item.mediaId.slice(0, 8)} · {formatStorage(item.totalBytes)}</span>
+          </li>)}
+        </ul>}
         {media.references?.draft && <p>현재 초안이 이 미디어를 사용 중입니다. 삭제하면 초안의 해당 항목이 자동으로 제거됩니다.</p>}
         {cascade && (
           <>
@@ -382,6 +403,8 @@ export function ContentAdmin() {
   const [uploadingSlot, setUploadingSlot] = useState("");
   const [uploadProgress, setUploadProgress] = useState(null);
   const [mediaUsage, setMediaUsage] = useState(null);
+  const [pendingPhotoSelection, setPendingPhotoSelection] = useState(null);
+  const [selectedMediaIds, setSelectedMediaIds] = useState([]);
   const [mediaList, setMediaList] = useState([]);
   const [mediaDeleteTarget, setMediaDeleteTarget] = useState(null);
   const [deletingMediaId, setDeletingMediaId] = useState("");
@@ -639,12 +662,65 @@ export function ContentAdmin() {
     try {
       const payload = await adapter.getMediaList();
       setMediaList(Array.isArray(payload?.media) ? payload.media : []);
+      setSelectedMediaIds((ids) => ids.filter((id) => payload.media?.some((item) => item.mediaId === id && !item.references?.published)));
       if (payload?.usage) setMediaUsage(payload.usage);
       return payload;
-    } catch {
+    } catch (error) {
+      showAdminError(error, "미디어 목록을 새로고침하지 못했습니다.");
       return null;
     }
-  }, [adapter]);
+  }, [adapter, showAdminError]);
+
+  const selectableMedia = mediaList.filter((item) => !item.references?.published);
+  const selectedMedia = selectableMedia.filter((item) => selectedMediaIds.includes(item.mediaId));
+
+  const requestDeleteSelectedMedia = async () => {
+    if (!selectedMedia.length) return;
+    if (dirty && selectedMedia.some((item) => JSON.stringify(editingDocument).toLowerCase().includes(`invitation/${item.mediaId}/`))) {
+      setStatus({ tone: "error", message: "미적용 변경사항이 선택한 미디어를 참조합니다. 임시 적용하거나 새로고침한 뒤 삭제해 주세요." });
+      return;
+    }
+    const fresh = await refreshMediaList();
+    if (!fresh) return;
+    const items = fresh.media.filter((item) => selectedMediaIds.includes(item.mediaId) && !item.references?.published);
+    if (!items.length) { setSelectedMediaIds([]); return; }
+    const dependentRevisions = [...new Map(items.flatMap((item) => item.references?.archivedRevisions || []).map((revision) => [revision.id, revision])).values()];
+    setMediaDeleteTarget({ media: { mediaId: "batch", items, kind: "photo",
+      totalBytes: items.reduce((total, item) => total + item.totalBytes, 0),
+      references: { draft: items.some((item) => item.references?.draft) },
+    }, dependentRevisions, error: "" });
+  };
+
+  const confirmDeleteSelectedMedia = async (target) => {
+    setDeletingMediaId("batch");
+    let freedBytes = 0;
+    const deleted = [];
+    const failures = [];
+    let authError = null;
+    try {
+      // Serialize deletions: each one rechecks the latest draft/public pointers.
+      for (const [index, item] of target.media.items.entries()) {
+        try {
+          const result = await adapter.deleteMedia(item.mediaId, {
+            deleteRevisions: target.dependentRevisions.length > 0,
+            expectedRevisionIds: target.dependentRevisions.map((revision) => revision.id),
+          });
+          deleted.push(item.mediaId);
+          freedBytes += result.freedBytes || 0;
+        } catch (error) {
+          failures.push(`${item.mediaId.slice(0, 8)}: ${formatAdminError(error, "삭제 실패")}`);
+          if (isAdminAuthRequiredError(error)) { authError = error; break; }
+        }
+        setMediaDeleteTarget((current) => current && { ...current, error: `${index + 1}/${target.media.items.length}개 처리 중…` });
+      }
+      setMediaDeleteTarget(null);
+      setSelectedMediaIds((ids) => ids.filter((id) => !deleted.includes(id)));
+      if (authError) { showAdminError(authError, "관리자 인증이 필요합니다."); return; }
+      await load({ preserveEditingDocument: dirty });
+      setStatus({ tone: failures.length ? "error" : "success",
+        message: `${deleted.length}개를 삭제하고 ${formatStorage(freedBytes)}를 회수했습니다.${failures.length ? ` ${failures.length}개는 삭제하지 못했습니다. ${failures.join(" · ")}` : ""}` });
+    } finally { setDeletingMediaId(""); }
+  };
 
   const requestDeleteMedia = async (item) => {
     if (dirty && JSON.stringify(editingDocument).toLowerCase().includes(`invitation/${item.mediaId}/`)) {
@@ -652,16 +728,24 @@ export function ContentAdmin() {
       return;
     }
     const fresh = await refreshMediaList();
-    const current = fresh?.media?.find((entry) => entry.mediaId === item.mediaId) || item;
+    if (!fresh) return;
+    const current = fresh.media?.find((entry) => entry.mediaId === item.mediaId);
+    if (!current) return;
     setMediaDeleteTarget({ media: current, dependentRevisions: current.references?.archivedRevisions || [], error: "" });
   };
 
   const confirmDeleteMedia = async () => {
     const target = mediaDeleteTarget;
     if (!target) return;
+    const targets = target.media.items || [target.media];
+    if (dirty && targets.some((item) => JSON.stringify(documentRef.current).toLowerCase().includes(`invitation/${item.mediaId}/`))) {
+      setMediaDeleteTarget((current) => current && { ...current, error: "미적용 변경사항이 선택한 미디어를 참조합니다. 먼저 임시 적용하거나 변경사항을 취소해 주세요." });
+      return;
+    }
+    if (target.media.items) return confirmDeleteSelectedMedia(target);
     setDeletingMediaId(target.media.mediaId);
     try {
-      const result = await adapter.deleteMedia(target.media.mediaId, { deleteRevisions: target.dependentRevisions.length > 0 });
+      const result = await adapter.deleteMedia(target.media.mediaId, { deleteRevisions: target.dependentRevisions.length > 0, expectedRevisionIds: target.dependentRevisions.map((revision) => revision.id) });
       setMediaDeleteTarget(null);
       const listPayload = await refreshMediaList();
       if (!listPayload?.usage) setMediaUsage(result.usage || await adapter.getMediaUsage());
@@ -725,60 +809,48 @@ export function ContentAdmin() {
     }
   };
 
-  const uploadGalleryPhotos = async (files, position) => {
+  const prepareGalleryPhotos = async (files) => {
+    setPendingPhotoSelection(null);
     setUploadingSlot("pastel-gallery-new");
-    let succeeded = 0;
-    let skipped = 0;
-    let remainingBytes = mediaUsage?.localReview ? null : mediaUsage?.remainingBytes ?? null;
-    const failures = [];
     try {
-      for (const [index, file] of files.entries()) {
-        if (remainingBytes !== null && file.size > remainingBytes) {
-          skipped = files.length - index;
-          break;
-        }
-        setUploadProgress({ slot: "pastel-gallery-new", index: index + 1, count: files.length, fileName: file.name, phase: "optimize", loaded: 0, total: 0 });
-        try {
-          const result = await adapter.uploadPhoto({
-            slot: "pastel-gallery-new",
-            file,
-            alt: "",
-            position,
-            onProgress: (event) => setUploadProgress((state) => state ? { ...state, ...event } : state),
-          });
-          const next = cloneContentDocument(documentRef.current);
-          next.photos.pastel.gallery.push(result.photo);
-          commitEdit(next, ".pastel-gallery-section");
-          const usage = result.usage || await adapter.getMediaUsage();
-          setMediaUsage(usage);
-          remainingBytes = usage?.localReview ? null : usage?.remainingBytes ?? remainingBytes;
-          succeeded += 1;
-        } catch (error) {
-          if (isAdminAuthRequiredError(error)) {
-            showAdminError(error, "사진을 처리하지 못했습니다.");
-            return;
-          }
-          failures.push(`${file.name}: ${formatAdminError(error, "업로드하지 못했습니다.")}`);
-          if (error?.status === 507 || error?.code === "MEDIA_STORAGE_LIMIT") {
-            skipped = files.length - index - 1;
-            break;
-          }
-        }
+      const selection = await preparePhotoSelection(adapter, files,
+        (event) => setUploadProgress({ slot: "pastel-gallery-new", ...event }));
+      setPendingPhotoSelection(selection);
+      setMediaUsage(selection.usage);
+      setStatus({ tone: "neutral", message: `${files.length}장 · ${formatStorage(selection.totalBytes)}를 저장할 수 있습니다. 용량을 확인한 뒤 업로드를 눌러 주세요.` });
+    } catch (error) {
+      if (Number.isFinite(error.requiredBytes)) error.message += ` 필요 ${formatStorage(error.requiredBytes)} / 남은 ${formatStorage(error.remainingBytes)}.`;
+      showAdminError(error, "사진 용량을 확인하지 못했습니다.");
+    } finally { setUploadingSlot(""); setUploadProgress(null); }
+  };
+
+  const uploadGalleryPhotos = async (selection, position) => {
+    setUploadingSlot("pastel-gallery-new");
+    try {
+      const results = await uploadPhotoSelection(adapter, selection, { position,
+        onProgress: (event) => setUploadProgress({ slot: "pastel-gallery-new", ...event }),
+        onAuthError: (error) => showAdminError(error, "관리자 인증이 필요합니다."),
+      });
+      const successes = results.filter((result) => result.status === "fulfilled");
+      if (successes.length) {
+        const next = cloneContentDocument(documentRef.current);
+        next.photos.pastel.gallery.push(...successes.map((result) => result.value.photo));
+        commitEdit(next, ".pastel-gallery-section");
       }
+      setPendingPhotoSelection(null);
+      const authError = results.find((result) => isAdminAuthRequiredError(result.reason));
+      if (authError) { showAdminError(authError.reason, "관리자 인증이 필요합니다."); return; }
+      const failures = results.flatMap((result, index) => result.status === "fulfilled" ? []
+        : [`${selection.prepared[index].file.name}: ${result.status === "skipped" ? "전송하지 않음" : formatAdminError(result.reason, "업로드 실패")}`]);
+      setStatus({ tone: failures.length ? "error" : "success", message: failures.length
+        ? `${successes.length}장은 추가했습니다. ${failures.length}장은 완료하지 못했습니다. ${failures.join(" · ")} 중단된 업로드의 예약 용량은 저장된 미디어에서 1시간 후 정리할 수 있습니다.`
+        : `${successes.length}장의 사진을 선택 순서대로 추가했습니다. 각 사진의 대체 텍스트와 초점을 확인해 주세요.` });
+    } catch (error) {
+      showAdminError(error, "사진 업로드를 시작하지 못했습니다.");
     } finally {
+      await refreshMediaList();
       setUploadingSlot("");
       setUploadProgress(null);
-    }
-    await refreshMediaList();
-    const skippedNote = skipped > 0 ? ` 저장 공간이 부족해 나머지 ${skipped}장은 올리지 않았습니다.` : "";
-    const failureNote = failures.length > 0 ? ` ${failures.join(" · ")}` : "";
-    if (failures.length === 0 && skipped === 0) {
-      setStatus({ tone: "success", message: `${succeeded}장의 사진을 초안에 넣었습니다. 각 사진의 대체 텍스트와 초점을 확인해 주세요.` });
-    } else if (succeeded > 0) {
-      const failureCount = failures.length > 0 ? ` ${failures.length}장은 실패했습니다.` : "";
-      setStatus({ tone: "error", message: `${succeeded}장은 추가했습니다.${failureCount}${skippedNote}${failureNote}` });
-    } else {
-      setStatus({ tone: "error", message: `사진을 업로드하지 못했습니다.${skippedNote}${failureNote}` });
     }
   };
 
@@ -1003,6 +1075,17 @@ export function ContentAdmin() {
           {!localReview && (
             <CollapsibleSection title="저장된 미디어" busy={busy}>
               <p className="content-admin-media-note">문서에서 제거한 사진·음악 파일도 저장 공간을 계속 사용합니다. 여기서 삭제하면 파일과 용량이 영구 회수됩니다.</p>
+              {mediaList.length > 0 && <div className="content-admin-media-actions">
+                <label className="content-admin-media-check">
+                  <input type="checkbox" aria-label="삭제 가능한 미디어 전체 선택"
+                    checked={selectableMedia.length > 0 && selectedMedia.length === selectableMedia.length}
+                    disabled={busy || Boolean(deletingMediaId) || Boolean(uploadingSlot) || selectableMedia.length === 0}
+                    onChange={(event) => setSelectedMediaIds(event.target.checked ? selectableMedia.map((item) => item.mediaId) : [])} />
+                  <span>전체 선택</span>
+                </label>
+                <button type="button" className="is-destructive" disabled={!selectedMedia.length || busy || Boolean(deletingMediaId) || Boolean(uploadingSlot)}
+                  onClick={() => void requestDeleteSelectedMedia()}>선택한 {selectedMedia.length}개 삭제</button>
+              </div>}
               {mediaList.length === 0 ? (
                 <p className="content-admin-media-empty">저장된 미디어가 없습니다.</p>
               ) : (
@@ -1019,6 +1102,12 @@ export function ContentAdmin() {
                     const mediaLabel = item.kind === "audio" ? "배경 음악" : item.slot === "pastel-hero" ? "대표 사진" : "갤러리 사진";
                     return (
                       <li key={item.mediaId} className="content-admin-media-item">
+                        <label className="content-admin-media-check">
+                          <input type="checkbox" aria-label={`${mediaLabel} 선택 (${item.mediaId.slice(0, 8)})`}
+                            checked={selectedMediaIds.includes(item.mediaId) && !refs.published}
+                            disabled={Boolean(refs.published) || busy || Boolean(deletingMediaId) || Boolean(uploadingSlot)}
+                            onChange={(event) => setSelectedMediaIds((ids) => event.target.checked ? [...new Set([...ids, item.mediaId])] : ids.filter((id) => id !== item.mediaId))} />
+                        </label>
                         {item.previewUrl
                           ? <img src={item.previewUrl} alt="" className="content-admin-media-thumb" loading="lazy" />
                           : <span className="content-admin-media-thumb is-audio" aria-hidden="true"><MusicNotes aria-hidden="true" /></span>}
@@ -1067,7 +1156,7 @@ export function ContentAdmin() {
                   </div>}
                 />
               ))}
-              <GalleryPhotoUploader onUpload={uploadGalleryPhotos} busy={uploadingSlot === "pastel-gallery-new"} disabled={Boolean(uploadingSlot)} progress={uploadProgress?.slot === "pastel-gallery-new" ? uploadProgress : null} />
+              <GalleryPhotoUploader onSelect={prepareGalleryPhotos} selection={pendingPhotoSelection} onClear={() => setPendingPhotoSelection(null)} onUpload={uploadGalleryPhotos} busy={uploadingSlot === "pastel-gallery-new"} disabled={Boolean(uploadingSlot)} progress={uploadProgress?.slot === "pastel-gallery-new" ? uploadProgress : null} />
             </div>
           </CollapsibleSection>
 

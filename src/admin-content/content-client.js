@@ -1,3 +1,4 @@
+import { assertMediaCapacity } from "./media-batch.js";
 import {
   applyContentDocument,
   cloneContentDocument,
@@ -146,10 +147,21 @@ function defaultEventTarget() {
   return typeof window === "undefined" ? null : window;
 }
 
+function isAccessLoginUrl(value) {
+  return typeof value === "string" && (/^https:\/\/[^/]+\.cloudflareaccess\.com\//i.test(value) || /\/cdn-cgi\/access\/login(?:[/?#]|$)/i.test(value));
+}
+
 function createRequestError(response, payload) {
-  const error = new Error(payload?.message || "콘텐츠 요청을 처리하지 못했습니다.");
+  const fallback = response.status === 401 ? "관리자 로그인이 만료되었습니다. 다시 로그인해 주세요."
+    : response.status === 413 ? "요청 크기 제한을 초과했습니다."
+      : response.status === 429 ? "요청이 많습니다. 잠시 후 다시 시도해 주세요."
+        : response.status >= 500 ? `서버가 업로드 요청을 완료하지 못했습니다(HTTP ${response.status}).`
+          : `콘텐츠 요청에 실패했습니다(HTTP ${response.status}).`;
+  const error = new Error(payload?.message || fallback);
   error.status = response.status;
-  error.code = typeof payload?.code === "string" ? payload.code : null;
+  const rayId = response.headers?.get?.("cf-ray");
+  if (/^[a-z0-9-]{1,80}$/i.test(rayId || "")) error.rayId = rayId;
+  error.code = typeof payload?.code === "string" ? payload.code : response.status === 401 ? "ADMIN_AUTH_REQUIRED" : null;
   error.fieldErrors = payload?.fieldErrors && typeof payload.fieldErrors === "object" ? payload.fieldErrors : null;
   error.dependentRevisions = Array.isArray(payload?.dependentRevisions) ? payload.dependentRevisions : null;
   error.requestId = typeof payload?.requestId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.requestId)
@@ -167,15 +179,18 @@ async function requestJson(fetchImpl, path, options = {}) {
       ...options.headers,
     },
   });
+  if (isAccessLoginUrl(response.url)) throw createRequestError({ status: 401 }, {});
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw createRequestError(response, payload);
   return payload;
 }
 
-function postBodyXhr(XHR, path, body, contentType, onProgress) {
+function postBodyXhr(XHR, path, body, contentType, onProgress, method = "POST") {
   return new Promise((resolve, reject) => {
     const xhr = new XHR();
-    xhr.open("POST", path, true);
+    xhr.open(method, path, true);
+    xhr.timeout = 180_000;
+    xhr.ontimeout = () => reject(Object.assign(new Error("업로드 응답 시간이 초과되었습니다."), { status: 408 }));
     xhr.setRequestHeader("content-type", contentType);
     if (xhr.upload) {
       xhr.upload.onprogress = (event) => {
@@ -185,46 +200,37 @@ function postBodyXhr(XHR, path, body, contentType, onProgress) {
       };
     }
     xhr.onload = () => {
+      if (isAccessLoginUrl(xhr.responseURL)) { reject(createRequestError({ status: 401 }, {})); return; }
       const payload = (() => { try { return JSON.parse(xhr.responseText || "{}"); } catch { return {}; } })();
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(payload);
         return;
       }
-      reject(createRequestError({ status: xhr.status }, payload));
+      const error = createRequestError({ status: xhr.status }, payload);
+      const rayId = xhr.getResponseHeader?.("cf-ray");
+      if (/^[a-z0-9-]{1,80}$/i.test(rayId || "")) error.rayId = rayId;
+      reject(error);
     };
-    xhr.onerror = () => reject(new Error("네트워크 오류로 업로드하지 못했습니다."));
+    xhr.onerror = () => reject(Object.assign(new Error("네트워크 오류로 업로드하지 못했습니다."), { status: 0 }));
     xhr.onabort = () => reject(new Error("업로드가 중단되었습니다."));
     onProgress?.({ phase: "upload", loaded: 0, total: 0 });
     xhr.send(body);
   });
 }
 
-async function postBody({ path, body, contentType, fetchImpl, xhrImpl, onProgress }) {
-  if (typeof xhrImpl === "function") return postBodyXhr(xhrImpl, path, body, contentType, onProgress);
+async function postBody({ path, body, contentType, fetchImpl, xhrImpl, onProgress, method = "POST" }) {
+  if (typeof xhrImpl === "function") return postBodyXhr(xhrImpl, path, body, contentType, onProgress, method);
   onProgress?.({ phase: "upload", loaded: 0, total: 0 });
   const response = await fetchImpl(path, {
-    method: "POST",
+    method,
     credentials: "same-origin",
     headers: { "content-type": contentType },
     body,
   });
+  if (isAccessLoginUrl(response.url)) throw createRequestError({ status: 401 }, {});
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw createRequestError(response, payload);
   return payload;
-}
-
-function encodeMediaUpload({ slot, alt, position, file, small, large }) {
-  const header = new TextEncoder().encode(JSON.stringify({
-    slot,
-    alt,
-    position,
-    originalType: file.type,
-    sizes: { original: file.size, small: small.size, large: large.size },
-  }));
-  const prefix = new Uint8Array(2);
-  prefix[0] = header.byteLength >> 8;
-  prefix[1] = header.byteLength & 0xff;
-  return new Blob([prefix, header, small, large, file]);
 }
 
 async function imageBitmap(file) {
@@ -244,6 +250,7 @@ async function resizeWebp(bitmap, maxWidth) {
   const blob = await new Promise((resolve, reject) => {
     canvas.toBlob((value) => value ? resolve(value) : reject(new Error("WebP 이미지를 만들지 못했습니다.")), "image/webp", 0.86);
   });
+  if (blob.type !== "image/webp") throw new Error("이 브라우저에서 WebP 사진 변환을 지원하지 않습니다.");
   return new File([blob], `${maxWidth}.webp`, { type: "image/webp" });
 }
 
@@ -330,7 +337,7 @@ async function optimizedFiles(file) {
   if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
     throw new Error("JPG, PNG 또는 WebP 이미지를 선택해 주세요.");
   }
-  if (file.size > MAX_IMAGE_FILE_BYTES) throw new Error("원본 이미지는 90MB 이하만 업로드할 수 있습니다.");
+  if (file.size < 1 || file.size > MAX_IMAGE_FILE_BYTES) throw new Error("원본 이미지는 90MB 이하만 업로드할 수 있습니다.");
   const bitmap = await imageBitmap(file);
   try {
     const small = await resizeWebp(bitmap, 480);
@@ -345,6 +352,22 @@ async function optimizedFiles(file) {
  * Explicitly development-only adapter. Its localStorage snapshot is a review
  * draft, never a production source of truth.
  */
+async function preparePhotoFile(file) {
+  const { small, large } = await optimizedFiles(file);
+  if (small.size > 2 * 1024 * 1024 || large.size > 4 * 1024 * 1024) throw new Error("생성된 미리보기 이미지가 너무 큽니다.");
+  return { file, small, large, totalBytes: file.size + small.size + large.size };
+}
+
+async function retryIdempotentUpload(operation) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await operation(); }
+    catch (error) {
+      if (attempt >= 2 || ![0, 408, 429, 500, 502, 503, 504].includes(error?.status)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 300 * (2 ** attempt)));
+    }
+  }
+}
+
 export function createLocalReviewContentAdapter({
   staticContent,
   storage = defaultStorage(),
@@ -420,6 +443,9 @@ export function createLocalReviewContentAdapter({
 
   return {
     mode: "local-review",
+    preparePhoto: preparePhotoFile,
+    async beginPhotoUploads(prepared) { return prepared.map(() => ({ mediaId: randomToken() })); },
+    async cancelPhotoUpload() { return { cancelled: true }; },
     async getAdminState() {
       return presentState(load());
     },
@@ -508,9 +534,9 @@ export function createLocalReviewContentAdapter({
       persist();
       return { revisionId, publishedAt };
     },
-    async uploadPhoto({ file, alt, position, onProgress }) {
+    async uploadPhoto({ file, prepared, alt, position, onProgress }) {
       onProgress?.({ phase: "optimize" });
-      const { large } = await optimizedFiles(file);
+      const { large } = prepared || await preparePhotoFile(file);
       const photo = {
         src: await blobAsDataUrl(large),
         alt,
@@ -591,10 +617,10 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl, xhrIm
     async getMediaList() {
       return requestJson(resolvedFetch, "/api/admin/media/list");
     },
-    async deleteMedia(mediaId, { deleteRevisions = false } = {}) {
+    async deleteMedia(mediaId, { deleteRevisions = false, expectedRevisionIds } = {}) {
       return requestJson(resolvedFetch, "/api/admin/media/delete", {
         method: "POST",
-        body: JSON.stringify({ mediaId, deleteRevisions }),
+        body: JSON.stringify({ mediaId, deleteRevisions, ...(expectedRevisionIds ? { expectedRevisionIds } : {}) }),
       });
     },
     async saveDraft(document) {
@@ -623,12 +649,54 @@ export function createCloudflareContentAdapter({ staticContent, fetchImpl, xhrIm
         body: JSON.stringify({ revisionId, expectedPublishedRevisionId }),
       });
     },
-    async uploadPhoto({ slot, file, alt, position, onProgress }) {
-      onProgress?.({ phase: "optimize" });
-      const { small, large } = await optimizedFiles(file);
-      const body = encodeMediaUpload({ slot, alt, position, file, small, large });
-      const payload = await postBody({ path: "/api/admin/media", body, contentType: "application/octet-stream", fetchImpl: resolvedFetch, xhrImpl: resolvedXhr, onProgress });
-      return { photo: payload.photo, usage: payload.usage };
+    preparePhoto: preparePhotoFile,
+    async beginPhotoUploads(prepared, { slot, alt = "", position = "50% 50%" }) {
+      const payload = await requestJson(resolvedFetch, "/api/admin/media/uploads", {
+        method: "POST",
+        body: JSON.stringify({ photos: prepared.map(({ file, small, large }) => ({ slot, alt, position,
+          originalType: file.type, sizes: { original: file.size, small: small.size, large: large.size },
+        })) }),
+      });
+      if (!Array.isArray(payload.uploads) || payload.uploads.length !== prepared.length
+        || payload.uploads.some((item) => !/^[0-9a-f-]{36}$/.test(item.mediaId))) {
+        throw new Error("서버의 업로드 예약 응답이 올바르지 않습니다. 저장된 미디어를 확인해 주세요.");
+      }
+      return payload.uploads;
+    },
+    async cancelPhotoUpload(mediaId) {
+      return requestJson(resolvedFetch, `/api/admin/media/uploads/${mediaId}`, { method: "DELETE" });
+    },
+    async uploadPhoto({ slot, file, prepared, sessionId, alt = "", position = "50% 50%", onProgress }) {
+      let item = prepared;
+      if (!item) {
+        onProgress?.({ phase: "optimize" });
+        assertMediaCapacity(await this.getMediaUsage(), file.size);
+        item = await preparePhotoFile(file);
+      }
+      if (!sessionId) {
+        assertMediaCapacity(await this.getMediaUsage(), item.totalBytes);
+        sessionId = (await this.beginPhotoUploads([item], { slot, alt, position }))[0].mediaId;
+      }
+      let sentBytes = 0;
+      try {
+        for (const [part, body] of [["original", item.file], ["small", item.small], ["large", item.large]]) {
+          const payload = await retryIdempotentUpload(() => postBody({
+            path: `/api/admin/media/uploads/${sessionId}/${part}`, method: "PUT", body,
+            contentType: body.type, fetchImpl: resolvedFetch, xhrImpl: resolvedXhr,
+            onProgress: (event) => onProgress?.({ ...event, loaded: sentBytes + Math.min(body.size, event.loaded || 0), total: item.totalBytes }),
+          }));
+          if (payload.stored !== true) throw new Error("사진 저장 응답을 확인하지 못했습니다.");
+          sentBytes += body.size;
+          onProgress?.({ phase: "upload", loaded: sentBytes, total: item.totalBytes });
+        }
+        const payload = await retryIdempotentUpload(() => requestJson(resolvedFetch,
+          `/api/admin/media/uploads/${sessionId}/complete`, { method: "POST", body: "{}" }));
+        if (!payload.photo?.src) throw new Error("사진 업로드 완료 응답을 확인하지 못했습니다.");
+        return { photo: payload.photo, usage: payload.usage };
+      } catch (error) {
+        await this.cancelPhotoUpload(sessionId).catch(() => {});
+        throw error;
+      }
     },
     async uploadAudio({ file, onProgress }) {
       const mimeType = validAudioFile(file);

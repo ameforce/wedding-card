@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "widths": [
+    360,
+    390,
+    430,
+    768,
+    1440
+  ],
+  "maximumParallelRequests": 3,
+  "bulkDeleted": 2,
+  "publishedProtected": true,
+  "noUploadOnSelection": true,
+  "quotaBlockedBeforeUpload": true,
+  "preservedSelectionOrder": true,
+  "authenticationFailClosed": true,
+  "pageErrors": []
+}

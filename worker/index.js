@@ -18,6 +18,7 @@ const MAX_BODY_BYTES = 8_192;
 const MAX_CONTENT_BODY_BYTES = 131_072;
 const MAX_MEDIA_BODY_BYTES = 97 * 1024 * 1024;
 const MAX_MEDIA_HEADER_BYTES = 4 * 1024;
+const LEGACY_MEDIA_BODY_BYTES = 1024 * 1024;
 const MAX_IMAGE_FILE_BYTES = 90 * 1024 * 1024;
 const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_BODY_BYTES = 26 * 1024 * 1024;
@@ -25,6 +26,7 @@ const MEDIA_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 const MEDIA_SETS_TABLE = "invitation_media_sets_v2";
 const LEGACY_MEDIA_SETS_TABLE = "invitation_media_sets";
 const MEDIA_DELETION_JOBS_TABLE = "invitation_media_deletion_jobs_v1";
+const MEDIA_UPLOADS_TABLE = "invitation_media_uploads_v1";
 const REQUIRED_COPY_LINES = 4;
 const MIN_GALLERY_PHOTOS = 1;
 const GUESTBOOK_RETENTION = "permanent";
@@ -1320,6 +1322,11 @@ async function migrateLegacyMediaSets(db) {
          requested_at TEXT NOT NULL
        )`,
     ),
+    db.prepare(`CREATE TABLE IF NOT EXISTS ${MEDIA_UPLOADS_TABLE} (
+  media_id TEXT PRIMARY KEY REFERENCES ${MEDIA_SETS_TABLE}(id) ON DELETE CASCADE,
+  metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
+  started_at TEXT
+);`),
     db.prepare(
       `INSERT OR IGNORE INTO ${MEDIA_SETS_TABLE} (id, slot, total_bytes, status, created_at, stored_at)
        SELECT id, slot, total_bytes, status, created_at, stored_at FROM ${LEGACY_MEDIA_SETS_TABLE}`,
@@ -1531,6 +1538,13 @@ async function finishAdminMediaDeletion(db, bucket, set, { removedFromDraft = 0,
     }
     await bucket.delete(mediaObjectKeys(set));
     const cleanup = await runDatabaseBatch(db, [
+      // Remove the dependent session explicitly: D1 counts cascading changes,
+      // while SQLite adapters may report only direct changes. Keep each guard
+      // deterministic on both runtimes, within the same database transaction.
+      db.prepare(`DELETE FROM ${MEDIA_UPLOADS_TABLE} WHERE media_id = ?
+        AND EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?)
+        AND NOT EXISTS (SELECT 1 FROM invitation_revisions r WHERE instr(lower(r.content_json), lower(?)) > 0)`)
+        .bind(mediaId, mediaId, `invitation/${mediaId}/`),
       db.prepare(
         `DELETE FROM ${MEDIA_SETS_TABLE} WHERE id = ?
          AND EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?)
@@ -1544,7 +1558,7 @@ async function finishAdminMediaDeletion(db, bucket, set, { removedFromDraft = 0,
     ]);
     const changes = (Array.isArray(cleanup) ? cleanup : cleanup?.results || [])
       .map((result) => result?.meta?.changes ?? 0);
-    if (changes.length !== 2 || ![0, 1].includes(changes[0]) || changes[1] !== 1) {
+    if (changes.length !== 3 || ![0, 1].includes(changes[0]) || ![0, 1].includes(changes[1]) || changes[2] !== 1) {
       usage = await getMediaUsageFromDatabase(db);
       return mediaDeletionPendingError(mediaId, usage);
     }
@@ -1598,7 +1612,12 @@ async function deleteAdminMedia(request, env) {
     return apiError(409, "MEDIA_IN_USE", "현재 공개본이 이 미디어를 사용 중입니다. 먼저 다른 콘텐츠로 교체해 주세요.");
   }
   const archivedRefs = referencing.filter((revision) => revision.id !== state?.draft_revision_id);
-  if (archivedRefs.length && payload?.deleteRevisions !== true) {
+  const approvedRevisions = payload?.expectedRevisionIds;
+  if (approvedRevisions !== undefined && (!Array.isArray(approvedRevisions) || approvedRevisions.some((id) => typeof id !== "string"))) {
+    return apiError(400, "INVALID_MEDIA", "삭제 확인 정보가 올바르지 않습니다.");
+  }
+  if (archivedRefs.length && (payload?.deleteRevisions !== true
+    || (approvedRevisions && archivedRefs.some((revision) => !approvedRevisions.includes(revision.id))))) {
     return apiError(409, "MEDIA_REFERENCED", "과거 리비전이 이 미디어를 참조하고 있습니다. 함께 삭제할지 확인해 주세요.", {
       dependentRevisions: archivedRefs.map(describeRevisionRef),
     });
@@ -1720,6 +1739,7 @@ function isExpectedMediaUploadError(error) {
     INVALID_MEDIA: 400,
     MEDIA_STORAGE_LIMIT: 507,
     MEDIA_STORAGE_LOST: 409,
+    UPLOAD_CLIENT_UPDATE_REQUIRED: 409,
   };
   return Number.isInteger(error?.status) && statuses[error.code] === error.status;
 }
@@ -1746,6 +1766,7 @@ async function uploadInvitationMedia(request, env) {
     phase = "request_size";
     const length = Number(request.headers.get("content-length") || 0);
     if (length > MAX_MEDIA_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "이미지 업로드 크기를 줄여 주세요.");
+    if (length > LEGACY_MEDIA_BODY_BYTES) return apiError(409, "UPLOAD_CLIENT_UPDATE_REQUIRED", "사진 업로드 방식이 변경되었습니다. 페이지를 새로고침한 뒤 다시 업로드해 주세요.");
     phase = "media_bucket";
     const bucket = requireMediaBucket(env);
     if (typeof bucket.delete !== "function") return apiError(503, "MEDIA_UNAVAILABLE", "미디어 저장소가 아직 연결되지 않았습니다.");
@@ -1754,8 +1775,8 @@ async function uploadInvitationMedia(request, env) {
       return apiError(415, "UNSUPPORTED_MEDIA_BODY", "업로드 형식이 올바르지 않습니다. 페이지를 새로고침해 주세요.");
     }
     phase = "body_header";
-    const body = createRequestBodyReader(request, MAX_MEDIA_BODY_BYTES,
-      { status: 413, code: "MEDIA_TOO_LARGE", message: "이미지 업로드 크기를 줄여 주세요." });
+    const body = createRequestBodyReader(request, LEGACY_MEDIA_BODY_BYTES,
+      { status: 409, code: "UPLOAD_CLIENT_UPDATE_REQUIRED", message: "페이지를 새로고침한 뒤 새로운 사진 업로드를 사용해 주세요." });
     const headerLengthBytes = await body.readExact(2);
     const headerLength = (headerLengthBytes[0] << 8) | headerLengthBytes[1];
     if (headerLength < 2 || headerLength > MAX_MEDIA_HEADER_BYTES) {
@@ -1787,6 +1808,10 @@ async function uploadInvitationMedia(request, env) {
     if (!["image/jpeg", "image/png", "image/webp"].includes(originalType) || !validSizes) {
       return apiError(400, "INVALID_MEDIA", "원본과 480·960px WebP 이미지를 확인해 주세요.");
     }
+    // Compatibility for already-open old clients is strictly bounded to 1MiB.
+    if (originalSize + smallSize + largeSize + headerLength + 2 > LEGACY_MEDIA_BODY_BYTES) {
+      return apiError(409, "UPLOAD_CLIENT_UPDATE_REQUIRED", "사진 업로드 방식이 변경되었습니다. 페이지를 새로고침한 뒤 다시 업로드해 주세요.");
+    }
     phase = "body_variants";
     const small = await body.readExact(smallSize);
     const large = await body.readExact(largeSize);
@@ -1816,9 +1841,10 @@ async function uploadInvitationMedia(request, env) {
       phase = "quota_commit";
       await commitMediaStorage(db, mediaId);
     } catch (error) {
+      const physicalDeletion = Promise.resolve().then(() => bucket.delete(keys));
       const cleanupResults = await Promise.allSettled([
-        Promise.resolve().then(() => bucket.delete(keys)),
-        Promise.resolve().then(() => releaseMediaStorage(db, mediaId)),
+        physicalDeletion,
+        physicalDeletion.then(() => releaseMediaStorage(db, mediaId), () => undefined),
       ]);
       let cleanupFailed = false;
       for (const [index, result] of cleanupResults.entries()) {
@@ -2164,8 +2190,180 @@ async function getInvitationMedia(request, env, url) {
   });
 }
 
+// Pure metadata helpers. Object payloads must remain native HTTP streams.
+function normalizePhotoUploadMetadata(value, maxOriginalBytes, validCropPosition) {
+  const slot = String(value?.slot || "").trim().toLowerCase();
+  const alt = String(value?.alt || "").trim();
+  const position = String(value?.position || "50% 50%").trim();
+  const originalType = String(value?.originalType || "");
+  const sizes = { original: value?.sizes?.original, small: value?.sizes?.small, large: value?.sizes?.large };
+  if (slot.length > 40 || !/^(?:pastel-hero|pastel-gallery-(?:new|\d+))$/.test(slot) || alt.length > 300 || !validCropPosition(position)
+    || !["image/jpeg", "image/png", "image/webp"].includes(originalType)
+    || !Object.values(sizes).every((size) => Number.isSafeInteger(size) && size > 0)
+    || sizes.original > maxOriginalBytes || sizes.small > 2 * 1024 * 1024 || sizes.large > 4 * 1024 * 1024) {
+    throw { status: 400, code: "INVALID_MEDIA_METADATA", message: "사진 형식, 크기 또는 초점 위치를 확인해 주세요." };
+  }
+  return { slot, alt, position, originalType, sizes };
+}
+
+function photoUploadParts(mediaId, metadata) {
+  const extension = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" }[metadata.originalType];
+  const base = `invitation/${mediaId}/${metadata.slot}`;
+  return [
+    { part: "original", key: `${base}/original.${extension}`, contentType: metadata.originalType, size: metadata.sizes.original },
+    { part: "small", key: `${base}/480.webp`, contentType: "image/webp", size: metadata.sizes.small },
+    { part: "large", key: `${base}/960.webp`, contentType: "image/webp", size: metadata.sizes.large },
+  ];
+}
+
+function uploadedPhotoPayload(mediaId, metadata) {
+  const base = `${MEDIA_API_PREFIX}/invitation/${mediaId}/${metadata.slot}`;
+  return { mediaId, photo: {
+    src: `${base}/480.webp`, srcSet: `${base}/480.webp 480w, ${base}/960.webp 960w`,
+    sizes: "(min-width: 768px) 430px, 100vw", alt: metadata.alt, position: metadata.position,
+  } };
+}
+
+async function beginPhotoUploads(request, env) {
+  requireSameOrigin(request);
+  await requireAdminEmail(request, env);
+  const db = requireContentDatabase(env);
+  requireMediaBucket(env);
+  const payload = await readJson(request, MAX_CONTENT_BODY_BYTES);
+  if (!Array.isArray(payload?.photos) || !payload.photos.length) {
+    return apiError(400, "INVALID_MEDIA_METADATA", "업로드할 사진을 선택해 주세요.");
+  }
+  const entries = payload.photos.map((value) => {
+    const metadata = normalizePhotoUploadMetadata(value, MAX_IMAGE_FILE_BYTES, validCropPosition);
+    return { mediaId: crypto.randomUUID(), ...metadata, totalBytes: Object.values(metadata.sizes).reduce((sum, size) => sum + size, 0) };
+  });
+  const requiredBytes = entries.reduce((sum, item) => sum + item.totalBytes, 0);
+  await migrateLegacyMediaSets(db);
+  const serialized = JSON.stringify(entries);
+  // Reserve the whole selection or none, atomically across administrators.
+  const results = await runDatabaseBatch(db, [
+    db.prepare(`WITH capacity AS MATERIALIZED (
+      SELECT COALESCE(SUM(total_bytes), 0) AS used FROM ${MEDIA_SETS_TABLE} WHERE status IN ('reserved', 'stored')
+    ) INSERT INTO ${MEDIA_SETS_TABLE} (id, slot, total_bytes, status, created_at, stored_at)
+      SELECT json_extract(value, '$.mediaId'), json_extract(value, '$.slot'), json_extract(value, '$.totalBytes'), 'reserved', ?, NULL
+      FROM json_each(?), capacity WHERE capacity.used + ? <= ?`)
+      .bind(new Date().toISOString(), serialized, requiredBytes, MEDIA_STORAGE_LIMIT_BYTES),
+    db.prepare(`INSERT INTO ${MEDIA_UPLOADS_TABLE} (media_id, metadata_json, started_at)
+      SELECT json_extract(value, '$.mediaId'), value, NULL FROM json_each(?)
+      WHERE EXISTS (SELECT 1 FROM ${MEDIA_SETS_TABLE} WHERE id = json_extract(value, '$.mediaId'))`).bind(serialized),
+  ]);
+  const changes = (Array.isArray(results) ? results : results?.results || []).map((result) => result?.meta?.changes || 0);
+  if (changes[0] !== entries.length || changes[1] !== entries.length) {
+    return apiError(507, "MEDIA_STORAGE_LIMIT", "선택한 사진 전체를 저장할 공간이 부족합니다. 아무 사진도 업로드하지 않았습니다.", {
+      requiredBytes, usage: await getMediaUsageFromDatabase(db),
+    });
+  }
+  return json({ uploads: entries.map((entry) => ({ mediaId: entry.mediaId })), usage: await getMediaUsageFromDatabase(db) }, 201);
+}
+
+async function photoUploadSession(db, mediaId) {
+  const row = await db.prepare(`SELECT u.metadata_json, u.started_at, s.status FROM ${MEDIA_UPLOADS_TABLE} u
+    JOIN ${MEDIA_SETS_TABLE} s ON s.id = u.media_id WHERE u.media_id = ?`).bind(mediaId).first();
+  if (!row) throw { status: 404, code: "MEDIA_UPLOAD_NOT_FOUND", message: "업로드 예약을 찾을 수 없습니다. 사진을 다시 선택해 주세요." };
+  return { ...row, metadata: JSON.parse(row.metadata_json) };
+}
+
+async function touchPhotoUpload(db, mediaId) {
+  const now = new Date().toISOString();
+  const results = await runDatabaseBatch(db, [
+    db.prepare(`UPDATE ${MEDIA_SETS_TABLE} SET created_at = ? WHERE id = ? AND status = 'reserved'
+      AND NOT EXISTS (SELECT 1 FROM ${MEDIA_DELETION_JOBS_TABLE} WHERE media_id = ?)`)
+      .bind(now, mediaId, mediaId),
+    db.prepare(`UPDATE ${MEDIA_UPLOADS_TABLE} SET started_at = COALESCE(started_at, ?)
+      WHERE media_id = ? AND EXISTS (SELECT 1 FROM ${MEDIA_SETS_TABLE} WHERE id = ? AND status = 'reserved')`)
+      .bind(now, mediaId, mediaId),
+  ]);
+  if (!(Array.isArray(results) ? results : results?.results)?.[0]?.meta?.changes) {
+    throw { status: 409, code: "MEDIA_STORAGE_LOST", message: "이미 완료되었거나 삭제 중인 업로드입니다. 목록을 새로고침해 주세요." };
+  }
+}
+
+async function putPhotoUploadPart(request, env, mediaId, partName) {
+  requireSameOrigin(request);
+  await requireAdminEmail(request, env);
+  const db = requireContentDatabase(env);
+  const bucket = requireMediaBucket(env);
+  const session = await photoUploadSession(db, mediaId);
+  const part = photoUploadParts(mediaId, session.metadata).find((entry) => entry.part === partName);
+  if (!part) return apiError(404, "NOT_FOUND", "사진 업로드 경로가 올바르지 않습니다.");
+  const contentLength = request.headers.get("content-length");
+  if (contentLength === null) return apiError(411, "MEDIA_LENGTH_REQUIRED", "파일 길이를 확인할 수 없습니다. 페이지를 새로고침해 주세요.");
+  if (Number(contentLength) !== part.size || !request.body
+    || request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== part.contentType) {
+    return apiError(400, "INVALID_MEDIA_BODY", "예약한 파일의 크기 또는 형식과 일치하지 않습니다.");
+  }
+  await touchPhotoUpload(db, mediaId);
+  // Keep retries immutable. R2 consumes the known-length native HTTP body.
+  const object = await bucket.put(part.key, request.body, {
+    onlyIf: { etagDoesNotMatch: "*" }, httpMetadata: { contentType: part.contentType },
+  });
+  if (!object) {
+    const existing = await bucket.head(part.key);
+    if (!existing || existing.size !== part.size || existing.httpMetadata?.contentType !== part.contentType) {
+      return apiError(409, "MEDIA_PART_CONFLICT", "기존 업로드 파일과 충돌했습니다. 사진을 다시 선택해 주세요.");
+    }
+  }
+  return json({ mediaId, part: partName, stored: true });
+}
+
+async function completePhotoUpload(request, env, mediaId) {
+  requireSameOrigin(request);
+  await requireAdminEmail(request, env);
+  const db = requireContentDatabase(env);
+  const bucket = requireMediaBucket(env);
+  const session = await photoUploadSession(db, mediaId);
+  if (session.status !== "stored") {
+    await touchPhotoUpload(db, mediaId);
+    const parts = photoUploadParts(mediaId, session.metadata);
+    const heads = await Promise.all(parts.map((part) => bucket.head(part.key)));
+    if (heads.some((head, index) => !head || head.size !== parts[index].size || head.httpMetadata?.contentType !== parts[index].contentType)) {
+      return apiError(409, "MEDIA_UPLOAD_INCOMPLETE", "사진 파일 일부가 아직 저장되지 않았습니다. 업로드를 다시 시도해 주세요.");
+    }
+    await commitMediaStorage(db, mediaId);
+  }
+  return json({ ...uploadedPhotoPayload(mediaId, session.metadata), usage: await getMediaUsageFromDatabase(db) }, 201);
+}
+
+async function cancelUnstartedPhotoUpload(request, env, mediaId) {
+  requireSameOrigin(request);
+  await requireAdminEmail(request, env);
+  const db = requireContentDatabase(env);
+  // Do not free space while a failed/ambiguous network request may still write.
+  // Started sessions remain accounted for until the existing stale cleanup.
+  const result = await db.prepare(`DELETE FROM ${MEDIA_SETS_TABLE} WHERE id = ? AND status = 'reserved'
+    AND EXISTS (SELECT 1 FROM ${MEDIA_UPLOADS_TABLE} WHERE media_id = ? AND started_at IS NULL)`)
+    .bind(mediaId, mediaId).run();
+  return json({ cancelled: Boolean(result?.meta?.changes) });
+}
+
+async function handlePhotoUploadSession(request, env, url) {
+  const requestId = crypto.randomUUID();
+  try {
+    if (url.pathname === `${ADMIN_API_PREFIX}/media/uploads` && request.method === "POST") return await beginPhotoUploads(request, env);
+    const match = url.pathname.match(/^\/api\/admin\/media\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(original|small|large|complete))?$/);
+    if (match) {
+      if (request.method === "PUT" && ["original", "small", "large"].includes(match[2])) return await putPhotoUploadPart(request, env, match[1], match[2]);
+      if (request.method === "POST" && match[2] === "complete") return await completePhotoUpload(request, env, match[1]);
+      if (request.method === "DELETE" && !match[2]) return await cancelUnstartedPhotoUpload(request, env, match[1]);
+    }
+    return apiError(404, "NOT_FOUND", "사진 업로드 경로가 올바르지 않습니다.");
+  } catch (error) {
+    if (error && Number.isInteger(error.status)) throw error;
+    logMediaUploadFailure(requestId, "native_upload", error);
+    return apiError(500, "INTERNAL_ERROR", "사진 업로드를 완료하지 못했습니다. 저장된 미디어를 확인해 주세요.", { requestId });
+  }
+}
+
 async function handleContent(request, env, url) {
   try {
+    if (url.pathname === `${ADMIN_API_PREFIX}/media/uploads` || url.pathname.startsWith(`${ADMIN_API_PREFIX}/media/uploads/`)) {
+      return await handlePhotoUploadSession(request, env, url);
+    }
     if (url.pathname === CONTENT_API_PREFIX && request.method === "GET") return await getPublishedInvitation(env);
     if (url.pathname === `${ADMIN_API_PREFIX}/content`) {
       if (request.method === "GET") return await getAdminInvitation(request, env);
