@@ -148,7 +148,7 @@ function validateCoverPlaybackEvidence(ribbonExpectation, intro) {
 
 function validateV2RibbonPlaybackEvidence(ribbonExpectation, intro) {
   invariant(JSON.stringify(intro.panelConfig?.panelCurve) === JSON.stringify(ribbonExpectation.panelCurve), "v2 measured per-side panel curve config가 runtime에 로드되지 않았습니다.");
-  const lastVisible = intro.draws.at(-2);
+  const lastVisible = ribbonExpectation.paperOpening.measuredExit ? intro.draws.at(-1) : intro.draws.at(-2);
   invariant(lastVisible?.alphaPixels > 0, "v2 transparent terminal 전 previous visible frame이 없습니다.");
   invariant(Number.isFinite(lastVisible.alphaViewportTop) && Number.isFinite(lastVisible.viewportHeight) && lastVisible.alphaViewportTop >= lastVisible.viewportHeight + 16, "v2 ribbon root가 transparent terminal 전에 viewport 밖 16px로 나가지 않았습니다.");
   invariant(intro.panelSamples?.some((sample) => (
@@ -162,14 +162,16 @@ export function validateRibbonPlaybackEvidence({ baseUrl, ribbonExpectation, int
   invariant(ribbonExpectation, "배포 리본 자산 기대값이 없습니다.");
   invariant(intro?.mounts === 1, `Pastel intro cover mount 수가 올바르지 않습니다: ${intro?.mounts ?? "missing"}`);
   invariant(Array.isArray(intro?.draws), "Pastel intro frame draw 증거가 없습니다.");
-  invariant(intro.draws.length === ribbonExpectation.frames.length, `Pastel intro가 모든 frame을 재생하지 않았습니다: expected=${ribbonExpectation.frames.length} actual=${intro.draws.length}`);
+  invariant(ribbonExpectation.paperOpening.measuredExit
+    ? intro.draws.length >= 2 && intro.draws.length < ribbonExpectation.frames.length
+    : intro.draws.length === ribbonExpectation.frames.length, `Pastel intro frame 범위가 올바르지 않습니다: expected=${ribbonExpectation.frames.length} actual=${intro.draws.length}`);
   invariant(intro.draws.every((draw, index) => draw.index === index), "Pastel intro frame 순서 또는 중복 draw가 올바르지 않습니다.");
   const terminal = intro.draws.at(-1);
-  invariant(terminal?.alphaPixels === 0, "투명 terminal frame이 canvas에 그려지지 않았습니다.");
+  if (!ribbonExpectation.paperOpening.measuredExit) invariant(terminal?.alphaPixels === 0, "투명 terminal frame이 canvas에 그려지지 않았습니다.");
   if (ribbonExpectation.paperOpening.measuredExit) {
     const exit = intro.draws.find((draw) => draw.alphaPixels > 0 && draw.alphaViewportTop >= draw.viewportHeight + 16);
     invariant(exit && intro.panelsOpenedAt >= exit.at, "paper panel이 리본의 화면 이탈 전에 열렸습니다.");
-    invariant(intro.draws.slice(exit.index).every((draw) => draw.alphaPixels === 0 || draw.alphaViewportTop >= draw.viewportHeight + 16), "개봉 이후 화면 안으로 돌아오는 리본 프레임이 있습니다.");
+    invariant(exit === terminal, "화면 이탈 뒤 불필요한 리본 프레임을 계속 처리했습니다.");
     invariant(intro.panelsOpenedAt - exit.at < 120, "리본 이탈 뒤 보이지 않는 프레임을 기다렸습니다.");
     const visibleGap = intro.panelSamples?.find((sample) => sample.rightInnerEdge - sample.leftInnerEdge >= 2);
     invariant(visibleGap && visibleGap.at - exit.at < 200, "리본 이탈 뒤 실제 봉투 틈의 시작이 늦습니다.");
@@ -935,7 +937,7 @@ export async function collectScenario({
         // would turn this scenario into another cold request set.
         await page.waitForFunction((frameCount) => {
           const intro = window.__weddingIntroEvidence;
-          return intro?.draws?.length === frameCount && intro.removedAt !== null
+          return intro?.draws?.length >= 2 && intro.draws.length <= frameCount && intro.removedAt !== null
             && !document.querySelector(".pastel-intro-cover") && !document.body.classList.contains("intro-lock");
         }, ribbonExpectation.frames.length, { timeout: RENDER_TIMEOUT_MS });
         await Promise.allSettled(ribbonResponseTasks);
@@ -998,7 +1000,7 @@ export async function collectScenario({
     if (ribbonExpectation) {
       await page.waitForFunction((frameCount) => {
         const intro = window.__weddingIntroEvidence;
-        return intro?.draws?.length === frameCount && intro.removedAt !== null
+        return intro?.draws?.length >= 2 && intro.draws.length <= frameCount && intro.removedAt !== null
           && !document.querySelector(".pastel-intro-cover") && !document.body.classList.contains("intro-lock");
       }, ribbonExpectation.frames.length, { timeout: RENDER_TIMEOUT_MS });
       await page.waitForTimeout(0);

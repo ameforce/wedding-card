@@ -163,7 +163,6 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
       let preparationComplete = false;
       let hiddenAt = document.hidden ? performance.now() : null;
       let panelsStarted = false;
-      let panelsFinished = false;
       let panelElapsed = 0;
       let panelLastPaint = 0;
       let panelDelayRemaining = 0;
@@ -269,18 +268,14 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
         // Measured curves may reach a zero projected paper width before their
         // runtime opening duration. Keep the transparent cover
         // alive through that contract; only elapsed panel time ends it.
-        if (panelElapsed >= PAPER_OPENING_DURATION_MS) {
-          panelsFinished = true;
-          if (scheduler?.completed) finish();
-          return;
-        }
+        if (panelElapsed >= PAPER_OPENING_DURATION_MS) { finish(); return; }
         panelFrame = window.requestAnimationFrame(paintPanels);
       };
       const openPanels = () => {
         if (panelsStarted) return;
         panelsStarted = true;
         // Retire the already-exited surface so a later resize cannot bring it
-        // back. The scheduler still completes all accepted frames in order.
+        // back. Proven-invisible tail frames no longer need decoding or drawing.
         if (ribbonTrackRef.current) ribbonTrackRef.current.style.visibility = "hidden";
         panelDelayRemaining = PAPER_OPENING_DELAY_MS;
         panelElapsed = 0;
@@ -289,8 +284,8 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
       };
       const prepareFrame = (index) => {
         if (!active || index === null || ready.has(index) || prepared.has(index) || prepared.size >= 2) return;
-        const pending = loader.getFrame(index).then((frame) => { if (active) ready.set(index, frame); })
-          .catch(() => { if (active) finish("asset-error"); }).finally(() => prepared.delete(index));
+        const pending = loader.getFrame(index).then((frame) => { if (active && !panelsStarted) ready.set(index, frame); })
+          .catch(() => { if (active && !panelsStarted) finish("asset-error"); }).finally(() => prepared.delete(index));
         prepared.set(index, pending);
       };
       const prepareWindow = () => {
@@ -311,9 +306,11 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
             applyRootTranslation(frameIndex);
             if (!firstDrawn) { firstDrawn = true; setFrameLive(true); }
             const completed = scheduler.markDrawn(frameIndex, now);
-            if (completed || (!panelsStarted && canOpenPaperAfterRibbonFrame(manifest, frameIndex, { width: window.innerWidth, height: window.innerHeight }))) openPanels();
-            if (completed) {
-              if (panelsFinished) finish();
+            if (completed || canOpenPaperAfterRibbonFrame(manifest, frameIndex, { width: window.innerWidth, height: window.innerHeight })) {
+              openPanels();
+              // No more visible ribbon work: release the decode window instead
+              // of competing with paper animation on slower browser engines.
+              scheduler.stop(); stallGate?.cancel(); loader.cancel(); prepared.clear(); ready.clear();
               return;
             }
             prepareWindow();
@@ -391,7 +388,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
         }
         if (!preparationComplete) armAssetWatchdog();
         armPlaybackWatchdog();
-        if (panelsStarted && !panelsFinished) { panelLastPaint = 0; panelFrame = window.requestAnimationFrame(paintPanels); }
+        if (panelsStarted) { panelLastPaint = 0; panelFrame = window.requestAnimationFrame(paintPanels); }
         if (scheduler && !scheduler.completed) animationFrame = window.requestAnimationFrame(animate);
       };
       const onResize = () => applyRootTranslation(Math.max(0, (scheduler?.nextFrameIndex || 1) - 1));

@@ -17,7 +17,6 @@ import { PAPER_OPENING_DELAY_MS, PAPER_OPENING_DURATION_MS } from "../src/intro/
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const manifest = JSON.parse(await readFile(new URL("../public/assets/design/ribbon-sequence/manifest.json", import.meta.url), "utf8"));
 const measuredPanelCurve = JSON.parse(await readFile(new URL("../scripts/ribbon/reference-paper-curve.json", import.meta.url), "utf8")).panelCurve;
-const expectedFrames = manifest.frames.map((_frame, index) => index);
 
 // Installed before App: observe actual fetch/decode/draw without changing assets,
 // timing, or production code. Keep hero identity/source inside the browser only.
@@ -211,11 +210,10 @@ function assertAccessible(state, expectedWidth = 390) {
 
 function assertCompletePlayback(state, { interrupted = false } = {}) {
   assert.equal(state.mounts, 1);
-  assert.deepEqual(state.draws.map((draw) => draw.index), expectedFrames);
-  const terminal = state.draws.at(-1);
-  assert.equal(terminal.alphaPixels, 0);
+  assert.deepEqual(state.draws.map((draw) => draw.index), Array.from({ length: state.draws.length }, (_, index) => index), "Every visible frame must be drawn once, without skips.");
   const exit = state.draws.find((draw) => draw.alphaViewportTop >= draw.viewportHeight + 16);
   assert.ok(exit, "Actual ribbon pixels must have exited before paper starts.");
+  assert.equal(state.draws.at(-1), exit, "Do not decode/draw invisible tail frames alongside paper motion.");
   assert.ok(state.openedAt - exit.at >= PAPER_OPENING_DELAY_MS, "Paper must not start over visible ribbon pixels.");
   if (!interrupted) {
     assert.ok(state.openedAt - exit.at < 120, `Paper start must follow visible exit, not terminal: ${state.openedAt - exit.at}ms`);
@@ -232,11 +230,7 @@ function assertCompletePlayback(state, { interrupted = false } = {}) {
     assert.ok(state.handoff, "Initial poster must hand off to a decoded F0.");
     for (const dimension of ["x", "y", "width", "height"]) assert.ok(Math.abs(state.handoff.poster[dimension] - state.handoff.canvas[dimension]) <= 1, `Poster-to-F0 ${dimension} changes by more than 1 CSS pixel.`);
   }
-  if (manifest.schemaVersion === 2) {
-    const lastVisible = state.draws.at(-2);
-    assert.ok(lastVisible.alphaPixels > 0, "The previous frame must contain real ribbon alpha, not a premature blank frame.");
-    assert.ok(lastVisible.alphaViewportTop >= lastVisible.viewportHeight + 16, `Real ribbon alpha must leave the viewport by 16px before terminal/panels; top=${lastVisible.alphaViewportTop}, height=${lastVisible.viewportHeight}.`);
-  }
+
 }
 
 test("real invitation ribbon preserves every frame and restores access across loading failures and viewports", { timeout: 360_000 }, async (t) => {
@@ -323,7 +317,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     });
   }
 
-  await scenarioTest(`all ${manifest.frames.length} real frames complete while paper starts on visible exit; reload mounts again even with reduced motion`, async () => {
+  await scenarioTest(`all visible frames remain continuous and paper starts at the measured exit; reload mounts again even with reduced motion`, async () => {
     const page = await newPage({ reducedMotion: "reduce" });
     try {
       await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
@@ -516,7 +510,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     });
   }
 
-  await scenarioTest("cold 400ms ribbon assets at 4MiB/s still complete every real frame before the cover opens", async () => {
+  await scenarioTest("cold 400ms ribbon assets at 4MiB/s preserve visible frames and prompt paper onset", async () => {
     const page = await newPage();
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Network.enable");
@@ -836,7 +830,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
       const pausedDrawCount = await page.evaluate(() => window.__ribbonQA.draws.length);
       await page.waitForTimeout(1800);
       assert.deepEqual(await progress(), paused, "Both panel transforms must remain unchanged while hidden.");
-      assert.equal(await page.evaluate(() => window.__ribbonQA.draws.length), pausedDrawCount, "The parallel offscreen ribbon clock must pause too.");
+      assert.equal(await page.evaluate(() => window.__ribbonQA.draws.length), pausedDrawCount, "The culled ribbon must not resume decoding while paper is hidden.");
       await setHidden(page, false);
       const state = await finalState(page);
       assertAccessible(state);
@@ -846,7 +840,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     } finally { await page.close(); }
   });
 
-  await scenarioTest("resize after visible exit never brings ribbon back while both clocks finish", async () => {
+  await scenarioTest("resize after visible exit never brings ribbon back during paper motion", async () => {
     const page = await newPage();
     try {
       await page.goto(baseUrl);

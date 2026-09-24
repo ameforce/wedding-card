@@ -268,7 +268,7 @@ test("render canary rejects intro fail-open, stale assets, and incorrect product
   assert.equal(validateRibbonPlaybackEvidence(ribbonPlaybackEvidence()), true);
   assert.throws(() => validateRibbonPlaybackEvidence(ribbonPlaybackEvidence({
     intro: { ...ribbonPlaybackEvidence().intro, draws: [], panelsOpenedAt: null, removedAt: 1000 },
-  })), /모든 frame을 재생하지/);
+  })), /frame 범위가 올바르지/);
   assert.throws(() => validateRibbonPlaybackEvidence(ribbonPlaybackEvidence({
     ribbonResponses: ribbonPlaybackEvidence().ribbonResponses.map((entry) => (
       entry.url.endsWith("manifest.json") ? { ...entry, sha256: HASH_B } : entry
@@ -285,7 +285,7 @@ test("render canary rejects intro fail-open, stale assets, and incorrect product
     ...ribbonPlaybackEvidence({
       intro: { ...ribbonPlaybackEvidence().intro, draws: [], panelsOpenedAt: null, removedAt: 1000 },
     }),
-  }), /\[cold-400ms\].*모든 frame을 재생하지/);
+  }), /\[cold-400ms\].*frame 범위가 올바르지/);
   assert.throws(() => validateRibbonPlaybackEvidence(ribbonPlaybackEvidence({
     ribbonResponses: ribbonPlaybackEvidence().ribbonResponses.map((entry) => (
       entry.url.endsWith("frame-001-test.webp") ? { ...entry, contentType: "text/html" } : entry
@@ -1078,6 +1078,7 @@ test("production canary rejects invisible-tail and visible-onset regressions", (
   const sample = () => {
     const evidence = ribbonV2PlaybackEvidence();
     evidence.ribbonExpectation = { ...evidence.ribbonExpectation, paperOpening: { ...evidence.ribbonExpectation.paperOpening, measuredExit: true } };
+    evidence.intro.draws.pop();
     evidence.intro.panelsOpenedAt = 980;
     evidence.intro.removedAt = 1780;
     evidence.intro.panelSamples[0].at = 1050;
@@ -1094,6 +1095,6 @@ test("production canary rejects invisible-tail and visible-onset regressions", (
   imperceptible.intro.panelSamples[0].at = 1250;
   assert.throws(() => validateRibbonPlaybackEvidence(imperceptible), /실제 봉투 틈/);
   const reentry = sample();
-  reentry.intro.draws[2] = { ...reentry.intro.draws[2], alphaPixels: 1, alphaViewportTop: 100, viewportHeight: 844 };
-  assert.throws(() => validateRibbonPlaybackEvidence(reentry), /terminal frame/);
+  reentry.intro.draws[1].alphaViewportTop = 100;
+  assert.throws(() => validateRibbonPlaybackEvidence(reentry), /화면 이탈 전에/);
 });
