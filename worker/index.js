@@ -1244,56 +1244,22 @@ function createRequestBodyReader(request, maxBytes, tooLargeError) {
     }
   }
   async function readExact(size) {
-    const parts = [];
-    let remaining = size;
-    while (remaining > 0) {
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    while (offset < size) {
       let chunk = buffered;
       buffered = new Uint8Array(0);
       if (chunk.byteLength === 0) chunk = await nextChunk();
       if (chunk === null || chunk.byteLength === 0) break;
-      const take = Math.min(remaining, chunk.byteLength);
-      parts.push(chunk.subarray(0, take));
+      const take = Math.min(size - offset, chunk.byteLength);
+      bytes.set(chunk.subarray(0, take), offset);
       if (take < chunk.byteLength) buffered = chunk.subarray(take);
-      remaining -= take;
+      offset += take;
     }
-    if (remaining > 0) {
+    if (offset < size) {
       throw { status: 400, code: "INVALID_MEDIA_BODY", message: "업로드 본문이 올바르지 않습니다." };
     }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const part of parts) {
-      bytes.set(part, offset);
-      offset += part.byteLength;
-    }
     return bytes;
-  }
-  function streamExact(size) {
-    const FixedLengthStreamCtor = typeof globalThis.FixedLengthStream === "function" ? globalThis.FixedLengthStream : null;
-    const stream = FixedLengthStreamCtor ? new FixedLengthStreamCtor(size) : new TransformStream();
-    const writer = stream.writable.getWriter();
-    writer.closed.catch(() => { reader?.cancel().catch(() => {}); });
-    let remaining = size;
-    (async () => {
-      try {
-        while (remaining > 0) {
-          let chunk = buffered;
-          buffered = new Uint8Array(0);
-          if (chunk.byteLength === 0) chunk = await nextChunk();
-          if (chunk === null || chunk.byteLength === 0) {
-            throw { status: 400, code: "INVALID_MEDIA_BODY", message: "업로드 본문이 올바르지 않습니다." };
-          }
-          const take = Math.min(remaining, chunk.byteLength);
-          await writer.write(chunk.subarray(0, take));
-          if (take < chunk.byteLength) buffered = chunk.subarray(take);
-          remaining -= take;
-        }
-        await writer.close();
-      } catch (error) {
-        reader?.cancel().catch(() => {});
-        await writer.abort(error).catch(() => {});
-      }
-    })();
-    return stream.readable;
   }
   async function readRest(maxSize, tooLarge) {
     const parts = [];
@@ -1320,7 +1286,7 @@ function createRequestBodyReader(request, maxBytes, tooLargeError) {
       throw { status: 400, code: "INVALID_MEDIA_BODY", message: "업로드 본문이 올바르지 않습니다." };
     }
   }
-  return { readExact, readRest, streamExact, expectEnd };
+  return { readExact, readRest, expectEnd };
 }
 
 function mediaUsagePayload(usedBytes, mediaSets = 0) {
@@ -1824,6 +1790,7 @@ async function uploadInvitationMedia(request, env) {
     phase = "body_variants";
     const small = await body.readExact(smallSize);
     const large = await body.readExact(largeSize);
+    const original = await body.readExact(originalSize);
     const mediaId = crypto.randomUUID();
     const originalExtension = originalType === "image/png" ? "png" : originalType === "image/webp" ? "webp" : "jpg";
     const baseKey = `invitation/${mediaId}/${slot}`;
@@ -1838,7 +1805,7 @@ async function uploadInvitationMedia(request, env) {
     try {
       phase = "r2_write";
       const writeResults = await Promise.allSettled([
-        bucket.put(keys[0], body.streamExact(originalSize), { httpMetadata: { contentType: originalType } }),
+        bucket.put(keys[0], original, { httpMetadata: { contentType: originalType } }),
         bucket.put(keys[1], small, { httpMetadata: { contentType: "image/webp" } }),
         bucket.put(keys[2], large, { httpMetadata: { contentType: "image/webp" } }),
       ]);
