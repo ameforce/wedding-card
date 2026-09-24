@@ -938,144 +938,7 @@ test("media uploads stream real XHR progress and preserve API error shape", asyn
   ]);
 });
 
-test("photo uploads send the framed octet-stream body", async () => {
-  const fileBytes = new Uint8Array([11, 12, 13, 14]);
-  const file = new File([fileBytes], "photo.jpg", { type: "image/jpeg" });
-  const variantBytes = new Uint8Array([9, 9, 9]);
-  const originalCreateImageBitmap = globalThis.createImageBitmap;
-  const originalDocument = globalThis.document;
-  let bitmapCalls = 0;
-  let bitmapCloses = 0;
-  const canvases = [];
-  const bitmap = { width: 6336, height: 9504, close() { bitmapCloses += 1; } };
-  globalThis.createImageBitmap = async () => { bitmapCalls += 1; return bitmap; };
-  globalThis.document = {
-    createElement() {
-      const canvas = {
-        width: 0,
-        height: 0,
-        getContext() { return { drawImage() {} }; },
-        toBlob(callback) { callback(new Blob([variantBytes], { type: "image/webp" })); },
-      };
-      canvases.push(canvas);
-      return canvas;
-    },
-  };
-  const sent = [];
-  class PhotoXhr {
-    constructor() { this.upload = {}; sent.push(this); }
-    open(method, path) { this.method = method; this.path = path; this.headers = {}; }
-    setRequestHeader(name, value) { this.headers[name] = value; }
-    send(body) {
-      this.body = body;
-      this.status = 201;
-      this.responseText = JSON.stringify({
-        photo: { src: "/api/media/invitation/x/pastel-hero/480.webp", srcSet: "", sizes: "", alt: "테스트 사진", position: "50% 50%" },
-        usage: { usedBytes: 1 },
-      });
-      this.onload();
-    }
-  }
-  try {
-    const cloud = createCloudflareContentAdapter({
-      staticContent: weddingContent,
-      fetchImpl: async () => { throw new Error("fetch must not be used when XHR is available"); },
-      xhrImpl: PhotoXhr,
-    });
-    const progress = [];
-    const uploaded = await cloud.uploadPhoto({
-      slot: "pastel-hero",
-      file,
-      alt: "테스트 사진",
-      position: "50% 50%",
-      onProgress: (event) => progress.push(event),
-    });
-    assert.equal(uploaded.photo.alt, "테스트 사진");
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].method, "POST");
-    assert.equal(sent[0].path, "/api/admin/media");
-    assert.equal(sent[0].headers["content-type"], "application/octet-stream");
-
-    const body = new Uint8Array(await sent[0].body.arrayBuffer());
-    const headerLength = (body[0] << 8) | body[1];
-    const header = JSON.parse(new TextDecoder().decode(body.subarray(2, 2 + headerLength)));
-    assert.equal(header.slot, "pastel-hero");
-    assert.equal(header.alt, "테스트 사진");
-    assert.equal(header.position, "50% 50%");
-    assert.equal(header.originalType, "image/jpeg");
-    assert.equal(header.sizes.original, file.size);
-    assert.equal(header.sizes.small, variantBytes.length);
-    assert.equal(header.sizes.large, variantBytes.length);
-
-    const expectedTail = new Uint8Array(variantBytes.length * 2 + fileBytes.length);
-    expectedTail.set(variantBytes, 0);
-    expectedTail.set(variantBytes, variantBytes.length);
-    expectedTail.set(fileBytes, variantBytes.length * 2);
-    assert.deepEqual(body.subarray(2 + headerLength), expectedTail);
-    assert.deepEqual(progress, [
-      { phase: "optimize" },
-      { phase: "upload", loaded: 0, total: 0 },
-    ]);
-    assert.equal(bitmapCalls, 1);
-    assert.equal(bitmapCloses, 1);
-    assert.deepEqual(canvases.slice(0, 2).map(({ width, height }) => [width, height]), [[480, 720], [960, 1440]]);
-
-    class FailedPhotoXhr {
-      constructor() { this.upload = {}; }
-      open() {}
-      setRequestHeader() {}
-      send() {
-        this.status = 500;
-        this.responseText = JSON.stringify({
-          code: "INTERNAL_ERROR",
-          message: "사진 업로드를 처리하지 못했습니다.",
-          requestId: "00000000-0000-4000-8000-000000000001",
-        });
-        this.onload();
-      }
-    }
-    const failedCloud = createCloudflareContentAdapter({
-      staticContent: weddingContent,
-      fetchImpl: async () => { throw new Error("fetch must not be used when XHR is available"); },
-      xhrImpl: FailedPhotoXhr,
-    });
-    await assert.rejects(failedCloud.uploadPhoto({ slot: "pastel-hero", file, alt: "", position: "50% 50%" }), (error) => {
-      assert.equal(error.status, 500);
-      assert.equal(error.code, "INTERNAL_ERROR");
-      assert.equal(error.requestId, "00000000-0000-4000-8000-000000000001");
-      assert.equal(error.message, "사진 업로드를 처리하지 못했습니다.");
-      return true;
-    });
-    assert.equal(bitmapCalls, 2);
-    assert.equal(bitmapCloses, 2);
-
-    class InvalidRequestIdXhr extends FailedPhotoXhr {
-      send() {
-        this.status = 500;
-        this.responseText = JSON.stringify({
-          code: "INTERNAL_ERROR",
-          message: "사진 업로드를 처리하지 못했습니다.",
-          requestId: "not-a-uuid",
-        });
-        this.onload();
-      }
-    }
-    const invalidIdCloud = createCloudflareContentAdapter({
-      staticContent: weddingContent,
-      fetchImpl: async () => { throw new Error("fetch must not be used when XHR is available"); },
-      xhrImpl: InvalidRequestIdXhr,
-    });
-    await assert.rejects(invalidIdCloud.uploadPhoto({ slot: "pastel-hero", file, alt: "", position: "50% 50%" }), (error) => {
-      assert.equal(error.requestId, null);
-      return true;
-    });
-    assert.equal(bitmapCalls, 3);
-    assert.equal(bitmapCloses, 3);
-  } finally {
-    globalThis.createImageBitmap = originalCreateImageBitmap;
-    globalThis.document = originalDocument;
-  }
-});
+// Photo transport is covered by media-upload-client.test.mjs.
 
 test("production admin requests preserve Access authentication failures for re-login UX", async () => {
   const adapter = createCloudflareContentAdapter({
@@ -1151,12 +1014,12 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.match(source, /uploadGalleryPhotos/);
   assert.match(source, /function formatAdminError\(error, fallbackMessage\)/);
   assert.match(source, /message: formatAdminError\(error, fallbackMessage\)/);
-  assert.match(source, /failures\.push\(`\$\{file\.name\}: \$\{formatAdminError\(error, "업로드하지 못했습니다\."\)\}`\)/);
-  assert.match(source, /for \(const \[index, file\] of files\.entries\(\)\)/);
-  assert.match(source, /file\.size > remainingBytes/);
-  assert.match(source, /error\?\.status === 507 \|\| error\?\.code === "MEDIA_STORAGE_LIMIT"/);
-  assert.match(source, /failures\.join\(" · "\)/);
-  assert.match(source, /저장 공간이 부족해 나머지/);
+  assert.match(source, /preparePhotoSelection/);
+  assert.match(source, /uploadPhotoSelection/);
+  assert.match(source, /selection\.prepared\[index\]\.file\.name/);
+  assert.match(source, /onSelect=\{prepareGalleryPhotos\}/);
+  assert.match(source, /selectedMediaIds/);
+  assert.match(source, /expectedRevisionIds/);
   assert.doesNotMatch(source, /MAX_GALLERY_PHOTOS|files\.slice\(0, Math\.max\(0, remaining\)\)/);
   assert.match(source, /isAdminAuthRequiredError\(error\)/);
   assert.match(source, /commitEdit\(next, "\.pastel-gallery-section"\)/);
