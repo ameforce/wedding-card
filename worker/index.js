@@ -1733,90 +1733,158 @@ async function deleteAdminMedia(request, env) {
   });
 }
 
+function mediaUploadLogName(value) {
+  return typeof value === "string" && /^[A-Za-z][A-Za-z0-9]{0,39}$/.test(value) ? value : undefined;
+}
+
+function mediaUploadLogCode(value) {
+  return typeof value === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : undefined;
+}
+
+function isExpectedMediaUploadError(error) {
+  const statuses = {
+    CROSS_ORIGIN_DENIED: 403,
+    ADMIN_AUTH_UNAVAILABLE: 503,
+    ADMIN_AUTH_REQUIRED: 401,
+    CONTENT_UNAVAILABLE: 503,
+    MEDIA_TOO_LARGE: 413,
+    MEDIA_UNAVAILABLE: 503,
+    UNSUPPORTED_MEDIA_BODY: 415,
+    INVALID_MEDIA_BODY: 400,
+    INVALID_MEDIA_METADATA: 400,
+    INVALID_MEDIA: 400,
+    MEDIA_STORAGE_LIMIT: 507,
+    MEDIA_STORAGE_LOST: 409,
+  };
+  return Number.isInteger(error?.status) && statuses[error.code] === error.status;
+}
+
+function logMediaUploadFailure(requestId, phase, error) {
+  const entry = { event: "media_upload_failed", requestId, phase };
+  const errorName = mediaUploadLogName(error?.name);
+  const errorCode = mediaUploadLogCode(error?.code);
+  if (errorName) entry.errorName = errorName;
+  if (errorCode) entry.errorCode = errorCode;
+  if (Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599) entry.errorStatus = error.status;
+  console.error(JSON.stringify(entry));
+}
+
 async function uploadInvitationMedia(request, env) {
-  requireSameOrigin(request);
-  await requireAdminEmail(request, env);
-  const db = requireContentDatabase(env);
-  const length = Number(request.headers.get("content-length") || 0);
-  if (length > MAX_MEDIA_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "이미지 업로드 크기를 줄여 주세요.");
-  const bucket = requireMediaBucket(env);
-  const contentType = (request.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
-  if (contentType !== "application/octet-stream") {
-    return apiError(415, "UNSUPPORTED_MEDIA_BODY", "업로드 형식이 올바르지 않습니다. 페이지를 새로고침해 주세요.");
-  }
-  const body = createRequestBodyReader(request, MAX_MEDIA_BODY_BYTES,
-    { status: 413, code: "MEDIA_TOO_LARGE", message: "이미지 업로드 크기를 줄여 주세요." });
-  const headerLengthBytes = await body.readExact(2);
-  const headerLength = (headerLengthBytes[0] << 8) | headerLengthBytes[1];
-  if (headerLength < 2 || headerLength > MAX_MEDIA_HEADER_BYTES) {
-    return apiError(400, "INVALID_MEDIA_BODY", "업로드 본문이 올바르지 않습니다.");
-  }
-  let header;
+  const requestId = crypto.randomUUID();
+  let phase = "same_origin";
   try {
-    header = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await body.readExact(headerLength)));
+    requireSameOrigin(request);
+    phase = "admin_auth";
+    await requireAdminEmail(request, env);
+    phase = "database";
+    const db = requireContentDatabase(env);
+    phase = "request_size";
+    const length = Number(request.headers.get("content-length") || 0);
+    if (length > MAX_MEDIA_BODY_BYTES) return apiError(413, "MEDIA_TOO_LARGE", "이미지 업로드 크기를 줄여 주세요.");
+    phase = "media_bucket";
+    const bucket = requireMediaBucket(env);
+    if (typeof bucket.delete !== "function") return apiError(503, "MEDIA_UNAVAILABLE", "미디어 저장소가 아직 연결되지 않았습니다.");
+    const contentType = (request.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
+    if (contentType !== "application/octet-stream") {
+      return apiError(415, "UNSUPPORTED_MEDIA_BODY", "업로드 형식이 올바르지 않습니다. 페이지를 새로고침해 주세요.");
+    }
+    phase = "body_header";
+    const body = createRequestBodyReader(request, MAX_MEDIA_BODY_BYTES,
+      { status: 413, code: "MEDIA_TOO_LARGE", message: "이미지 업로드 크기를 줄여 주세요." });
+    const headerLengthBytes = await body.readExact(2);
+    const headerLength = (headerLengthBytes[0] << 8) | headerLengthBytes[1];
+    if (headerLength < 2 || headerLength > MAX_MEDIA_HEADER_BYTES) {
+      return apiError(400, "INVALID_MEDIA_BODY", "업로드 본문이 올바르지 않습니다.");
+    }
+    let header;
+    try {
+      header = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await body.readExact(headerLength)));
+    } catch (error) {
+      if (error && Number.isInteger(error.status)) throw error;
+      return apiError(400, "INVALID_MEDIA_BODY", "업로드 본문이 올바르지 않습니다.");
+    }
+    const slot = String(header?.slot || "").trim().toLowerCase();
+    const alt = String(header?.alt || "").trim();
+    const position = String(header?.position || "50% 50%").trim();
+    const validSlot = /^(?:pastel-hero|pastel-gallery-(?:new|\d+))$/.test(slot);
+    if (!validSlot || alt.length > 300 || !validCropPosition(position)) {
+      return apiError(400, "INVALID_MEDIA_METADATA", "이미지 슬롯, 설명 또는 초점 위치를 확인해 주세요.");
+    }
+    const sizes = header?.sizes && typeof header.sizes === "object" ? header.sizes : {};
+    const originalSize = Number(sizes.original);
+    const smallSize = Number(sizes.small);
+    const largeSize = Number(sizes.large);
+    const originalType = String(header?.originalType || "");
+    const validSizes = Number.isInteger(originalSize) && originalSize > 0 && originalSize <= MAX_IMAGE_FILE_BYTES
+      && Number.isInteger(smallSize) && smallSize > 0 && smallSize <= 2 * 1024 * 1024
+      && Number.isInteger(largeSize) && largeSize > 0 && largeSize <= 4 * 1024 * 1024
+      && originalSize + smallSize + largeSize <= MAX_MEDIA_BODY_BYTES;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(originalType) || !validSizes) {
+      return apiError(400, "INVALID_MEDIA", "원본과 480·960px WebP 이미지를 확인해 주세요.");
+    }
+    phase = "body_variants";
+    const small = await body.readExact(smallSize);
+    const large = await body.readExact(largeSize);
+    const mediaId = crypto.randomUUID();
+    const originalExtension = originalType === "image/png" ? "png" : originalType === "image/webp" ? "webp" : "jpg";
+    const baseKey = `invitation/${mediaId}/${slot}`;
+    const keys = [
+      `${baseKey}/original.${originalExtension}`,
+      `${baseKey}/480.webp`,
+      `${baseKey}/960.webp`,
+    ];
+    const totalBytes = originalSize + smallSize + largeSize;
+    phase = "quota_reserve";
+    await reserveMediaStorage(db, { mediaId, slot, totalBytes });
+    try {
+      phase = "r2_write";
+      const writeResults = await Promise.allSettled([
+        bucket.put(keys[0], body.streamExact(originalSize), { httpMetadata: { contentType: originalType } }),
+        bucket.put(keys[1], small, { httpMetadata: { contentType: "image/webp" } }),
+        bucket.put(keys[2], large, { httpMetadata: { contentType: "image/webp" } }),
+      ]);
+      const failedWrite = writeResults.find((result) => result.status === "rejected");
+      if (failedWrite) throw failedWrite.reason;
+      phase = "body_end";
+      await body.expectEnd();
+      phase = "quota_commit";
+      await commitMediaStorage(db, mediaId);
+    } catch (error) {
+      const cleanupResults = await Promise.allSettled([
+        Promise.resolve().then(() => bucket.delete(keys)),
+        Promise.resolve().then(() => releaseMediaStorage(db, mediaId)),
+      ]);
+      let cleanupFailed = false;
+      for (const [index, result] of cleanupResults.entries()) {
+        if (result.status === "rejected") {
+          cleanupFailed = true;
+          logMediaUploadFailure(requestId, index === 0 ? "r2_cleanup" : "quota_release", result.reason);
+        }
+      }
+      if (cleanupFailed && isExpectedMediaUploadError(error)) {
+        return apiError(500, "INTERNAL_ERROR", "초대장 콘텐츠 요청을 처리하지 못했습니다.", { requestId });
+      }
+      throw error;
+    }
+    phase = "media_usage";
+    const src = `${MEDIA_API_PREFIX}/${baseKey}/480.webp`;
+    const usage = await getMediaUsageFromDatabase(db);
+    return json({
+      mediaId,
+      usage,
+      photo: {
+        src,
+        srcSet: `${src} 480w, ${MEDIA_API_PREFIX}/${baseKey}/960.webp 960w`,
+        sizes: "(min-width: 768px) 430px, 100vw",
+        alt,
+        position,
+      },
+    }, 201);
   } catch (error) {
-    if (error && Number.isInteger(error.status)) throw error;
-    return apiError(400, "INVALID_MEDIA_BODY", "업로드 본문이 올바르지 않습니다.");
+    if (isExpectedMediaUploadError(error)) throw error;
+    logMediaUploadFailure(requestId, phase, error);
+    return apiError(500, "INTERNAL_ERROR", "초대장 콘텐츠 요청을 처리하지 못했습니다.", { requestId });
   }
-  const slot = String(header?.slot || "").trim().toLowerCase();
-  const alt = String(header?.alt || "").trim();
-  const position = String(header?.position || "50% 50%").trim();
-  const validSlot = /^(?:pastel-hero|pastel-gallery-(?:new|\d+))$/.test(slot);
-  if (!validSlot || alt.length > 300 || !validCropPosition(position)) {
-    return apiError(400, "INVALID_MEDIA_METADATA", "이미지 슬롯, 설명 또는 초점 위치를 확인해 주세요.");
-  }
-  const sizes = header?.sizes && typeof header.sizes === "object" ? header.sizes : {};
-  const originalSize = Number(sizes.original);
-  const smallSize = Number(sizes.small);
-  const largeSize = Number(sizes.large);
-  const originalType = String(header?.originalType || "");
-  const validSizes = Number.isInteger(originalSize) && originalSize > 0 && originalSize <= MAX_IMAGE_FILE_BYTES
-    && Number.isInteger(smallSize) && smallSize > 0 && smallSize <= 2 * 1024 * 1024
-    && Number.isInteger(largeSize) && largeSize > 0 && largeSize <= 4 * 1024 * 1024
-    && originalSize + smallSize + largeSize <= MAX_MEDIA_BODY_BYTES;
-  if (!["image/jpeg", "image/png", "image/webp"].includes(originalType) || !validSizes) {
-    return apiError(400, "INVALID_MEDIA", "원본과 480·960px WebP 이미지를 확인해 주세요.");
-  }
-  const small = await body.readExact(smallSize);
-  const large = await body.readExact(largeSize);
-  const mediaId = crypto.randomUUID();
-  const originalExtension = originalType === "image/png" ? "png" : originalType === "image/webp" ? "webp" : "jpg";
-  const baseKey = `invitation/${mediaId}/${slot}`;
-  const keys = [
-    `${baseKey}/original.${originalExtension}`,
-    `${baseKey}/480.webp`,
-    `${baseKey}/960.webp`,
-  ];
-  const totalBytes = originalSize + smallSize + largeSize;
-  await reserveMediaStorage(db, { mediaId, slot, totalBytes });
-  try {
-    const writeResults = await Promise.allSettled([
-      bucket.put(keys[0], body.streamExact(originalSize), { httpMetadata: { contentType: originalType } }),
-      bucket.put(keys[1], small, { httpMetadata: { contentType: "image/webp" } }),
-      bucket.put(keys[2], large, { httpMetadata: { contentType: "image/webp" } }),
-    ]);
-    const failedWrite = writeResults.find((result) => result.status === "rejected");
-    if (failedWrite) throw failedWrite.reason;
-    await body.expectEnd();
-    await commitMediaStorage(db, mediaId);
-  } catch (error) {
-    if (typeof bucket.delete !== "function") throw new Error("R2 media cleanup is unavailable", { cause: error });
-    await Promise.allSettled([bucket.delete(keys), releaseMediaStorage(db, mediaId)]);
-    throw error;
-  }
-  const src = `${MEDIA_API_PREFIX}/${baseKey}/480.webp`;
-  const usage = await getMediaUsageFromDatabase(db);
-  return json({
-    mediaId,
-    usage,
-    photo: {
-      src,
-      srcSet: `${src} 480w, ${MEDIA_API_PREFIX}/${baseKey}/960.webp 960w`,
-      sizes: "(min-width: 768px) 430px, 100vw",
-      alt,
-      position,
-    },
-  }, 201);
 }
 
 function hasMpegFrameHeader(bytes) {

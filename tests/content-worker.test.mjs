@@ -1120,7 +1120,10 @@ test("failed image variants settle before R2 cleanup and release the quota reser
     async get() { return null; },
   };
   const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  const logLines = [];
   globalThis.fetch = async () => Response.json(fixture.jwks);
+  console.error = (line) => logLines.push(line);
   try {
     const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
       method: "POST",
@@ -1134,11 +1137,80 @@ test("failed image variants settle before R2 cleanup and release the quota reser
       }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(response.status, 500);
+    const payload = await response.json();
+    assert.equal(payload.code, "INTERNAL_ERROR");
+    assert.match(payload.requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.equal(logLines.length, 1);
+    assert.deepEqual(JSON.parse(logLines[0]), {
+      event: "media_upload_failed",
+      requestId: payload.requestId,
+      phase: "r2_write",
+      errorName: "Error",
+    });
+    assert.doesNotMatch(logLines[0], /simulated original write failure|photo\.jpg|pastel-gallery-new|실패 원자성 검증 사진|cf-access-jwt-assertion/i);
     assert.equal(cleanupObservedSettledWrites, true);
     assert.equal(objects.size, 0);
     assert.equal(db.mediaSets.size, 0);
   } finally {
     globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
+  }
+});
+
+test("media upload failures return a request reference and log D1 reservation phase without photo data", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const originalPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    const statement = originalPrepare(sql);
+    if (!sql.startsWith("INSERT INTO invitation_media_sets_v2")) return statement;
+    return {
+      bind(...values) { statement.bind(...values); return this; },
+      async run() { throw Object.assign(new Error("synthetic D1 failure"), { code: "D1_ERROR", status: 503 }); },
+    };
+  };
+  let putCount = 0;
+  const bucket = {
+    async put() { putCount += 1; },
+    async get() { return null; },
+    async delete() {},
+  };
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  const logLines = [];
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  console.error = (line) => logLines.push(line);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: await mediaUploadBody({
+        slot: "pastel-gallery-new",
+        alt: "추적용 시험 이미지",
+        original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 500);
+    const payload = await response.json();
+    assert.equal(payload.code, "INTERNAL_ERROR");
+    assert.match(payload.requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.equal(putCount, 0);
+    assert.equal(db.mediaSets.size, 0);
+    assert.equal(logLines.length, 1);
+    assert.deepEqual(JSON.parse(logLines[0]), {
+      event: "media_upload_failed",
+      requestId: payload.requestId,
+      phase: "quota_reserve",
+      errorName: "Error",
+      errorCode: "D1_ERROR",
+      errorStatus: 503,
+    });
+    assert.doesNotMatch(logLines[0], /synthetic D1 failure|photo\.jpg|pastel-gallery-new|추적용 시험 이미지|촬영|EXIF/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
   }
 });
 
@@ -1149,13 +1221,16 @@ test("failed R2 cleanup still releases the media quota reservation", async () =>
     async put(key) {
       if (key.endsWith("/480.webp")) throw new Error("simulated variant write failure");
     },
-    async delete() {
+    delete() {
       throw new Error("simulated cleanup failure");
     },
     async get() { return null; },
   };
   const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  const logLines = [];
   globalThis.fetch = async () => Response.json(fixture.jwks);
+  console.error = (line) => logLines.push(line);
   try {
     const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
       method: "POST",
@@ -1169,9 +1244,95 @@ test("failed R2 cleanup still releases the media quota reservation", async () =>
       }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(response.status, 500);
+    const payload = await response.json();
+    assert.equal(payload.code, "INTERNAL_ERROR");
+    assert.match(payload.requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.equal(db.mediaSets.size, 0);
+    const logs = logLines.map((line) => JSON.parse(line));
+    assert.deepEqual(logs.map((entry) => entry.phase), ["r2_cleanup", "r2_write"]);
+    assert.doesNotMatch(logLines.join("\n"), /simulated variant write failure|simulated cleanup failure|photo\.jpg|pastel-gallery-new|정리 실패 검증 사진|cf-access-jwt-assertion/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
+  }
+});
+
+test("photo uploads fail closed before reserving quota when R2 cleanup is unavailable", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  let putCount = 0;
+  const bucket = {
+    async put() { putCount += 1; },
+    async get() { return null; },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: await mediaUploadBody({
+        slot: "pastel-gallery-new",
+        alt: "미디어 설정 시험 이미지",
+        original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, "MEDIA_UNAVAILABLE");
+    assert.equal(putCount, 0);
     assert.equal(db.mediaSets.size, 0);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("cleanup failure returns a request reference when an expected media error becomes internal", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const bucket = {
+    async put(_key, value) { await storedBytes(value); },
+    async delete() { throw new Error("simulated cleanup failure"); },
+    async get() { return null; },
+  };
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  const logLines = [];
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  console.error = (line) => logLines.push(line);
+  try {
+    const framed = await mediaUploadBody({
+      slot: "pastel-gallery-new",
+      alt: "추적용 시험 이미지",
+      original: new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" }),
+      small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+      large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+    });
+    const withTrailingByte = new Uint8Array(framed.length + 1);
+    withTrailingByte.set(framed);
+    withTrailingByte[withTrailingByte.length - 1] = 1;
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: withTrailingByte,
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 500);
+    const payload = await response.json();
+    assert.equal(payload.code, "INTERNAL_ERROR");
+    assert.match(payload.requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.equal(db.mediaSets.size, 0);
+    assert.equal(logLines.length, 1);
+    assert.deepEqual(JSON.parse(logLines[0]), {
+      event: "media_upload_failed",
+      requestId: payload.requestId,
+      phase: "r2_cleanup",
+      errorName: "Error",
+    });
+    assert.doesNotMatch(logLines[0], /simulated cleanup failure|photo\.jpg|pastel-gallery-new|추적용 시험 이미지|cf-access-jwt-assertion/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
   }
 });
 
