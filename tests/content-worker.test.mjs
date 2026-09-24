@@ -1214,7 +1214,7 @@ test("media upload failures return a request reference and log D1 reservation ph
   }
 });
 
-test("failed R2 cleanup still releases the media quota reservation", async () => {
+test("failed R2 cleanup retains the media quota reservation", async () => {
   const fixture = await accessFixture();
   const db = invitationDatabase();
   const bucket = {
@@ -1247,7 +1247,7 @@ test("failed R2 cleanup still releases the media quota reservation", async () =>
     const payload = await response.json();
     assert.equal(payload.code, "INTERNAL_ERROR");
     assert.match(payload.requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
-    assert.equal(db.mediaSets.size, 0);
+    assert.equal(db.mediaSets.size, 1);
     const logs = logLines.map((line) => JSON.parse(line));
     assert.deepEqual(logs.map((entry) => entry.phase), ["r2_cleanup", "r2_write"]);
     assert.doesNotMatch(logLines.join("\n"), /simulated variant write failure|simulated cleanup failure|photo\.jpg|pastel-gallery-new|정리 실패 검증 사진|cf-access-jwt-assertion/i);
@@ -1321,7 +1321,7 @@ test("cleanup failure returns a request reference when an expected media error b
     const payload = await response.json();
     assert.equal(payload.code, "INTERNAL_ERROR");
     assert.match(payload.requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
-    assert.equal(db.mediaSets.size, 0);
+    assert.equal(db.mediaSets.size, 1);
     assert.equal(logLines.length, 1);
     assert.deepEqual(JSON.parse(logLines[0]), {
       event: "media_upload_failed",
@@ -2365,7 +2365,7 @@ test("media deletion aborts when a revision becomes a live pointer mid-batch", a
   });
 });
 
-test("photo upload cleanup still releases the reservation when R2 delete fails", async () => {
+test("photo upload cleanup retains the reservation when R2 delete fails", async () => {
   const fixture = await accessFixture();
   const db = invitationDatabase();
   const objects = new Map();
@@ -2401,7 +2401,7 @@ test("photo upload cleanup still releases the reservation when R2 delete fails",
       }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
     assert.equal(response.status, 500);
-    assert.equal(db.mediaSets.size, 0);
+    assert.equal(db.mediaSets.size, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2432,7 +2432,7 @@ test("legacy media sets migrate to the v2 quota table on the first media operati
   });
 });
 
-test("media reservations accept totals beyond the retired 30MiB per-set bound", async () => {
+test("old framed clients refresh before large original buffering", async () => {
   const fixture = await accessFixture();
   const db = invitationDatabase();
   const bucket = memoryBucket();
@@ -2458,10 +2458,9 @@ test("media reservations accept totals beyond the retired 30MiB per-set bound", 
         large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
       }),
     }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
-    assert.equal(response.status, 201);
-    const set = [...db.mediaSets.values()][0];
-    assert.equal(set.status, "stored");
-    assert.equal(set.total_bytes > 40 * 1024 * 1024, true);
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "UPLOAD_CLIENT_UPDATE_REQUIRED");
+    assert.equal(db.mediaSets.size, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
