@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { INVITATION_MAX_WIDTH, assertRibbonFrameDimensions, calculatePanelHingeTurn, calculateRootTranslation, createFrameStallGate, createRibbonFrameLoader, createSequentialRibbonScheduler, loadInitialRibbonFrames, loadRibbonManifest } from "./ribbon-player.mjs";
 import "./pastel-intro.css";
+import { PAPER_OPENING_DELAY_MS, PAPER_OPENING_DURATION_MS } from "./opening-timing.js";
 import { drawRibbonFrame, ribbonSpanStyle } from "./ribbon-span.mjs";
 
 export const PASTEL_INTRO_PAPER_OPENING_EVENT = "pastel-intro-paper-opening";
@@ -133,7 +134,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
   const [panelsOpen, setPanelsOpen] = useState(false);
   const [readyToOpen, setReadyToOpen] = useState(false);
   const [openingStarted, setOpeningStarted] = useState(false);
-  const [panelDurationMs, setPanelDurationMs] = useState(1400);
+  const [panelDurationMs, setPanelDurationMs] = useState(PAPER_OPENING_DURATION_MS);
 
   useEffect(() => { finishRef.current = onFinish; }, [onFinish]);
 
@@ -260,16 +261,16 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
           setPanelsOpen(true);
         }
         panelElapsed += delta;
-        const progress = panelCurveProgress(manifest.panelCurve, panelElapsed / manifest.panelDurationMs);
+        const progress = panelCurveProgress(manifest.panelCurve, panelElapsed / PAPER_OPENING_DURATION_MS);
         applyPanelProgress(progress);
         // Measured curves may reach a zero projected paper width before their
-        // recorded 1400ms controller lifetime. Keep the transparent cover
+        // runtime opening duration. Keep the transparent cover
         // alive through that contract; only elapsed panel time ends it.
-        if (panelElapsed >= manifest.panelDurationMs) { finish(); return; }
+        if (panelElapsed >= PAPER_OPENING_DURATION_MS) { finish(); return; }
         panelFrame = window.requestAnimationFrame(paintPanels);
       };
       const openPanels = () => {
-        panelDelayRemaining = manifest.panelDelayMs;
+        panelDelayRemaining = PAPER_OPENING_DELAY_MS;
         panelElapsed = 0;
         panelLastPaint = 0;
         panelFrame = window.requestAnimationFrame(paintPanels);
@@ -329,8 +330,8 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
           document.dispatchEvent(new Event(PASTEL_INTRO_RIBBON_START_EVENT));
           playbackDeadline = performance.now()
             + manifest.frames.length * (1000 / manifest.fps)
-            + manifest.panelDelayMs
-            + manifest.panelDurationMs
+            + PAPER_OPENING_DELAY_MS
+            + PAPER_OPENING_DURATION_MS
             + PLAYBACK_SLACK_MS;
           armPlaybackWatchdog();
           stallGate = createFrameStallGate({ timeoutMs: FRAME_STALL_MS, schedule: window.setTimeout, cancelSchedule: window.clearTimeout, onTimeout: () => finish("asset-stall") });
@@ -347,7 +348,7 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
           });
           if (!active) return;
           verifyEarlyPosterIdentity(manifest);
-          setPanelDurationMs(manifest.panelDurationMs);
+          setPanelDurationMs(PAPER_OPENING_DURATION_MS);
           loader = loaderFactory(manifest, { maxInFlightDecodes: 2, maxPrefetchBytes: 4 * 1024 * 1024 });
           await Promise.all([loader.prefetch(), waitForHeroLayout(manifestController.signal)]);
           if (!active) return;

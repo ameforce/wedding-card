@@ -697,10 +697,10 @@ function validateInvitationPhoto(photo, path, seenSources) {
   if (photo.sizes !== undefined && !validPhotoSizes(photo.sizes)) {
     throw { status: 400, code: "INVALID_CONTENT", message: `${path}.sizes 값을 확인해 주세요.` };
   }
-  requireText(photo.alt, `${path}.alt`, 300);
-  if (!validCropPosition(photo.position)) {
-    throw { status: 400, code: "INVALID_CONTENT", message: `${path}.position 값을 확인해 주세요.` };
-  }
+  // Retired editor fields: fill safe defaults while keeping valid legacy crops.
+  photo.alt = typeof photo.alt === "string" && photo.alt.trim() && photo.alt.trim().length <= 300
+    ? photo.alt.trim() : "웨딩 사진";
+  photo.position = validCropPosition(photo.position) ? photo.position.trim() : "50% 50%";
 }
 
 function derivedEventLabels(isoDate, startTime24h) {

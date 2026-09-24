@@ -84,15 +84,15 @@ function ribbonPlaybackEvidence(overrides = {}) {
       earlyPoster: { present: true, observedBeforeMain: true, sha256: HASH_B },
       handoff: { claimedAt: 910, firstCanvasDrawAt: 900, lateMounts: 0 },
       panelSamples: [{
-        at: terminalAt + 800, leftProgress: 0.5, rightProgress: 0.5,
+        at: terminalAt + 400, leftProgress: 0.5, rightProgress: 0.5,
         leftTransform: hingeMatrix(0.5, 1), rightTransform: hingeMatrix(0.5, -1),
         leftWidth: 196, rightWidth: 196, leftOuterEdge: 0, rightOuterEdge: 390,
         leftInnerEdge: 98, rightInnerEdge: 292,
       }],
-      progressiveHero: [{ at: terminalAt + 800, coverPresent: true, rootTransparent: true, opacity: "1" }],
+      progressiveHero: [{ at: terminalAt + 400, coverPresent: true, rootTransparent: true, opacity: "1" }],
       visibility: { hiddenPause: true, noProgressWhileHidden: true, resumed: true },
-      panelsOpenedAt: terminalAt + 300,
-      removedAt: terminalAt + 1_500,
+      panelsOpenedAt: terminalAt + 16,
+      removedAt: terminalAt + 816,
       coverPresent: false,
       bodyLocked: false,
       finalHero: { sampledAfterCoverRemoved: true, opacity: "1", display: "block", visibility: "visible" },
@@ -121,18 +121,18 @@ function ribbonV2PlaybackEvidence(overrides = {}) {
       earlyPoster: { present: true, observedBeforeMain: true, sha256: HASH_B },
       panelConfig: { panelCurve: ribbonV2Expectation.panelCurve },
       handoff: { claimedAt: 910, firstCanvasDrawAt: 900, lateMounts: 0 },
-      panelsOpenedAt: terminalAt + 600,
+      panelsOpenedAt: terminalAt + 16,
       panelSamples: [{
-        at: terminalAt + measuredMidCurvePoint.offset * 1_400,
+        at: terminalAt + 16 + measuredMidCurvePoint.offset * 800,
         leftProgress: measuredMidCurvePoint.leftProgress, rightProgress: measuredMidCurvePoint.rightProgress,
         leftTransform: hingeMatrix(measuredMidCurvePoint.leftProgress, 1),
         rightTransform: hingeMatrix(measuredMidCurvePoint.rightProgress, -1),
         leftWidth: 196, rightWidth: 196, leftOuterEdge: 0, rightOuterEdge: 390,
         leftInnerEdge: 196 * (1 - measuredMidCurvePoint.leftProgress), rightInnerEdge: 390 - 196 * (1 - measuredMidCurvePoint.rightProgress),
       }],
-      progressiveHero: [{ at: terminalAt + 1_000, coverPresent: true, rootTransparent: true, opacity: "1" }],
+      progressiveHero: [{ at: terminalAt + 400, coverPresent: true, rootTransparent: true, opacity: "1" }],
       visibility: { hiddenPause: true, noProgressWhileHidden: true, resumed: true },
-      removedAt: terminalAt + 2_000,
+      removedAt: terminalAt + 816,
       coverPresent: false,
       bodyLocked: false,
       finalHero: { sampledAfterCoverRemoved: true, opacity: "1", display: "block", visibility: "visible" },
@@ -1060,4 +1060,16 @@ test("local release fixture serves built assets without dev transforms and isola
   assert.equal((await fetch(server.baseUrl, { method: "POST" })).status, 405);
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.match(pkg.scripts["test:sites"], /--test-concurrency=1(?:\s|$)/);
+});
+
+test("production canary uses the fast runtime contract, not immutable authoring timing", () => {
+  assert.equal(ribbonV2Expectation.paperOpening.delayMs, 0);
+  assert.equal(ribbonV2Expectation.paperOpening.durationMs, 800);
+  const evidence = ribbonV2PlaybackEvidence();
+  assert.equal(validateRibbonPlaybackEvidence(evidence), true);
+  evidence.intro.panelsOpenedAt = evidence.intro.draws.at(-1).at - 1;
+  assert.throws(() => validateRibbonPlaybackEvidence(evidence), /terminal frame 전에/);
+  const premature = ribbonV2PlaybackEvidence();
+  premature.intro.removedAt = premature.intro.panelsOpenedAt + 700;
+  assert.throws(() => validateRibbonPlaybackEvidence(premature), /transition 완료 전에/);
 });

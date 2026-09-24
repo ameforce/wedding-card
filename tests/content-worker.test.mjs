@@ -404,7 +404,7 @@ test("Worker accepts exactly four copy lines and dynamic galleries of any size f
   }
 });
 
-test("Worker rejects legacy copy counts, invalid gallery counts, duplicates, and invalid crops", () => {
+test("Worker rejects invalid content and duplicate sources while normalizing legacy crops", () => {
   for (const lineCount of [3, 5]) {
     const document = confirmedDocument();
     document.content.story = Array.from({ length: lineCount }, (_, index) => `이야기 ${index + 1}`);
@@ -448,7 +448,8 @@ test("Worker rejects legacy copy counts, invalid gallery counts, duplicates, and
 
   const invalidCrop = confirmedDocument();
   invalidCrop.photos.pastel.gallery[0].position = "50% 101%";
-  assert.throws(() => __test.validateInvitationDocument(invalidCrop, { write: true }), (error) => error.code === "INVALID_CONTENT");
+  assert.doesNotThrow(() => __test.validateInvitationDocument(invalidCrop, { write: true }));
+  assert.equal(invalidCrop.photos.pastel.gallery[0].position, "50% 50%");
 });
 
 async function storedBytes(value) {
@@ -1019,7 +1020,7 @@ test("Access-authenticated media uploads keep private immutable R2 keys and expo
   }
 });
 
-test("media uploads accept an empty description but document writes still require it", async () => {
+test("media uploads and draft writes work without manual photo descriptions", async () => {
   const fixture = await accessFixture();
   const db = invitationDatabase();
   const objects = new Map();
@@ -1082,16 +1083,18 @@ test("media uploads accept an empty description but document writes still requir
 
     const document = confirmedDocument();
     document.photos.pastel.gallery[0] = payload.photo;
-    assert.throws(() => __test.validateInvitationDocument(document, { write: true }), (error) => error.code === "INVALID_CONTENT");
+    delete document.photos.pastel.gallery[0].position;
+    assert.doesNotThrow(() => __test.validateInvitationDocument(document, { write: true }));
+    assert.equal(document.photos.pastel.gallery[0].alt, "웨딩 사진");
+    assert.equal(document.photos.pastel.gallery[0].position, "50% 50%");
     const draftResponse = await worker.fetch(request("/api/admin/content", {
       method: "PUT",
       headers: { "cf-access-jwt-assertion": fixture.assertion },
       body: JSON.stringify({ document }),
     }), { ...fixture.env, GUESTBOOK_DB: db });
-    assert.equal(draftResponse.status, 400);
+    assert.equal(draftResponse.status, 201);
     const draftPayload = await draftResponse.json();
-    assert.equal(draftPayload.code, "INVALID_CONTENT");
-    assert.equal(typeof draftPayload.fieldErrors["photos.pastel.gallery[0].alt"], "string");
+    assert.equal(typeof draftPayload.revisionId, "string");
   } finally {
     globalThis.fetch = originalFetch;
   }
