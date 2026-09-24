@@ -131,7 +131,17 @@ test("intro suppresses native tap tint, keeps keyboard focus and opens paper wit
     const original = CanvasRenderingContext2D.prototype.drawImage;
     CanvasRenderingContext2D.prototype.drawImage = function (...args) {
       const result = original.apply(this, args);
-      if (this.canvas.matches(".pastel-intro-cover__ribbon")) window.__openingTiming.lastDraw = performance.now();
+      if (args.length === 5 && this.canvas.matches(".pastel-intro-cover__ribbon")) {
+        const pixels = this.getImageData(0, 0, this.canvas.width, this.canvas.height).data;
+        let top = null;
+        for (let index = 3; index < pixels.length; index += 4) if (pixels[index]) { top = Math.floor((index - 3) / 4 / this.canvas.width); break; }
+        const at = performance.now();
+        window.__openingTiming.lastDraw = at;
+        queueMicrotask(() => {
+          const rect = this.canvas.getBoundingClientRect();
+          if (top !== null && window.__openingTiming.exit === undefined && rect.top + top * rect.height / this.canvas.height >= innerHeight + 16) window.__openingTiming.exit = at;
+        });
+      }
       return result;
     };
     document.addEventListener("pastel-intro-paper-opening", () => { window.__openingTiming.paper = performance.now(); });
@@ -160,7 +170,7 @@ test("intro suppresses native tap tint, keeps keyboard focus and opens paper wit
     await start.tap();
     await page.waitForFunction(() => Number.isFinite(window.__openingTiming.opened));
     const timing = await page.evaluate(() => window.__openingTiming);
-    assert.ok(timing.paper - timing.lastDraw >= 0 && timing.paper - timing.lastDraw < 180, "No post-ribbon idle hold");
+    assert.ok(timing.paper - timing.exit >= 0 && timing.paper - timing.exit < 180, "No invisible-tail idle hold");
     assert.ok(timing.opened - timing.paper >= 780 && timing.opened - timing.paper < 1100, "800ms visible paper lifetime");
     await page.waitForSelector(".pastel-intro-cover", { state: "detached" });
     assert.equal(await page.locator(".pastel-intro-cover").count(), 0);
@@ -168,7 +178,7 @@ test("intro suppresses native tap tint, keeps keyboard focus and opens paper wit
     const input = page.locator('input:not([type]), input[type="text"]').first();
     await input.evaluate((element) => { element.value = "selection"; element.focus(); element.setSelectionRange(1, 4); });
     assert.deepEqual(await input.evaluate((element) => [element.selectionStart, element.selectionEnd]), [1, 4]);
-    t.diagnostic(`${browserType.name()}: ribbon-to-paper ${(timing.paper - timing.lastDraw).toFixed(1)}ms, paper ${(timing.opened - timing.paper).toFixed(1)}ms`);
+    t.diagnostic(`${browserType.name()}: ribbon-to-paper ${(timing.paper - timing.exit).toFixed(1)}ms, paper ${(timing.opened - timing.paper).toFixed(1)}ms`);
   } finally {
     await browser.close();
     await server.close();
