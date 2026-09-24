@@ -41,7 +41,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
   border: 0;
 }
 
-.app-shell { min-height: 100vh; padding: 24px 24px 72px; }
+.app-shell { --invitation-top-inset: 24px; min-height: 100vh; padding: var(--invitation-top-inset) 24px 72px; }
 .app-shell.is-capture { padding: 0; background: #fff; }
 .invitation-stage { width: min(100%, 430px); margin: 0 auto; }
 .invitation-loading-paper { min-height: 100vh; padding: clamp(86px, 20vw, 112px) 7% 64px; background: #fbfaf3 url("/assets/design/pastel-paper-fibers.webp") 0 0 / 234px 234px repeat; box-shadow: 0 24px 80px rgba(34, 36, 38, .13); }
@@ -380,7 +380,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .guestbook-delete-dialog-actions button.is-destructive { color: #fff; background: #9b4d58; border-color: #9b4d58; }
 .guestbook-delete-dialog-actions button:disabled { cursor: wait; opacity: .58; }
 
-.music-control-slot { position: fixed; z-index: 50; top: max(12px, env(safe-area-inset-top)); right: max(calc(env(safe-area-inset-right) + 12px), calc((100vw - min(100vw, 430px)) / 2 + 12px)); width: 44px; height: 44px; }
+.music-control-slot { position: fixed; z-index: 50; top: max(12px, env(safe-area-inset-top), var(--invitation-top-inset)); right: max(calc(env(safe-area-inset-right) + 12px), calc((100vw - min(100vw, 430px)) / 2 + 12px)); width: 44px; height: 44px; }
 .music-control { position: static; }
 .music-control button { display: grid; width: 44px; height: 44px; padding: 0; place-items: center; color: #415a79; background: rgba(255, 255, 255, .86); border: 1px solid rgba(71, 98, 127, .16); border-radius: 50%; cursor: pointer; box-shadow: 0 8px 22px rgba(42, 59, 77, .12); backdrop-filter: blur(10px); }
 .music-control button svg { width: 17px; height: 17px; }
@@ -802,7 +802,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 .toast.is-error { background: #713b3b; }
 .toast svg { width: 15px; height: 15px; }
 @media (max-width: 600px) {
-  .app-shell { padding: 0; }
+  .app-shell { --invitation-top-inset: 0px; padding: var(--invitation-top-inset) 0 0; }
   .invitation-stage { width: 100%; max-width: 430px; }
   .invitation { box-shadow: none; }
   .bottom-actions.is-pastel { padding-inline: 18px; }
@@ -815,7 +815,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #315174; outline-offs
 }
 
 @media (min-width: 768px) {
-  .app-shell { padding-top: 112px; }
+  .app-shell { --invitation-top-inset: 112px; padding-top: var(--invitation-top-inset); }
   .invitation-stage { width: 430px; }
   .section-pad { padding-inline: 42px; }
 }
