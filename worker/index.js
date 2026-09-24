@@ -1268,33 +1268,32 @@ function createRequestBodyReader(request, maxBytes, tooLargeError) {
     return bytes;
   }
   function streamExact(size) {
+    const FixedLengthStreamCtor = typeof globalThis.FixedLengthStream === "function" ? globalThis.FixedLengthStream : null;
+    const stream = FixedLengthStreamCtor ? new FixedLengthStreamCtor(size) : new TransformStream();
+    const writer = stream.writable.getWriter();
+    writer.closed.catch(() => { reader?.cancel().catch(() => {}); });
     let remaining = size;
-    return new ReadableStream({
-      async pull(controller) {
-        if (remaining <= 0) {
-          controller.close();
-          return;
-        }
-        try {
+    (async () => {
+      try {
+        while (remaining > 0) {
           let chunk = buffered;
           buffered = new Uint8Array(0);
           if (chunk.byteLength === 0) chunk = await nextChunk();
           if (chunk === null || chunk.byteLength === 0) {
-            controller.error({ status: 400, code: "INVALID_MEDIA_BODY", message: "업로드 본문이 올바르지 않습니다." });
-            return;
+            throw { status: 400, code: "INVALID_MEDIA_BODY", message: "업로드 본문이 올바르지 않습니다." };
           }
           const take = Math.min(remaining, chunk.byteLength);
-          controller.enqueue(chunk.subarray(0, take));
+          await writer.write(chunk.subarray(0, take));
           if (take < chunk.byteLength) buffered = chunk.subarray(take);
           remaining -= take;
-        } catch (error) {
-          controller.error(error);
         }
-      },
-      cancel() {
+        await writer.close();
+      } catch (error) {
         reader?.cancel().catch(() => {});
-      },
-    });
+        await writer.abort(error).catch(() => {});
+      }
+    })();
+    return stream.readable;
   }
   async function readRest(maxSize, tooLarge) {
     const parts = [];

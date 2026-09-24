@@ -1336,6 +1336,55 @@ test("cleanup failure returns a request reference when an expected media error b
   }
 });
 
+test("media upload stores the original through a known-length stream accepted by R2", async () => {
+  const fixture = await accessFixture();
+  const db = invitationDatabase();
+  const objects = new Map();
+  const bucket = {
+    async put(key, value, options) {
+      if (value instanceof ReadableStream && typeof value.expectedLength !== "number") {
+        throw new TypeError("Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)");
+      }
+      objects.set(key, { value: await storedBytes(value), httpMetadata: options.httpMetadata, expectedLength: value?.expectedLength });
+    },
+    async delete(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+    },
+    async get() { return null; },
+  };
+  const originalFetch = globalThis.fetch;
+  const originalFixedLengthStream = globalThis.FixedLengthStream;
+  globalThis.fetch = async () => Response.json(fixture.jwks);
+  globalThis.FixedLengthStream = class extends TransformStream {
+    constructor(expectedLength) {
+      super();
+      this.readable.expectedLength = expectedLength;
+    }
+  };
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/admin/media", {
+      method: "POST",
+      headers: { origin: "https://example.test", "cf-access-jwt-assertion": fixture.assertion, ...MEDIA_UPLOAD_HEADERS },
+      body: await mediaUploadBody({
+        slot: "pastel-gallery-new",
+        alt: "스트림 길이 검증 사진",
+        original: new File([new Uint8Array([1, 2, 3, 9])], "photo.jpg", { type: "image/jpeg" }),
+        small: new File([new Uint8Array([4, 5])], "480.webp", { type: "image/webp" }),
+        large: new File([new Uint8Array([6, 7, 8])], "960.webp", { type: "image/webp" }),
+      }),
+    }), { ...fixture.env, GUESTBOOK_DB: db, WEDDING_MEDIA: bucket });
+    assert.equal(response.status, 201);
+    const originalKey = [...objects.keys()].find((key) => key.endsWith("/original.jpg"));
+    assert.equal(typeof originalKey, "string");
+    assert.equal(objects.get(originalKey).expectedLength, 4);
+    assert.deepEqual(objects.get(originalKey).value, new Uint8Array([1, 2, 3, 9]));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalFixedLengthStream === undefined) delete globalThis.FixedLengthStream;
+    else globalThis.FixedLengthStream = originalFixedLengthStream;
+  }
+});
+
 test("Access-authenticated MP3 uploads use immutable private keys and stream GET, HEAD, and byte ranges", async () => {
   const fixture = await accessFixture();
   const db = invitationDatabase();
