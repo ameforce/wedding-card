@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
+import { RIBBON_ALPHA_TOPS } from "../src/intro/ribbon-alpha-bounds.mjs";
 import { build, createServer, preview } from "vite";
 import sharp from "sharp";
 import { createEarlyPosterMarkup } from "../scripts/intro/early-poster.mjs";
@@ -20,7 +21,7 @@ const expectedFrames = manifest.frames.map((_frame, index) => index);
 
 // Installed before App: observe actual fetch/decode/draw without changing assets,
 // timing, or production code. Keep hero identity/source inside the browser only.
-function instrumentIntro({ frameNames, framePack, terminalIndex, diagnostic = false }) {
+function instrumentIntro({ frameNames, framePack, terminalIndex, alphaTops, diagnostic = false }) {
   const byteIndexes = new WeakMap();
   const packedBuffers = new WeakSet();
   const packOffsets = new Map();
@@ -29,7 +30,7 @@ function instrumentIntro({ frameNames, framePack, terminalIndex, diagnostic = fa
   const blobIndexes = new WeakMap();
   const bitmapIndexes = new WeakMap();
   const evidence = window.__ribbonQA = {
-    draws: [], mounts: 0, mountedAt: null, removedAt: null, openedAt: null,
+    draws: [], mounts: 0, mountedAt: null, removedAt: null, openedAt: null, firstGapAt: null,
     hero: null, heroSource: null, heroPreserved: true, handoff: null, poster: null,
   };
   const timing = diagnostic ? evidence.timing = { rafCallbacks: [], decodes: [], mutationObserver: [], ribbonTrackStyleWrites: [] } : null;
@@ -99,7 +100,7 @@ function instrumentIntro({ frameNames, framePack, terminalIndex, diagnostic = fa
       const index = bitmapIndexes.get(source);
       const at = performance.now();
       let alphaPixels = null;
-      let alphaTop = null;
+      let alphaTop = alphaTops?.[index] ?? null;
       let getImageDataMs = null;
       let alphaScanMs = null;
       if (index >= terminalIndex - 1) {
@@ -152,6 +153,11 @@ function instrumentIntro({ frameNames, framePack, terminalIndex, diagnostic = fa
     if (cover?.classList.contains("pastel-intro-cover--opening-panels") && evidence.openedAt === null) {
       evidence.openedAt = performance.now();
     }
+    if (cover?.classList.contains("pastel-intro-cover--opening-panels") && evidence.firstGapAt === null) {
+      const left = cover.querySelector(".pastel-intro-cover__panel--left")?.getBoundingClientRect();
+      const right = cover.querySelector(".pastel-intro-cover__panel--right")?.getBoundingClientRect();
+      if (right && left && right.left - left.right >= 2) evidence.firstGapAt = performance.now();
+    }
     const hero = document.querySelector(".pastel-hero-photo img, .quiet-invitation .hero-photo img");
     if (hero?.complete && hero.naturalWidth > 0) {
       if (!evidence.hero) {
@@ -182,7 +188,7 @@ async function finalState(page) {
       ancestors.push({ opacity: Number(style.opacity), display: style.display, visibility: style.visibility });
     }
     return {
-      draws: e.draws, mounts: e.mounts, mountedAt: e.mountedAt, removedAt: e.removedAt, openedAt: e.openedAt, handoff: e.handoff,
+      draws: e.draws, mounts: e.mounts, mountedAt: e.mountedAt, removedAt: e.removedAt, openedAt: e.openedAt, firstGapAt: e.firstGapAt, handoff: e.handoff,
       early: window.__pastelIntroEarly ? { shownAt: window.__pastelIntroEarly.shownAt, reason: window.__pastelIntroEarly.reason, status: window.__pastelIntroEarly.status } : null,
       bodyLocked: document.body.classList.contains("intro-lock") || getComputedStyle(document.body).overflow === "hidden" || getComputedStyle(document.documentElement).overflow === "hidden", coverPresent: [...document.querySelectorAll(".pastel-intro-cover, #pastel-intro-early-poster")].some((node) => getComputedStyle(node).display !== "none" && getComputedStyle(node).visibility !== "hidden"),
       heroPreserved: e.heroPreserved && hero === e.hero && hero.currentSrc === e.heroSource,
@@ -208,7 +214,13 @@ function assertCompletePlayback(state, { interrupted = false } = {}) {
   assert.deepEqual(state.draws.map((draw) => draw.index), expectedFrames);
   const terminal = state.draws.at(-1);
   assert.equal(terminal.alphaPixels, 0);
-  assert.ok(state.openedAt - terminal.at >= PAPER_OPENING_DELAY_MS, "Paper must wait at least the transparent terminal before opening.");
+  const exit = state.draws.find((draw) => draw.alphaViewportTop >= draw.viewportHeight + 16);
+  assert.ok(exit, "Actual ribbon pixels must have exited before paper starts.");
+  assert.ok(state.openedAt - exit.at >= PAPER_OPENING_DELAY_MS, "Paper must not start over visible ribbon pixels.");
+  if (!interrupted) {
+    assert.ok(state.openedAt - exit.at < 120, `Paper start must follow visible exit, not terminal: ${state.openedAt - exit.at}ms`);
+    assert.ok(state.firstGapAt - exit.at < 200, `Visible paper gap must not hide a delayed onset: ${state.firstGapAt - exit.at}ms`);
+  }
   assert.ok(state.removedAt >= state.openedAt + PAPER_OPENING_DURATION_MS - 5, `Actual visible panel motion lasted ${(state.removedAt - state.openedAt).toFixed(2)}ms; requires ${PAPER_OPENING_DURATION_MS}ms (5ms observer allowance).`);
   if (!interrupted) {
     const intervals = state.draws.slice(2).map((draw, index) => draw.at - state.draws[index + 1].at).sort((a, b) => a - b);
@@ -256,7 +268,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
   const address = server.httpServer.address();
   assert.equal(typeof address, "object");
   const baseUrl = `http://${lanHost || "127.0.0.1"}:${address.port}`;
-  browser = await chromium.launch({ headless: true });
+  browser = await (process.env.RIBBON_QA_BROWSER === "webkit" ? webkit : chromium).launch({ headless: true });
   if (artifactDir) await mkdir(artifactDir, { recursive: true });
   async function screenshot(page, name) {
     if (artifactDir) {
@@ -274,7 +286,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     const { autoTap = true, ...browserOptions } = options;
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, ...browserOptions });
     assert.equal(await page.evaluate(() => innerWidth), options.viewport?.width ?? 390, "Viewport setup must take effect before loading App.");
-    await page.addInitScript(instrumentIntro, { frameNames: manifest.frames, framePack: manifest.framePack, terminalIndex: manifest.frames.length - 1, diagnostic: timingDiagnostic });
+    await page.addInitScript(instrumentIntro, { frameNames: manifest.frames, framePack: manifest.framePack, terminalIndex: manifest.frames.length - 1, alphaTops: RIBBON_ALPHA_TOPS, diagnostic: timingDiagnostic });
     if (autoTap) page.on("domcontentloaded", () => { void page.locator(".pastel-intro-cover__start").click({ position: { x: 10, y: 10 }, timeout: 8_000 }).catch(() => {}); });
     const network = { responses: [], failures: [], errors: [] };
     page.on("response", (response) => { if (response.url().includes("/ribbon-sequence/")) network.responses.push({ path: new URL(response.url()).pathname, status: response.status() }); });
@@ -311,7 +323,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     });
   }
 
-  await scenarioTest(`all ${manifest.frames.length} real frames precede paper opening; reload mounts again even with reduced motion`, async () => {
+  await scenarioTest(`all ${manifest.frames.length} real frames complete while paper starts on visible exit; reload mounts again even with reduced motion`, async () => {
     const page = await newPage({ reducedMotion: "reduce" });
     try {
       await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
@@ -605,6 +617,10 @@ test("real invitation ribbon preserves every frame and restores access across lo
           return progress >= target - 0.025 && progress <= target + 0.075;
         }, targetProgress);
         const sample = await samplePage.evaluate(() => {
+          // Freeze and sample atomically instead of racing another animation frame.
+          Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+          Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+          document.dispatchEvent(new Event("visibilitychange"));
           const cover = document.querySelector(".pastel-intro-cover");
           const left = cover?.querySelector(".pastel-intro-cover__panel--left");
           const right = cover?.querySelector(".pastel-intro-cover__panel--right");
@@ -614,11 +630,6 @@ test("real invitation ribbon preserves every frame and restores access across lo
             leftTransform: left && getComputedStyle(left).transform,
             rightTransform: right && getComputedStyle(right).transform,
           };
-        });
-        await samplePage.evaluate(() => {
-          Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
-          Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
-          document.dispatchEvent(new Event("visibilitychange"));
         });
         const pausedSample = await samplePage.evaluate(() => {
           const cover = document.querySelector(".pastel-intro-cover");
@@ -822,14 +833,30 @@ test("real invitation ribbon preserves every frame and restores access across lo
       await setHidden(page, true);
       const progress = () => page.locator(".pastel-intro-cover").evaluate((cover) => ({ left: cover.style.getPropertyValue("--pastel-intro-left-progress"), right: cover.style.getPropertyValue("--pastel-intro-right-progress") }));
       const paused = await progress();
+      const pausedDrawCount = await page.evaluate(() => window.__ribbonQA.draws.length);
       await page.waitForTimeout(1800);
       assert.deepEqual(await progress(), paused, "Both panel transforms must remain unchanged while hidden.");
+      assert.equal(await page.evaluate(() => window.__ribbonQA.draws.length), pausedDrawCount, "The parallel offscreen ribbon clock must pause too.");
       await setHidden(page, false);
       const state = await finalState(page);
       assertAccessible(state);
-      assertCompletePlayback(state);
+      assertCompletePlayback(state, { interrupted: true });
       assert.ok(state.removedAt - state.openedAt >= PAPER_OPENING_DURATION_MS + 1800 - 5, "Hidden time must not consume visible panel motion.");
       assert.equal(state.early.reason, "finished");
+    } finally { await page.close(); }
+  });
+
+  await scenarioTest("resize after visible exit never brings ribbon back while both clocks finish", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(baseUrl);
+      await page.waitForFunction(() => window.__ribbonQA.openedAt !== null && window.__ribbonQA.draws.length < 73);
+      assert.equal(await page.locator(".pastel-intro-cover__ribbon-track").evaluate((node) => getComputedStyle(node).visibility), "hidden");
+      await page.setViewportSize({ width: 360, height: 1600 });
+      assert.equal(await page.locator(".pastel-intro-cover__ribbon-track").evaluate((node) => getComputedStyle(node).visibility), "hidden");
+      const state = await finalState(page);
+      assertAccessible(state, 360);
+      assertCompletePlayback(state, { interrupted: true });
     } finally { await page.close(); }
   });
 

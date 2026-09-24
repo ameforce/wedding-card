@@ -1073,3 +1073,27 @@ test("production canary uses the fast runtime contract, not immutable authoring 
   premature.intro.removedAt = premature.intro.panelsOpenedAt + 700;
   assert.throws(() => validateRibbonPlaybackEvidence(premature), /transition 완료 전에/);
 });
+
+test("production canary rejects invisible-tail and visible-onset regressions", () => {
+  const sample = () => {
+    const evidence = ribbonV2PlaybackEvidence();
+    evidence.ribbonExpectation = { ...evidence.ribbonExpectation, paperOpening: { ...evidence.ribbonExpectation.paperOpening, measuredExit: true } };
+    evidence.intro.panelsOpenedAt = 980;
+    evidence.intro.removedAt = 1780;
+    evidence.intro.panelSamples[0].at = 1050;
+    return evidence;
+  };
+  assert.equal(validateRibbonPlaybackEvidence(sample()), true);
+  const early = sample();
+  early.intro.panelsOpenedAt = 960;
+  assert.throws(() => validateRibbonPlaybackEvidence(early), /화면 이탈 전에/);
+  const delayed = sample();
+  delayed.intro.panelsOpenedAt = 1500;
+  assert.throws(() => validateRibbonPlaybackEvidence(delayed), /보이지 않는 프레임/);
+  const imperceptible = sample();
+  imperceptible.intro.panelSamples[0].at = 1250;
+  assert.throws(() => validateRibbonPlaybackEvidence(imperceptible), /실제 봉투 틈/);
+  const reentry = sample();
+  reentry.intro.draws[2] = { ...reentry.intro.draws[2], alphaPixels: 1, alphaViewportTop: 100, viewportHeight: 844 };
+  assert.throws(() => validateRibbonPlaybackEvidence(reentry), /terminal frame/);
+});

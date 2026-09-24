@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { chromium } from "playwright";
+import { supportsMeasuredRibbonExit } from "../src/intro/ribbon-visibility.mjs";
 import { activeDeploymentIdentity } from "./cloudflare-deployment-state.mjs";
 import { PAPER_OPENING_DELAY_MS, PAPER_OPENING_DURATION_MS } from "../src/intro/opening-timing.js";
 
@@ -72,7 +73,7 @@ export function createRibbonExpectation(manifest, { manifestHash, frameHashes, p
     panelDelayMs: manifest.panelDelayMs,
     panelDurationMs: manifest.panelDurationMs,
     // Keep authored metadata distinct from the approved runtime pacing.
-    paperOpening: Object.freeze({ delayMs: PAPER_OPENING_DELAY_MS, durationMs: PAPER_OPENING_DURATION_MS }),
+    paperOpening: Object.freeze({ delayMs: PAPER_OPENING_DELAY_MS, durationMs: PAPER_OPENING_DURATION_MS, measuredExit: supportsMeasuredRibbonExit(manifest) }),
     ...(manifest.framePack ? { framePack: Object.freeze({ ...manifest.framePack }) } : {}),
   };
   if (manifest.framePack) {
@@ -165,7 +166,16 @@ export function validateRibbonPlaybackEvidence({ baseUrl, ribbonExpectation, int
   invariant(intro.draws.every((draw, index) => draw.index === index), "Pastel intro frame 순서 또는 중복 draw가 올바르지 않습니다.");
   const terminal = intro.draws.at(-1);
   invariant(terminal?.alphaPixels === 0, "투명 terminal frame이 canvas에 그려지지 않았습니다.");
-  invariant(Number.isFinite(intro.panelsOpenedAt) && intro.panelsOpenedAt - terminal.at >= ribbonExpectation.paperOpening.delayMs, "paper panel이 transparent terminal frame 전에 열렸습니다.");
+  if (ribbonExpectation.paperOpening.measuredExit) {
+    const exit = intro.draws.find((draw) => draw.alphaPixels > 0 && draw.alphaViewportTop >= draw.viewportHeight + 16);
+    invariant(exit && intro.panelsOpenedAt >= exit.at, "paper panel이 리본의 화면 이탈 전에 열렸습니다.");
+    invariant(intro.draws.slice(exit.index).every((draw) => draw.alphaPixels === 0 || draw.alphaViewportTop >= draw.viewportHeight + 16), "개봉 이후 화면 안으로 돌아오는 리본 프레임이 있습니다.");
+    invariant(intro.panelsOpenedAt - exit.at < 120, "리본 이탈 뒤 보이지 않는 프레임을 기다렸습니다.");
+    const visibleGap = intro.panelSamples?.find((sample) => sample.rightInnerEdge - sample.leftInnerEdge >= 2);
+    invariant(visibleGap && visibleGap.at - exit.at < 200, "리본 이탈 뒤 실제 봉투 틈의 시작이 늦습니다.");
+  } else {
+    invariant(Number.isFinite(intro.panelsOpenedAt) && intro.panelsOpenedAt - terminal.at >= ribbonExpectation.paperOpening.delayMs, "paper panel이 transparent terminal frame 전에 열렸습니다.");
+  }
   invariant(Number.isFinite(intro.removedAt) && intro.removedAt >= intro.panelsOpenedAt + ribbonExpectation.paperOpening.durationMs - 5, "paper panel transition 완료 전에 intro cover가 제거되었습니다.");
   invariant(intro.coverPresent === false && intro.bodyLocked === false, "최종 intro cover 또는 body scroll lock이 남아 있습니다.");
   invariant(intro.finalHero?.sampledAfterCoverRemoved === true, "cover 제거 뒤 최종 hero computed-style sample이 없습니다.");

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { INVITATION_MAX_WIDTH, assertRibbonFrameDimensions, calculatePanelHingeTurn, calculateRootTranslation, createFrameStallGate, createRibbonFrameLoader, createSequentialRibbonScheduler, loadInitialRibbonFrames, loadRibbonManifest } from "./ribbon-player.mjs";
 import "./pastel-intro.css";
+import { canOpenPaperAfterRibbonFrame } from "./ribbon-visibility.mjs";
 import { PAPER_OPENING_DELAY_MS, PAPER_OPENING_DURATION_MS } from "./opening-timing.js";
 import { drawRibbonFrame, ribbonSpanStyle } from "./ribbon-span.mjs";
 
@@ -161,6 +162,8 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
       let playbackDeadline = 0;
       let preparationComplete = false;
       let hiddenAt = document.hidden ? performance.now() : null;
+      let panelsStarted = false;
+      let panelsFinished = false;
       let panelElapsed = 0;
       let panelLastPaint = 0;
       let panelDelayRemaining = 0;
@@ -266,10 +269,19 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
         // Measured curves may reach a zero projected paper width before their
         // runtime opening duration. Keep the transparent cover
         // alive through that contract; only elapsed panel time ends it.
-        if (panelElapsed >= PAPER_OPENING_DURATION_MS) { finish(); return; }
+        if (panelElapsed >= PAPER_OPENING_DURATION_MS) {
+          panelsFinished = true;
+          if (scheduler?.completed) finish();
+          return;
+        }
         panelFrame = window.requestAnimationFrame(paintPanels);
       };
       const openPanels = () => {
+        if (panelsStarted) return;
+        panelsStarted = true;
+        // Retire the already-exited surface so a later resize cannot bring it
+        // back. The scheduler still completes all accepted frames in order.
+        if (ribbonTrackRef.current) ribbonTrackRef.current.style.visibility = "hidden";
         panelDelayRemaining = PAPER_OPENING_DELAY_MS;
         panelElapsed = 0;
         panelLastPaint = 0;
@@ -298,8 +310,10 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
             drawFrame(canvasRef.current, frame, manifest, frameIndex);
             applyRootTranslation(frameIndex);
             if (!firstDrawn) { firstDrawn = true; setFrameLive(true); }
-            if (scheduler.markDrawn(frameIndex, now)) {
-              openPanels();
+            const completed = scheduler.markDrawn(frameIndex, now);
+            if (completed || (!panelsStarted && canOpenPaperAfterRibbonFrame(manifest, frameIndex, { width: window.innerWidth, height: window.innerHeight }))) openPanels();
+            if (completed) {
+              if (panelsFinished) finish();
               return;
             }
             prepareWindow();
@@ -377,8 +391,8 @@ export function PastelIntroCover({ onFinish, manifestUrl = MANIFEST_URL, loaderF
         }
         if (!preparationComplete) armAssetWatchdog();
         armPlaybackWatchdog();
-        if (scheduler?.completed) { panelLastPaint = 0; panelFrame = window.requestAnimationFrame(paintPanels); }
-        else if (scheduler) animationFrame = window.requestAnimationFrame(animate);
+        if (panelsStarted && !panelsFinished) { panelLastPaint = 0; panelFrame = window.requestAnimationFrame(paintPanels); }
+        if (scheduler && !scheduler.completed) animationFrame = window.requestAnimationFrame(animate);
       };
       const onResize = () => applyRootTranslation(Math.max(0, (scheduler?.nextFrameIndex || 1) - 1));
 
