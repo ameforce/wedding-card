@@ -1,4 +1,5 @@
 import { WEDDING_PHOTOS } from "../content.js";
+import { normalizePhotoPresentation } from "../photo-presentation.js";
 
 export const CONTENT_SCHEMA_VERSION = 2;
 const SUPPORTED_CONTENT_SCHEMA_VERSIONS = new Set([1, CONTENT_SCHEMA_VERSION]);
@@ -7,7 +8,6 @@ const MAX_LENGTH = {
   name: 50,
   short: 80,
   copy: 240,
-  photoAlt: 300,
   photoUrl: 2048,
   url: 2048,
   accountNumber: 40,
@@ -150,7 +150,7 @@ function displayDiffValue(value, counterpart, current) {
         .join(" · ");
     }
     if (typeof value.alt === "string") {
-      return [value.alt, mediaLabel(value.src, counterpart?.src, current), value.position].filter(Boolean).join(" · ");
+      return mediaLabel(value.src, counterpart?.src, current);
     }
     if (typeof value.bank === "string" || typeof value.number === "string") {
       return [`${value.bank ?? ""} ${value.number ?? ""}`.trim(), value.holder && `예금주 ${value.holder}`].filter(Boolean).join(" · ");
@@ -278,8 +278,6 @@ export function validateEditableContentDocument(document, { allowLocalPreview = 
       errors[`${label} 반응형 파일`] = `${label} 480px 및 960px 반응형 파일을 확인해 주세요.`;
     }
     if (photo?.sizes !== undefined && !photoSizes(photo.sizes)) errors[`${label} 표시 크기`] = `${label} 표시 크기를 확인해 주세요.`;
-    if (!photo?.alt?.trim() || photo.alt.length > MAX_LENGTH.photoAlt) errors[`${label} 대체 텍스트`] = `${label} 대체 텍스트를 확인해 주세요.`;
-    if (!cropPosition(photo?.position, "")) errors[`${label} 초점 위치`] = `${label} 초점 위치를 백분율 두 개로 입력해 주세요. 예: 50% 58%`;
   });
   return errors;
 }
@@ -288,6 +286,12 @@ export const validateContentDocument = validateEditableContentDocument;
 
 export function serializeContentDocument(document, { allowLocalPreview = false } = {}) {
   const serialized = clone(document);
+  if (serialized.photos?.pastel) {
+    serialized.photos.pastel.hero = normalizePhotoPresentation(serialized.photos.pastel.hero);
+    if (Array.isArray(serialized.photos.pastel.gallery)) {
+      serialized.photos.pastel.gallery = serialized.photos.pastel.gallery.map(normalizePhotoPresentation);
+    }
+  }
   const derived = deriveEventDisplay(serialized?.content?.event?.isoDate, serialized?.content?.event?.startTime24h);
   if (derived) {
     Object.assign(serialized.content.event, derived);
@@ -298,13 +302,6 @@ export function serializeContentDocument(document, { allowLocalPreview = false }
     throw Object.assign(new Error(Object.values(fieldErrors)[0]), { code: "INVALID_CONTENT", fieldErrors });
   }
   return serialized;
-}
-
-function cropPosition(value, fallback) {
-  if (typeof value !== "string") return fallback;
-  const match = value.trim().match(/^(\d{1,3})%\s+(\d{1,3})%$/);
-  if (!match || Number(match[1]) > 100 || Number(match[2]) > 100) return fallback;
-  return `${Number(match[1])}% ${Number(match[2])}%`;
 }
 
 function normalizeAccountNumber(value) {
@@ -415,7 +412,7 @@ function normalizeMusic(value, fallback, { allowLocalPreview = false } = {}) {
 
 function normalizeEditablePhoto(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const normalized = { ...value };
+  const normalized = normalizePhotoPresentation(value);
   for (const key of ["src", "srcSet", "sizes", "alt", "position"]) {
     if (typeof normalized[key] === "string") normalized[key] = normalized[key].trim();
   }

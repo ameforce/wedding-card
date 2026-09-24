@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { chromium } from "playwright";
 import { activeDeploymentIdentity } from "./cloudflare-deployment-state.mjs";
+import { PAPER_OPENING_DELAY_MS, PAPER_OPENING_DURATION_MS } from "../src/intro/opening-timing.js";
 
 const DEFAULT_BASE_URL = "https://wdcard.enmsoftware.com/";
 const HTTP_TIMEOUT_MS = 20_000;
@@ -70,6 +71,8 @@ export function createRibbonExpectation(manifest, { manifestHash, frameHashes, p
     frameHashes: Object.freeze({ ...frameHashes }),
     panelDelayMs: manifest.panelDelayMs,
     panelDurationMs: manifest.panelDurationMs,
+    // Keep authored metadata distinct from the approved runtime pacing.
+    paperOpening: Object.freeze({ delayMs: PAPER_OPENING_DELAY_MS, durationMs: PAPER_OPENING_DURATION_MS }),
     ...(manifest.framePack ? { framePack: Object.freeze({ ...manifest.framePack }) } : {}),
   };
   if (manifest.framePack) {
@@ -162,8 +165,8 @@ export function validateRibbonPlaybackEvidence({ baseUrl, ribbonExpectation, int
   invariant(intro.draws.every((draw, index) => draw.index === index), "Pastel intro frame 순서 또는 중복 draw가 올바르지 않습니다.");
   const terminal = intro.draws.at(-1);
   invariant(terminal?.alphaPixels === 0, "투명 terminal frame이 canvas에 그려지지 않았습니다.");
-  invariant(Number.isFinite(intro.panelsOpenedAt) && intro.panelsOpenedAt - terminal.at >= ribbonExpectation.panelDelayMs, "paper panel이 terminal frame 뒤 manifest delay 전에 열렸습니다.");
-  invariant(Number.isFinite(intro.removedAt) && intro.removedAt >= intro.panelsOpenedAt + ribbonExpectation.panelDurationMs - 5, "paper panel transition 완료 전에 intro cover가 제거되었습니다.");
+  invariant(Number.isFinite(intro.panelsOpenedAt) && intro.panelsOpenedAt - terminal.at >= ribbonExpectation.paperOpening.delayMs, "paper panel이 transparent terminal frame 전에 열렸습니다.");
+  invariant(Number.isFinite(intro.removedAt) && intro.removedAt >= intro.panelsOpenedAt + ribbonExpectation.paperOpening.durationMs - 5, "paper panel transition 완료 전에 intro cover가 제거되었습니다.");
   invariant(intro.coverPresent === false && intro.bodyLocked === false, "최종 intro cover 또는 body scroll lock이 남아 있습니다.");
   invariant(intro.finalHero?.sampledAfterCoverRemoved === true, "cover 제거 뒤 최종 hero computed-style sample이 없습니다.");
   invariant(Number(intro.finalHero.opacity) > 0 && intro.finalHero.display !== "none" && intro.finalHero.visibility === "visible", "cover 제거 뒤 hero가 표시 상태가 아닙니다.");

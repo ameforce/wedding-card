@@ -1,0 +1,25 @@
+.content-admin-gallery-layout { display: grid; min-width: 0; gap: 12px; }
+.content-admin-gallery-layout > p { margin: 0; color: #526779; font-size: 13px; line-height: 1.8; }
+.content-admin-gallery-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; width: 100%; max-width: 366px; margin-inline: auto; }
+.content-admin-gallery-tile { position: relative; width: 100%; min-width: 0; aspect-ratio: 3 / 4; padding: 0; overflow: hidden; background: #d8e3ec; border: 0; border-radius: 3px; cursor: grab; -webkit-user-select: none; user-select: none; }
+.content-admin-gallery-tile.is-small { grid-column: span 2; }
+.content-admin-gallery-tile.is-large { grid-column: span 3; aspect-ratio: 4 / 5; }
+.content-admin-gallery-tile.is-full { grid-column: 1 / -1; aspect-ratio: 4 / 5; }
+.content-admin-gallery-tile img { display: block; width: 100%; height: 100%; object-fit: cover; filter: saturate(.84) contrast(.96) brightness(1.02); pointer-events: none; }
+.content-admin-gallery-tile.is-selected { outline: 3px solid #496d90; outline-offset: -3px; }
+.content-admin-gallery-tile:focus-visible { outline: 3px solid #063d72; outline-offset: -3px; }
+.content-admin-gallery-tile.is-dragging { opacity: .45; }
+.content-admin-gallery-tile.is-drop-target { outline: 3px dashed #063d72; outline-offset: -3px; }
+.content-admin-gallery-tile:disabled { cursor: not-allowed; }
+.content-admin-gallery-index { position: absolute; left: 6px; top: 6px; min-width: 26px; padding: 3px 6px; border-radius: 5px; color: #263648; background: rgba(255,255,255,.94); font-size: 13px; font-weight: 700; pointer-events: none; }
+.content-admin-gallery-drop { position: absolute; inset: auto 0 0; padding: 8px 2px; color: white; background: #496d90; font-size: 13px; pointer-events: none; }
+.content-admin-gallery-layout > .content-admin-gallery-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.content-admin-photo-card.is-hero, .content-admin-photo-card.is-gallery-controls { grid-template-columns: minmax(0, 1fr); }
+.content-admin-photo-card.is-hero > img { display: block; width: 86%; max-width: 335px; height: auto; margin: 12px auto; aspect-ratio: 4 / 5; border-radius: 48% 48% 12px 12px; }
+.content-admin-photo-card.is-gallery-controls .content-admin-photo-heading { flex-wrap: wrap; }
+.content-admin-photo-actions button { width: 44px; height: 44px; }
+.content-admin-file:focus-within { outline: 2px solid #063d72; outline-offset: 3px; }
+.content-admin-gallery-tile::after { content: ""; position: absolute; inset: 0; border: 3px solid transparent; border-radius: inherit; pointer-events: none; }
+.content-admin-gallery-tile.is-selected::after { border-color: #496d90; }
+.content-admin-gallery-tile:focus-visible::after { border-color: #063d72; }
+.content-admin-gallery-tile.is-drop-target::after { border-color: #063d72; border-style: dashed; }

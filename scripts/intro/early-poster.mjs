@@ -43,7 +43,7 @@ export function createEarlyPosterMarkup() {
 <style id="pastel-intro-early-style">
 html.early-intro-enabled,html.early-intro-enabled body{overflow:hidden}
 html.early-intro-enabled{--pastel-intro-paper-image:url("${paper}")}
-#pastel-intro-early-poster{position:fixed;z-index:200;inset:0;display:none;overflow:hidden;isolation:isolate;background:#f7f0e4;touch-action:none;cursor:pointer;--pastel-intro-left-turn:0deg;--pastel-intro-right-turn:0deg}
+#pastel-intro-early-poster{position:fixed;z-index:200;inset:0;display:none;overflow:hidden;isolation:isolate;background:#f7f0e4;touch-action:none;cursor:pointer;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;--pastel-intro-left-turn:0deg;--pastel-intro-right-turn:0deg}
 html.early-intro-enabled #pastel-intro-early-poster{display:block}
 #pastel-intro-early-poster[data-handoff="claimed"]{visibility:hidden;pointer-events:none}
 #pastel-intro-early-poster .pastel-intro-cover__envelope{position:absolute;z-index:1;inset-block:0;left:50%;width:min(100vw,430px);transform:translateX(-50%)}
