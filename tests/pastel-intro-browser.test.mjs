@@ -424,13 +424,16 @@ test("real invitation ribbon preserves every frame and restores access across lo
           const slot = document.querySelector(".music-control-slot");
           const button = slot.querySelector("button").getBoundingClientRect();
           const paper = document.querySelector(".invitation-stage").getBoundingClientRect();
-          return { position: getComputedStyle(slot).position, top: button.top, right: button.right, left: button.left, paperLeft: paper.left, paperRight: paper.right };
+          return { position: getComputedStyle(slot).position, top: button.top, bottom: button.bottom, right: button.right, left: button.left, paperTop: paper.top, paperBottom: paper.bottom, paperLeft: paper.left, paperRight: paper.right };
         });
         const before = await geometry();
+        if (width === 1440) await screenshot(page, "music-control-desktop");
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2));
         const after = await geometry();
         assert.equal(before.position, "fixed");
         assert.ok(before.left >= before.paperLeft && before.right <= before.paperRight, `music at ${width}px must stay inside the invitation`);
+        assert.ok(before.top >= before.paperTop && before.bottom <= before.paperBottom, `music at ${width}px must stay inside the invitation vertically (button ${before.top}-${before.bottom}, invitation ${before.paperTop}-${before.paperBottom})`);
+        if (width >= 768) assert.equal(before.top, before.paperTop, `music at ${width}px must align with the invitation's top edge`);
         assert.ok(Math.abs(after.top - before.top) < 1 && Math.abs(after.right - before.right) < 1, `music at ${width}px must follow scrolling`);
         await page.locator(".pastel-gallery-item").first().click();
         assert.equal(await page.evaluate(() => {
@@ -438,6 +441,30 @@ test("real invitation ribbon preserves every frame and restores access across lo
           return Boolean(document.elementFromPoint(button.left + button.width / 2, button.top + button.height / 2)?.closest(".gallery-lightbox"));
         }), true);
         await page.locator(".lightbox-close").click();
+      } finally { await page.close(); }
+    }
+  });
+
+  await scenarioTest("fixed music stays inside the Quiet invitation across required widths", async () => {
+    for (const width of [360, 390, 430, 768, 1440]) {
+      const page = await newPage({ viewport: { width, height: 900 } });
+      try {
+        await page.goto(`${baseUrl}/?variant=quiet`, { waitUntil: "domcontentloaded" });
+        await page.waitForSelector(".music-control button");
+        const geometry = () => page.evaluate(() => {
+          const slot = document.querySelector(".music-control-slot");
+          const button = slot.querySelector("button").getBoundingClientRect();
+          const paper = document.querySelector(".invitation-stage").getBoundingClientRect();
+          return { position: getComputedStyle(slot).position, top: button.top, bottom: button.bottom, right: button.right, left: button.left, paperTop: paper.top, paperBottom: paper.bottom, paperLeft: paper.left, paperRight: paper.right };
+        });
+        const before = await geometry();
+        assert.equal(before.position, "fixed");
+        assert.ok(before.left >= before.paperLeft && before.right <= before.paperRight, `music at ${width}px must stay inside the Quiet invitation`);
+        assert.ok(before.top >= before.paperTop && before.bottom <= before.paperBottom, `music at ${width}px must stay vertically inside the Quiet invitation`);
+        if (width >= 768) assert.equal(before.top, before.paperTop, `music at ${width}px must align with the Quiet invitation's top edge`);
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2));
+        const after = await geometry();
+        assert.ok(Math.abs(after.top - before.top) < 1 && Math.abs(after.right - before.right) < 1, `music at ${width}px must follow scrolling in the Quiet invitation`);
       } finally { await page.close(); }
     }
   });
