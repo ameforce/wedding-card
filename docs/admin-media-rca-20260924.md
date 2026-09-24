@@ -42,3 +42,11 @@ Already-open old clients are supported only for framed photo bodies no larger th
 Release through the existing hotfix/PR/main flow and protected GitHub Actions controller. Migration 0008 is additive and does not rewrite existing content. No user media or invitation revision was deleted or published to perform these tests. The user-reported original failed files were not supplied to this verification, and an authenticated production media upload must not be reported as passed merely from local tests or unauthenticated deployment canaries.
 
 After deployment, refresh `/admin`, select photos, review required/remaining bytes, then press the explicit upload button. Use stored-media checkboxes and the batch confirmation to remove selected stored objects. A gallery-only removal continues to modify the document without deleting R2 objects.
+
+## CI release-blocker follow-up
+
+Run `36005208044` passed all photo/upload tests but failed the local warm-ribbon canary. Its diagnostic reported cover mount at about 4878ms and fail-open removal at about 5189ms, with no ribbon frames drawn. The test was serving cold Vite development transforms, while the application deliberately retains a five-second readiness deadline. The new large workerd and browser suites also ran concurrently with that timing-sensitive test in the shared CI runner. The sibling integration run `36005184163` passed the same source, demonstrating execution-sensitive rather than deterministic upload failure.
+
+The test now serves the actual `dist/client` build through a loopback-only fixture, preserving the published bootstrap, exact SHA/version headers, production `connect-src 'self'` constraint and media aliases. Ribbon expectations are read from that built artifact rather than the source directory. Worker/Sites files run with `--test-concurrency=1` so 270MiB upload stress and separate browser processes do not consume the render test's startup budget. The upload stress test still exercises three concurrent originals internally.
+
+No production timeout, animation, acceptance assertion, authentication boundary or deploy gate was relaxed. Regression checks require production bundle URLs, absence of Vite development modules, actual built asset responses and isolated suite execution. Runtime application files are unchanged by this follow-up.
