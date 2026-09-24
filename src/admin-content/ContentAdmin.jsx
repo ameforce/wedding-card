@@ -31,6 +31,11 @@ import {
 } from "./public-content.jsx";
 import { AdminShell } from "./AdminShell.jsx";
 
+function formatAdminError(error, fallbackMessage) {
+  const message = error?.message || fallbackMessage;
+  return typeof error?.requestId === "string" ? `${message} (참조 번호: ${error.requestId})` : message;
+}
+
 function setAtPath(document, path, value) {
   const next = cloneContentDocument(document);
   let target = next;
@@ -400,7 +405,7 @@ export function ContentAdmin() {
       setStatus({ tone: "error", message: "승인된 Google 계정으로 다시 로그인해 주세요." });
       return;
     }
-    setStatus({ tone: "error", message: error.message || fallbackMessage });
+    setStatus({ tone: "error", message: formatAdminError(error, fallbackMessage) });
   }, []);
 
   const load = useCallback(async ({ preserveEditingDocument = false } = {}) => {
@@ -753,7 +758,7 @@ export function ContentAdmin() {
             showAdminError(error, "사진을 처리하지 못했습니다.");
             return;
           }
-          failures.push(`${file.name}: ${error?.message || "업로드하지 못했습니다."}`);
+          failures.push(`${file.name}: ${formatAdminError(error, "업로드하지 못했습니다.")}`);
           if (error?.status === 507 || error?.code === "MEDIA_STORAGE_LIMIT") {
             skipped = files.length - index - 1;
             break;

@@ -152,6 +152,9 @@ function createRequestError(response, payload) {
   error.code = typeof payload?.code === "string" ? payload.code : null;
   error.fieldErrors = payload?.fieldErrors && typeof payload.fieldErrors === "object" ? payload.fieldErrors : null;
   error.dependentRevisions = Array.isArray(payload?.dependentRevisions) ? payload.dependentRevisions : null;
+  error.requestId = typeof payload?.requestId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.requestId)
+    ? payload.requestId
+    : null;
   return error;
 }
 
@@ -229,24 +232,19 @@ async function imageBitmap(file) {
   return createImageBitmap(file, { imageOrientation: "from-image" });
 }
 
-async function resizeWebp(file, maxWidth) {
-  const bitmap = await imageBitmap(file);
-  try {
-    const width = Math.min(maxWidth, bitmap.width);
-    const height = Math.max(1, Math.round(bitmap.height * (width / bitmap.width)));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d", { alpha: false });
-    if (!context) throw new Error("이미지를 처리하지 못했습니다.");
-    context.drawImage(bitmap, 0, 0, width, height);
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob((value) => value ? resolve(value) : reject(new Error("WebP 이미지를 만들지 못했습니다.")), "image/webp", 0.86);
-    });
-    return new File([blob], `${maxWidth}.webp`, { type: "image/webp" });
-  } finally {
-    bitmap.close();
-  }
+async function resizeWebp(bitmap, maxWidth) {
+  const width = Math.min(maxWidth, bitmap.width);
+  const height = Math.max(1, Math.round(bitmap.height * (width / bitmap.width)));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) throw new Error("이미지를 처리하지 못했습니다.");
+  context.drawImage(bitmap, 0, 0, width, height);
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob((value) => value ? resolve(value) : reject(new Error("WebP 이미지를 만들지 못했습니다.")), "image/webp", 0.86);
+  });
+  return new File([blob], `${maxWidth}.webp`, { type: "image/webp" });
 }
 
 function blobAsDataUrl(blob) {
@@ -333,8 +331,14 @@ async function optimizedFiles(file) {
     throw new Error("JPG, PNG 또는 WebP 이미지를 선택해 주세요.");
   }
   if (file.size > MAX_IMAGE_FILE_BYTES) throw new Error("원본 이미지는 90MB 이하만 업로드할 수 있습니다.");
-  const [small, large] = await Promise.all([resizeWebp(file, 480), resizeWebp(file, 960)]);
-  return { small, large };
+  const bitmap = await imageBitmap(file);
+  try {
+    const small = await resizeWebp(bitmap, 480);
+    const large = await resizeWebp(bitmap, 960);
+    return { small, large };
+  } finally {
+    bitmap.close();
+  }
 }
 
 /**
