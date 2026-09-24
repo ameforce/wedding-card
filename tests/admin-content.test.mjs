@@ -944,15 +944,21 @@ test("photo uploads send the framed octet-stream body", async () => {
   const variantBytes = new Uint8Array([9, 9, 9]);
   const originalCreateImageBitmap = globalThis.createImageBitmap;
   const originalDocument = globalThis.document;
-  globalThis.createImageBitmap = async () => ({ width: 4000, height: 3000, close() {} });
+  let bitmapCalls = 0;
+  let bitmapCloses = 0;
+  const canvases = [];
+  const bitmap = { width: 6336, height: 9504, close() { bitmapCloses += 1; } };
+  globalThis.createImageBitmap = async () => { bitmapCalls += 1; return bitmap; };
   globalThis.document = {
     createElement() {
-      return {
+      const canvas = {
         width: 0,
         height: 0,
         getContext() { return { drawImage() {} }; },
         toBlob(callback) { callback(new Blob([variantBytes], { type: "image/webp" })); },
       };
+      canvases.push(canvas);
+      return canvas;
     },
   };
   const sent = [];
@@ -1010,6 +1016,61 @@ test("photo uploads send the framed octet-stream body", async () => {
       { phase: "optimize" },
       { phase: "upload", loaded: 0, total: 0 },
     ]);
+    assert.equal(bitmapCalls, 1);
+    assert.equal(bitmapCloses, 1);
+    assert.deepEqual(canvases.slice(0, 2).map(({ width, height }) => [width, height]), [[480, 720], [960, 1440]]);
+
+    class FailedPhotoXhr {
+      constructor() { this.upload = {}; }
+      open() {}
+      setRequestHeader() {}
+      send() {
+        this.status = 500;
+        this.responseText = JSON.stringify({
+          code: "INTERNAL_ERROR",
+          message: "사진 업로드를 처리하지 못했습니다.",
+          requestId: "00000000-0000-4000-8000-000000000001",
+        });
+        this.onload();
+      }
+    }
+    const failedCloud = createCloudflareContentAdapter({
+      staticContent: weddingContent,
+      fetchImpl: async () => { throw new Error("fetch must not be used when XHR is available"); },
+      xhrImpl: FailedPhotoXhr,
+    });
+    await assert.rejects(failedCloud.uploadPhoto({ slot: "pastel-hero", file, alt: "", position: "50% 50%" }), (error) => {
+      assert.equal(error.status, 500);
+      assert.equal(error.code, "INTERNAL_ERROR");
+      assert.equal(error.requestId, "00000000-0000-4000-8000-000000000001");
+      assert.equal(error.message, "사진 업로드를 처리하지 못했습니다.");
+      return true;
+    });
+    assert.equal(bitmapCalls, 2);
+    assert.equal(bitmapCloses, 2);
+
+    class InvalidRequestIdXhr extends FailedPhotoXhr {
+      send() {
+        this.status = 500;
+        this.responseText = JSON.stringify({
+          code: "INTERNAL_ERROR",
+          message: "사진 업로드를 처리하지 못했습니다.",
+          requestId: "not-a-uuid",
+        });
+        this.onload();
+      }
+    }
+    const invalidIdCloud = createCloudflareContentAdapter({
+      staticContent: weddingContent,
+      fetchImpl: async () => { throw new Error("fetch must not be used when XHR is available"); },
+      xhrImpl: InvalidRequestIdXhr,
+    });
+    await assert.rejects(invalidIdCloud.uploadPhoto({ slot: "pastel-hero", file, alt: "", position: "50% 50%" }), (error) => {
+      assert.equal(error.requestId, null);
+      return true;
+    });
+    assert.equal(bitmapCalls, 3);
+    assert.equal(bitmapCloses, 3);
   } finally {
     globalThis.createImageBitmap = originalCreateImageBitmap;
     globalThis.document = originalDocument;
@@ -1088,6 +1149,9 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.match(source, /\/api\/admin\/media|uploadPhoto/);
   assert.match(source, /type="file" multiple accept="image\/jpeg,image\/png,image\/webp"/);
   assert.match(source, /uploadGalleryPhotos/);
+  assert.match(source, /function formatAdminError\(error, fallbackMessage\)/);
+  assert.match(source, /message: formatAdminError\(error, fallbackMessage\)/);
+  assert.match(source, /failures\.push\(`\$\{file\.name\}: \$\{formatAdminError\(error, "업로드하지 못했습니다\."\)\}`\)/);
   assert.match(source, /for \(const \[index, file\] of files\.entries\(\)\)/);
   assert.match(source, /file\.size > remainingBytes/);
   assert.match(source, /error\?\.status === 507 \|\| error\?\.code === "MEDIA_STORAGE_LIMIT"/);

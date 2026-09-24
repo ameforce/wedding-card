@@ -205,10 +205,28 @@ test("credential verification has a bounded per-isolate concurrency ceiling", as
   assert.deepEqual(await Promise.all(active), [true, true, true, true]);
 });
 
-test("worker source never logs guestbook payloads, passwords, messages, or hashes", async () => {
+test("worker logs only sanitized media-upload failures and never logs guestbook content", async () => {
   const source = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /console\.(?:log|info|warn|error|debug)\s*\(/);
+  const loggerStart = source.indexOf("function logMediaUploadFailure(requestId, phase, error)");
+  const loggerEnd = source.indexOf("async function uploadInvitationMedia(request, env)", loggerStart);
+  assert.ok(loggerStart >= 0 && loggerEnd > loggerStart);
+  const mediaUploadLogger = source.slice(loggerStart, loggerEnd);
+  const sourceWithoutMediaUploadLogger = `${source.slice(0, loggerStart)}${source.slice(loggerEnd)}`;
+  assert.doesNotMatch(sourceWithoutMediaUploadLogger, /\bconsole\b/);
   assert.doesNotMatch(source, /JSON\.stringify\([^)]*password_hash/);
+  assert.match(mediaUploadLogger, /event: "media_upload_failed"/);
+  assert.doesNotMatch(mediaUploadLogger, /\b(?:message|stack|password|email|token|assertion|alt|filename|account)\b/i);
+  assert.match(mediaUploadLogger, /console\.error\(JSON\.stringify\(entry\)\)/);
+  assert.equal((mediaUploadLogger.match(/\bconsole\b/g) || []).length, 1);
+  const uploadStart = loggerEnd;
+  const uploadEnd = source.indexOf("async function uploadInvitationAudio(request, env)", uploadStart);
+  assert.ok(uploadEnd > uploadStart);
+  const uploadSource = source.slice(uploadStart, uploadEnd);
+  const phaseAssignments = Array.from(uploadSource.matchAll(/\bphase\s*=\s*([^;]+);/g), (match) => match[1].trim());
+  assert.ok(phaseAssignments.length > 0);
+  assert.ok(phaseAssignments.every((phase) => /^"(?:same_origin|admin_auth|database|request_size|media_bucket|body_header|body_variants|quota_reserve|r2_write|body_end|quota_commit|media_usage)"$/.test(phase)), phaseAssignments.join(", "));
+  const loggerPhaseArguments = Array.from(uploadSource.matchAll(/logMediaUploadFailure\(requestId,\s*([^,]+),/g), (match) => match[1].trim());
+  assert.deepEqual(loggerPhaseArguments, ["index === 0 ? \"r2_cleanup\" : \"quota_release\"", "phase"]);
 });
 
 test("public guestbook has no list endpoint and fails closed without D1", async () => {
