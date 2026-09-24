@@ -7,6 +7,10 @@
   background: transparent;
   touch-action: none;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   --pastel-intro-left-progress: 0;
   --pastel-intro-right-progress: 0;
   --pastel-intro-left-turn: 0deg;
@@ -160,6 +164,8 @@
   cursor: pointer;
   font: inherit;
   touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
 }
 
 .pastel-intro-cover .pastel-intro-cover__start span {

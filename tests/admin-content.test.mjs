@@ -87,7 +87,7 @@ test("gallery normalization preserves supported documents without filling or tru
   }
 });
 
-test("invalid gallery counts and incomplete photo metadata are rejected without fallback inheritance", () => {
+test("invalid gallery counts stay invalid while retired presentation fields get automatic defaults", () => {
   const empty = createContentDocument(weddingContent);
   empty.photos.pastel.gallery = [];
   assert.equal(typeof validateEditableContentDocument(normalizeContentDocument(empty, weddingContent))["사진"], "string");
@@ -106,20 +106,20 @@ test("invalid gallery counts and incomplete photo metadata are rejected without 
   missing.photos.pastel.hero = { src: missing.photos.pastel.hero.src };
   missing.photos.pastel.gallery[0] = { src: missing.photos.pastel.gallery[0].src };
   const normalized = normalizeContentDocument(missing, weddingContent);
-  assert.equal(normalized.photos.pastel.hero.alt, undefined);
-  assert.equal(normalized.photos.pastel.gallery[0].alt, undefined);
-  assert.equal(typeof validateEditableContentDocument(normalized)["상단 대표 사진 대체 텍스트"], "string");
-  assert.equal(typeof validateEditableContentDocument(normalized)["갤러리 1 대체 텍스트"], "string");
+  assert.equal(normalized.photos.pastel.hero.alt, "웨딩 사진");
+  assert.equal(normalized.photos.pastel.gallery[0].alt, "웨딩 사진");
+  assert.equal(validateEditableContentDocument(normalized)["상단 대표 사진 대체 텍스트"], undefined);
+  assert.equal(validateEditableContentDocument(normalized)["갤러리 1 대체 텍스트"], undefined);
 });
 
-test("gallery validation rejects duplicate sources and out-of-range crop positions", () => {
+test("gallery validation rejects duplicate sources and sanitizes retired crop metadata", () => {
   const duplicate = createContentDocument(weddingContent);
   duplicate.photos.pastel.gallery[1].src = duplicate.photos.pastel.gallery[0].src;
   assert.equal(typeof validateEditableContentDocument(duplicate)["갤러리 2 파일"], "string");
 
   const position = createContentDocument(weddingContent);
   position.photos.pastel.gallery[0].position = "101% 50%";
-  assert.equal(typeof validateEditableContentDocument(position)["갤러리 1 초점 위치"], "string");
+  assert.equal(serializeContentDocument(position).photos.pastel.gallery[0].position, "50% 50%");
   position.photos.pastel.gallery[0].position = "0% 100%";
   assert.equal(validateEditableContentDocument(position)["갤러리 1 초점 위치"], undefined);
 });
@@ -544,8 +544,7 @@ test("photo alt validation and normalization share the 300 character Worker cont
   assert.equal(validateEditableContentDocument(document)["사진"], undefined);
 
   document.photos.pastel.hero.alt = "가".repeat(301);
-  assert.equal(typeof validateEditableContentDocument(document)["상단 대표 사진 대체 텍스트"], "string");
-  assert.throws(() => serializeContentDocument(document), (error) => error.code === "INVALID_CONTENT" && typeof error.fieldErrors["상단 대표 사진 대체 텍스트"] === "string");
+  assert.equal(serializeContentDocument(document).photos.pastel.hero.alt, "웨딩 사진");
 });
 
 test("public bootstrap selects exactly one published or bundled source before React", () => {
@@ -1027,7 +1026,7 @@ test("the admin UI uses apply, automatic publish review, dirty guard, fixed prev
   assert.match(source, /<progress max="100"/);
   assert.doesNotMatch(source, /replacementAlt|새 사진 대체 텍스트/);
   assert.doesNotMatch(source, /alt:\s*current\.alt/);
-  assert.match(source, /alt: "",\s*\n\s*position:/);
+  assert.match(source, /alt: DEFAULT_PHOTO_ALT,\s*\n\s*position: DEFAULT_PHOTO_POSITION/);
   assert.match(client, /MAX_IMAGE_FILE_BYTES = 90 \* 1024 \* 1024/);
   assert.match(client, /file\.size > MAX_IMAGE_FILE_BYTES\)[\s\S]*?원본 이미지는 90MB 이하만 업로드할 수 있습니다/);
   assert.doesNotMatch(client, /원본 이미지는 25MB/);
@@ -1111,7 +1110,7 @@ test("publish review includes every editable parking field and material media de
   current.content.transit.parkingRegistrationLocation = "변경된 등록 위치";
   current.content.transit.parkingRegistration = "변경된 등록 안내";
   current.content.music.licenseLabel = "변경된 라이선스";
-  current.photos.pastel.gallery[0].position = "40% 60%";
+  current.photos.pastel.gallery.reverse();
 
   const diff = buildPublishDiff(current, published);
   assert.deepEqual(
@@ -1121,7 +1120,8 @@ test("publish review includes every editable parking field and material media de
   const music = diff.changes.find((change) => change.label === "배경 음악");
   assert.match(music.current, /변경된 라이선스/);
   const gallery = diff.changes.find((change) => change.label === "갤러리");
-  assert.match(gallery.current, /40% 60%/);
+  assert.match(gallery.current, /새 파일/);
+  assert.doesNotMatch(gallery.current, /\d+% \d+%/);
   assert.doesNotMatch(gallery.current, /\[object Object\]/);
 });
 
@@ -1209,15 +1209,14 @@ test("guestbook append failures preserve loaded rows and raw compatibility-form 
   assert.doesNotMatch(api, /query\.normalize\("NFKC"\)/);
 });
 
-test("photo validation exposes the exact collapsed field before apply is enabled", async () => {
+test("retired photo fields cannot block apply and are absent from the editor", async () => {
   const document = createContentDocument(weddingContent);
   document.photos.pastel.hero.position = "invalid";
-  const errors = validateEditableContentDocument(document);
-  assert.match(errors["상단 대표 사진 초점 위치"], /50% 58%/);
-  assert.equal(errors["사진"], undefined);
+  document.photos.pastel.hero.alt = "";
+  assert.deepEqual(validateEditableContentDocument(document), {});
+  assert.equal(serializeContentDocument(document).photos.pastel.hero.position, "50% 50%");
   const source = await readFile(new URL("../src/admin-content/ContentAdmin.jsx", import.meta.url), "utf8");
-  assert.match(source, /altError=\{validationErrors\["상단 대표 사진 대체 텍스트"\]\}/);
-  assert.match(source, /positionError=\{validationErrors\["상단 대표 사진 초점 위치"\]\}/);
+  assert.doesNotMatch(source, /현재 사진 대체 텍스트|초점 위치|onMetaChange|altError|positionError/);
 });
 
 test("applied admin content keeps full runtime photo objects", () => {

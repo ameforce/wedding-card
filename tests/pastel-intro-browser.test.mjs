@@ -11,6 +11,7 @@ import sharp from "sharp";
 import { createEarlyPosterMarkup } from "../scripts/intro/early-poster.mjs";
 import { createContentDocument } from "../src/admin-content/content-document.js";
 import { weddingContent } from "../src/content.js";
+import { PAPER_OPENING_DELAY_MS, PAPER_OPENING_DURATION_MS } from "../src/intro/opening-timing.js";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const manifest = JSON.parse(await readFile(new URL("../public/assets/design/ribbon-sequence/manifest.json", import.meta.url), "utf8"));
@@ -207,8 +208,8 @@ function assertCompletePlayback(state, { interrupted = false } = {}) {
   assert.deepEqual(state.draws.map((draw) => draw.index), expectedFrames);
   const terminal = state.draws.at(-1);
   assert.equal(terminal.alphaPixels, 0);
-  assert.ok(state.openedAt - terminal.at >= manifest.panelDelayMs, "Paper must wait at least 300 ms after the actual transparent terminal draw.");
-  assert.ok(state.removedAt >= state.openedAt + manifest.panelDurationMs - 5, `Actual visible panel motion lasted ${(state.removedAt - state.openedAt).toFixed(2)}ms; requires ${manifest.panelDurationMs}ms (5ms observer allowance).`);
+  assert.ok(state.openedAt - terminal.at >= PAPER_OPENING_DELAY_MS, "Paper must wait at least the transparent terminal before opening.");
+  assert.ok(state.removedAt >= state.openedAt + PAPER_OPENING_DURATION_MS - 5, `Actual visible panel motion lasted ${(state.removedAt - state.openedAt).toFixed(2)}ms; requires ${PAPER_OPENING_DURATION_MS}ms (5ms observer allowance).`);
   if (!interrupted) {
     const intervals = state.draws.slice(2).map((draw, index) => draw.at - state.draws[index + 1].at).sort((a, b) => a - b);
     const p95 = intervals[Math.ceil(intervals.length * 0.95) - 1];
@@ -649,7 +650,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
     try {
       await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => window.__ribbonQA.openedAt !== null);
-      await page.waitForTimeout(manifest.panelDurationMs / 2);
+      await page.waitForTimeout(PAPER_OPENING_DURATION_MS / 2);
       const geometry = await page.evaluate(() => {
         const cover = document.querySelector(".pastel-intro-cover");
         const hero = document.querySelector(".pastel-hero-photo img");
@@ -827,7 +828,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
       const state = await finalState(page);
       assertAccessible(state);
       assertCompletePlayback(state);
-      assert.ok(state.removedAt - state.openedAt >= manifest.panelDurationMs + 1800 - 5, "Hidden time must not consume visible panel motion.");
+      assert.ok(state.removedAt - state.openedAt >= PAPER_OPENING_DURATION_MS + 1800 - 5, "Hidden time must not consume visible panel motion.");
       assert.equal(state.early.reason, "finished");
     } finally { await page.close(); }
   });
@@ -1061,8 +1062,8 @@ test("real invitation ribbon preserves every frame and restores access across lo
         rightProgress: Number(getComputedStyle(document.querySelector(".pastel-intro-cover")).getPropertyValue("--pastel-intro-right-progress")),
       }));
       fullyOpenBeforeDuration.effectiveElapsedMs = fullyOpenBeforeDuration.elapsedMs - (midResumeAt - midPauseAt);
-      assert.ok(fullyOpenBeforeDuration.effectiveElapsedMs < synthetic.panelDurationMs - 50, "The measured curve must reach its zero-width state before the 1400ms controller lifetime ends.");
-      assert.equal(fullyOpenBeforeDuration.coverPresent, true, "The cover must remain mounted through the elapsed 1400ms panel contract.");
+      assert.ok(fullyOpenBeforeDuration.effectiveElapsedMs < PAPER_OPENING_DURATION_MS - 50, "The measured curve must reach its zero-width state before the 800ms controller lifetime ends.");
+      assert.equal(fullyOpenBeforeDuration.coverPresent, true, "The cover must remain mounted through the elapsed 800ms panel contract.");
       await freezePanels();
       await screenshot(page, "actual-v2-curve-zero-width-before-duration");
       await resumePanels();
@@ -1071,7 +1072,7 @@ test("real invitation ribbon preserves every frame and restores access across lo
       const [midPixels, finalPixels] = await Promise.all([midImage, finalImage].map((png) => sharp(png).extract(centerPatch).removeAlpha().raw().toBuffer()));
       const centerMeanDifference = midPixels.reduce((total, value, index) => total + Math.abs(value - finalPixels[index]), 0) / midPixels.length;
       const completed = await page.evaluate(() => ({ removedAt: window.__ribbonQA.removedAt, openedAt: window.__ribbonQA.openedAt }));
-      assert.ok(completed.removedAt - completed.openedAt >= synthetic.panelDurationMs - 5, "Cover removal must honor panelDurationMs even after the measured curve has reached progress=1.");
+      assert.ok(completed.removedAt - completed.openedAt >= PAPER_OPENING_DURATION_MS - 5, "Cover removal must honor panelDurationMs even after the measured curve has reached progress=1.");
       assert.ok(centerMeanDifference <= 1, `The opening center must reveal the final hero without a residual seam; mean pixel difference=${centerMeanDifference.toFixed(3)}.`);
       if (artifactDir) await writeFile(join(artifactDir, "actual-v2-curve-evidence.json"), JSON.stringify({
         classification: "synthetic v2 manifest using checked-in measured panel curve; no cloth-physics acceptance",

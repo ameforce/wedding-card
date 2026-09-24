@@ -31,6 +31,9 @@ import {
 } from "./public-content.jsx";
 import { preparePhotoSelection, uploadPhotoSelection } from "./media-batch.js";
 import { AdminShell } from "./AdminShell.jsx";
+import { GalleryLayoutEditor } from "./GalleryLayoutEditor.jsx";
+import { reorderGallery } from "./gallery-order.js";
+import { normalizePhotoPresentation, DEFAULT_PHOTO_ALT, DEFAULT_PHOTO_POSITION } from "../photo-presentation.js";
 
 function formatAdminError(error, fallbackMessage) {
   const message = error?.message || fallbackMessage;
@@ -109,16 +112,15 @@ function UploadProgress({ progress }) {
   );
 }
 
-function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, fileError, altError, positionError, actions, progress }) {
+function PhotoEditor({ title, slot, photo, onUpload, busy, fileError, actions, progress, preview = true }) {
   return (
-    <article className="content-admin-photo-card">
-      <img src={photo.src} alt="" style={{ objectPosition: photo.position }} />
+    <article className={`content-admin-photo-card ${preview ? "is-hero" : "is-gallery-controls"}`}>
+      {preview && <img src={photo.src} alt="" style={{ objectPosition: photo.position }} />}
       <div>
         <div className="content-admin-photo-heading">
           <strong>{title}</strong>
           {actions}
         </div>
-        <Field label="현재 사진 대체 텍스트" value={photo.alt} onChange={(value) => onMetaChange("alt", value)} error={altError} hint="사진을 교체하면 설명이 비워집니다. 임시 적용 전에 새 사진에 맞는 설명을 입력해 주세요." />
         <label className={`content-admin-file ${busy ? "is-disabled" : ""}`}>
           <span>{busy ? "업로드 중…" : "사진 교체"}</span>
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} aria-invalid={fileError ? "true" : undefined} onChange={async (event) => {
@@ -129,26 +131,19 @@ function PhotoEditor({ title, slot, photo, onMetaChange, onUpload, busy, fileErr
         </label>
         {progress && <UploadProgress progress={progress} />}
         {fileError && <small className="is-error" role="alert">{fileError}</small>}
-        <Field label="초점 위치" value={photo.position} onChange={(value) => onMetaChange("position", value)} error={positionError} hint="예: 50% 58%" />
       </div>
     </article>
   );
 }
 
 function GalleryPhotoUploader({ onSelect, onUpload, onClear, selection, busy, disabled, progress }) {
-  const [position, setPosition] = useState("50% 50%");
-  const positionMatch = position.trim().match(/^(\d{1,3})%\s+(\d{1,3})%$/);
-  const ready = Boolean(positionMatch) && Number(positionMatch?.[1]) <= 100 && Number(positionMatch?.[2]) <= 100;
   return (
     <section className="content-admin-gallery-add">
       <strong>갤러리 사진 추가</strong>
       <p>사진을 선택하면 원본과 미리보기의 총 용량을 먼저 계산합니다. 업로드는 동시에 최대 3장씩 진행하며, 선택한 순서로 추가합니다.</p>
-      <div className="content-admin-grid">
-        <Field label="초점 위치" value={position} onChange={setPosition} hint="예: 50% 50% · 나중에 사진별로 바꿀 수 있습니다." />
-      </div>
-      <label className={`content-admin-file ${ready && !disabled ? "" : "is-disabled"}`}>
+      <label className={`content-admin-file ${!disabled ? "" : "is-disabled"}`}>
         <span>{busy ? "사진 처리 중…" : "사진 선택"}</span>
-        <input type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={busy || disabled || !ready} onChange={async (event) => {
+        <input type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={busy || disabled} onChange={async (event) => {
           const input = event.currentTarget;
           const files = [...(input.files || [])];
           input.value = "";
@@ -160,9 +155,9 @@ function GalleryPhotoUploader({ onSelect, onUpload, onClear, selection, busy, di
           <strong>{selection.prepared.length}장 선택 · 저장에 필요한 용량 {formatStorage(selection.totalBytes)}</strong>
           <span>원본 {formatStorage(selection.originalBytes)} + 480·960px 미리보기 {formatStorage(selection.totalBytes - selection.originalBytes)}</span>
           <span>남은 공간 {selection.usage.localReview ? "로컬 검토" : formatStorage(selection.usage.remainingBytes)}</span>
-          <small>정확한 합계 {selection.totalBytes.toLocaleString("ko-KR")}바이트 · 실제 전송 직전에 서버에서 남은 용량을 다시 확인합니다. 업로드 후 각 사진의 대체 텍스트를 입력해 주세요.</small>
+          <small>정확한 합계 {selection.totalBytes.toLocaleString("ko-KR")}바이트 · 실제 전송 직전에 서버에서 남은 용량을 다시 확인합니다. 업로드 후 사진을 드래그해 순서를 정할 수 있습니다.</small>
           <div className="content-admin-media-actions">
-            <button type="button" disabled={busy || disabled || !ready} onClick={() => onUpload(selection, position.trim())}>{selection.prepared.length}장 업로드</button>
+            <button type="button" disabled={busy || disabled} onClick={() => onUpload(selection)}>{selection.prepared.length}장 업로드</button>
             <button type="button" disabled={busy || disabled} onClick={onClear}>선택 취소</button>
           </div>
         </div>
@@ -555,18 +550,24 @@ export function ContentAdmin() {
     commitEdit(next, ".account-groups");
   };
 
-  const moveGalleryPhoto = (index, direction) => {
-    if (uploadingSlot) return;
-    const targetIndex = index + direction;
+  const reorderGalleryPhotos = (source, target) => {
+    if (busy || uploadingSlot) return;
     const gallery = documentRef.current.photos.pastel.gallery;
-    if (targetIndex < 0 || targetIndex >= gallery.length) return;
+    const reordered = reorderGallery(gallery, source, target);
+    if (reordered === gallery) return;
     const next = cloneContentDocument(documentRef.current);
-    [next.photos.pastel.gallery[index], next.photos.pastel.gallery[targetIndex]] = [next.photos.pastel.gallery[targetIndex], next.photos.pastel.gallery[index]];
+    next.photos.pastel.gallery = reordered;
     commitEdit(next, ".pastel-gallery-section");
   };
 
+  const moveGalleryPhoto = (index, direction) => {
+    const gallery = documentRef.current.photos.pastel.gallery;
+    const destination = gallery[index + direction];
+    if (gallery[index] && destination) reorderGalleryPhotos(gallery[index].src, destination.src);
+  };
+
   const removeGalleryPhoto = (index) => {
-    if (uploadingSlot || documentRef.current.photos.pastel.gallery.length <= MIN_GALLERY_PHOTOS) return;
+    if (busy || uploadingSlot || documentRef.current.photos.pastel.gallery.length <= MIN_GALLERY_PHOTOS) return;
     const next = cloneContentDocument(documentRef.current);
     next.photos.pastel.gallery.splice(index, 1);
     commitEdit(next, ".pastel-gallery-section");
@@ -784,21 +785,20 @@ export function ContentAdmin() {
   const uploadPhoto = async (slot, file) => {
     const isHero = slot === "pastel-hero";
     const index = isHero ? -1 : Number(slot.replace("pastel-gallery-", ""));
-    const current = isHero ? documentRef.current.photos.pastel.hero : documentRef.current.photos.pastel.gallery[index];
     setUploadingSlot(slot);
     setUploadProgress({ slot, index: 1, count: 1, fileName: file.name, phase: "optimize", loaded: 0, total: 0 });
     try {
       const result = await adapter.uploadPhoto({
         slot,
         file,
-        alt: "",
-        position: current?.position,
+        alt: DEFAULT_PHOTO_ALT,
+        position: DEFAULT_PHOTO_POSITION,
         onProgress: (event) => setUploadProgress((state) => state ? { ...state, ...event } : state),
       });
-      update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], result.photo);
+      update(isHero ? ["photos", "pastel", "hero"] : ["photos", "pastel", "gallery", index], normalizePhotoPresentation(result.photo));
       setMediaUsage(result.usage || await adapter.getMediaUsage());
       await refreshMediaList();
-      setStatus({ tone: "success", message: "새 사진을 초안에 넣었습니다. 새 사진에 맞는 대체 텍스트와 초점을 확인해 주세요." });
+      setStatus({ tone: "success", message: "새 사진을 편집본에 넣었습니다. 미리보기를 확인한 뒤 임시 적용해 주세요." });
       return true;
     } catch (error) {
       showAdminError(error, "사진을 처리하지 못했습니다.");
@@ -824,17 +824,17 @@ export function ContentAdmin() {
     } finally { setUploadingSlot(""); setUploadProgress(null); }
   };
 
-  const uploadGalleryPhotos = async (selection, position) => {
+  const uploadGalleryPhotos = async (selection) => {
     setUploadingSlot("pastel-gallery-new");
     try {
-      const results = await uploadPhotoSelection(adapter, selection, { position,
+      const results = await uploadPhotoSelection(adapter, selection, { position: DEFAULT_PHOTO_POSITION,
         onProgress: (event) => setUploadProgress({ slot: "pastel-gallery-new", ...event }),
         onAuthError: (error) => showAdminError(error, "관리자 인증이 필요합니다."),
       });
       const successes = results.filter((result) => result.status === "fulfilled");
       if (successes.length) {
         const next = cloneContentDocument(documentRef.current);
-        next.photos.pastel.gallery.push(...successes.map((result) => result.value.photo));
+        next.photos.pastel.gallery.push(...successes.map((result) => normalizePhotoPresentation(result.value.photo)));
         commitEdit(next, ".pastel-gallery-section");
       }
       setPendingPhotoSelection(null);
@@ -844,7 +844,7 @@ export function ContentAdmin() {
         : [`${selection.prepared[index].file.name}: ${result.status === "skipped" ? "전송하지 않음" : formatAdminError(result.reason, "업로드 실패")}`]);
       setStatus({ tone: failures.length ? "error" : "success", message: failures.length
         ? `${successes.length}장은 추가했습니다. ${failures.length}장은 완료하지 못했습니다. ${failures.join(" · ")} 중단된 업로드의 예약 용량은 저장된 미디어에서 1시간 후 정리할 수 있습니다.`
-        : `${successes.length}장의 사진을 선택 순서대로 추가했습니다. 각 사진의 대체 텍스트와 초점을 확인해 주세요.` });
+        : `${successes.length}장의 사진을 선택 순서대로 추가했습니다. 사진을 드래그해 순서를 정한 뒤 임시 적용해 주세요.` });
     } catch (error) {
       showAdminError(error, "사진 업로드를 시작하지 못했습니다.");
     } finally {
@@ -1135,27 +1135,25 @@ export function ContentAdmin() {
 
           <CollapsibleSection title="사진" busy={busy} attention={Boolean(uploadingSlot || validationErrors["사진"])}>
             <div className="content-admin-photo-list">
-              <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={Boolean(uploadingSlot)} fileError={validationErrors["상단 대표 사진 파일"]} altError={validationErrors["상단 대표 사진 대체 텍스트"]} positionError={validationErrors["상단 대표 사진 초점 위치"]} onUpload={uploadPhoto} progress={uploadProgress?.slot === "pastel-hero" ? uploadProgress : null} onMetaChange={(key, value) => update(["photos", "pastel", "hero", key], value)} />
-              {photos.gallery.map((photo, index) => (
+              <PhotoEditor title="상단 대표 사진" slot="pastel-hero" photo={photos.hero} busy={busy || Boolean(uploadingSlot)} fileError={validationErrors["상단 대표 사진 파일"]} onUpload={uploadPhoto} progress={uploadProgress?.slot === "pastel-hero" ? uploadProgress : null} />
+              <GalleryLayoutEditor photos={photos.gallery} busy={busy || Boolean(uploadingSlot)} onMove={reorderGalleryPhotos} renderControls={(index, selectCurrent) => (
                 <PhotoEditor
-                  key={photo.src}
+                  key={photos.gallery[index].src}
                   title={`갤러리 ${index + 1}`}
                   slot={`pastel-gallery-${index}`}
-                  photo={photo}
-                  busy={Boolean(uploadingSlot)}
+                  photo={photos.gallery[index]}
+                  preview={false}
+                  busy={busy || Boolean(uploadingSlot)}
                   fileError={validationErrors[`갤러리 ${index + 1} 파일`]}
-                  altError={validationErrors[`갤러리 ${index + 1} 대체 텍스트`]}
-                  positionError={validationErrors[`갤러리 ${index + 1} 초점 위치`]}
                   onUpload={uploadPhoto}
                   progress={uploadProgress?.slot === `pastel-gallery-${index}` ? uploadProgress : null}
-                  onMetaChange={(key, value) => update(["photos", "pastel", "gallery", index, key], value)}
                   actions={<div className="content-admin-photo-actions" aria-label={`갤러리 ${index + 1} 순서와 삭제`}>
-                    <button type="button" onClick={() => moveGalleryPhoto(index, -1)} disabled={Boolean(uploadingSlot) || index === 0} aria-label={`갤러리 ${index + 1} 앞으로 이동`}><ArrowUp aria-hidden="true" /></button>
-                    <button type="button" onClick={() => moveGalleryPhoto(index, 1)} disabled={Boolean(uploadingSlot) || index === photos.gallery.length - 1} aria-label={`갤러리 ${index + 1} 뒤로 이동`}><ArrowDown aria-hidden="true" /></button>
+                    <button type="button" onClick={() => { selectCurrent(); moveGalleryPhoto(index, -1); }} disabled={Boolean(uploadingSlot) || index === 0} aria-label={`갤러리 ${index + 1} 앞으로 이동`}><ArrowUp aria-hidden="true" /></button>
+                    <button type="button" onClick={() => { selectCurrent(); moveGalleryPhoto(index, 1); }} disabled={Boolean(uploadingSlot) || index === photos.gallery.length - 1} aria-label={`갤러리 ${index + 1} 뒤로 이동`}><ArrowDown aria-hidden="true" /></button>
                     <button type="button" className="is-destructive" onClick={() => removeGalleryPhoto(index)} disabled={Boolean(uploadingSlot) || photos.gallery.length <= MIN_GALLERY_PHOTOS} aria-label={`갤러리 ${index + 1} 목록에서 제거`}><Trash aria-hidden="true" /></button>
                   </div>}
                 />
-              ))}
+              )} />
               <GalleryPhotoUploader onSelect={prepareGalleryPhotos} selection={pendingPhotoSelection} onClear={() => setPendingPhotoSelection(null)} onUpload={uploadGalleryPhotos} busy={uploadingSlot === "pastel-gallery-new"} disabled={Boolean(uploadingSlot)} progress={uploadProgress?.slot === "pastel-gallery-new" ? uploadProgress : null} />
             </div>
           </CollapsibleSection>
