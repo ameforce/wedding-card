@@ -14,7 +14,7 @@ function assertSecurityHeaders(response) {
 test("redirects production HTTP before reading bodies or accessing any bindings", async () => {
   const metadata = { id: "b26a8010-ae43-49e9-9357-401e7ad518e8", tag: "a".repeat(40) };
   for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
-    for (const path of ["/", "/assets/app.js", "/api/guestbook/entries", "/api/admin/content", "/api/media/photo.webp", "/admin/content"]) {
+    for (const path of ["/", "/assets/app.js", "/api/guestbook/entries", "/api/admin/content", "/api/media/photo.webp", "/admin/content", "/calendar.ics"]) {
       const suffix = `${path}?source=kakao&value=%2F%2B+%26&value=second`;
       const request = new Request(`http://wdcard.enmsoftware.com${suffix}`, {
         method,

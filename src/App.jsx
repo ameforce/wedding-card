@@ -28,7 +28,7 @@ import { usePublicInvitationContent } from "./admin-content/public-content.jsx";
 import { pastelGalleryLayout } from "./gallery-layout.js";
 import { fallbackPhotoSource, findPhotoIndexBySource, movePhotoSource } from "./gallery-state.js";
 import { createGuestbookEntry, deleteGuestbookEntry, unlockGuestbookEntry, updateGuestbookEntry } from "./guestbook-api.js";
-import { copyText, saveCalendar, shareInvitation } from "./invitation-actions.js";
+import { calendarLaunchHref, copyText, openCalendarFile, shareInvitation } from "./invitation-actions.js";
 import { PASTEL_INTRO_OPENED_EVENT, PASTEL_INTRO_RIBBON_START_EVENT, PASTEL_INTRO_TERMINATED_EVENT, PastelIntroCover } from "./intro/PastelIntroCover.jsx";
 
 const VARIANTS = {
@@ -614,12 +614,16 @@ function Location({ notify, compact = false }) {
 }
 
 function BottomActions({ notify, pastel = false }) {
-  const { content } = useWeddingRuntime();
-  const saveDate = async () => {
+  const { content, source } = useWeddingRuntime();
+  // Only a session rendered from the published revision may point at the Worker
+  // calendar file; drafts, local review, and bundled fallback use the browser file.
+  const calendarHref = useMemo(
+    () => calendarLaunchHref(content, { publishedFile: source === "cloudflare-published" }),
+    [content, source],
+  );
+  const openCalendarFallback = () => {
     try {
-      const result = await saveCalendar(content);
-      if (result === "shared-file") notify("일정 파일을 시스템 공유 메뉴로 전달했습니다.");
-      if (result === "opened-file") notify("캘린더 일정 열기를 요청했습니다.");
+      openCalendarFile(content);
     } catch {
       notify("일정을 준비하지 못했습니다.", "error");
     }
@@ -640,7 +644,13 @@ function BottomActions({ notify, pastel = false }) {
   return (
     <nav className={`bottom-actions ${pastel ? "is-pastel" : ""}`} aria-label="청첩장 주요 기능">
       <ActionButton icon={Phone} href="#contact">연락하기</ActionButton>
-      <ActionButton icon={CalendarBlank} onClick={saveDate}>캘린더 추가</ActionButton>
+      <ActionButton
+        icon={CalendarBlank}
+        href={calendarHref ?? undefined}
+        onClick={calendarHref ? undefined : openCalendarFallback}
+      >
+        캘린더 추가
+      </ActionButton>
       <ActionButton icon={ShareNetwork} onClick={share}>공유하기</ActionButton>
     </nav>
   );
@@ -1139,7 +1149,7 @@ function WeddingApp() {
   if (runtime.status !== "ready") return <InvitationLoadingShell captureMode={captureMode} />;
 
   return (
-    <WeddingRuntimeContext.Provider value={{ content: runtime.content, photos: runtimePhotos }}>
+    <WeddingRuntimeContext.Provider value={{ content: runtime.content, photos: runtimePhotos, source: runtime.source }}>
     <main
       className={`app-shell ${captureMode ? "is-capture" : ""}`}
       data-content-source={runtime.source}
