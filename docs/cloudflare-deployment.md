@@ -31,7 +31,7 @@ If a check after `wrangler deploy` fails, the workflow rolls Worker traffic back
 ## Fit with the current repository
 
 - `dist/client/` contains the Vite SPA assets.
-- `dist/server/index.js` is prepared from `worker/index.js`; it serves `/api/guestbook/*`, `/api/content`, `/api/admin/*`, and private-R2-backed `/api/media/*`, then falls back to the SPA shell for unknown HTML routes.
+- `dist/server/index.js` is prepared from `worker/index.js`; it serves `/api/guestbook/*`, `/api/content`, `/api/admin/*`, private-R2-backed `/api/media/*`, and the published-revision-only `/calendar.ics`, then falls back to the SPA shell for unknown HTML routes.
 - `dist/.openai/hosting.json` declares the `GUESTBOOK_DB` D1 binding and `WEDDING_MEDIA` R2 binding, while migrations are copied to `dist/.openai/drizzle/`.
 - `/admin`, `/admin/guestbook`, and their administrator APIs fail closed unless the Cloudflare Access JWT signature, issuer, audience, expiry, and exact two-address deployment allowlist are valid. Exact `GET` and `HEAD /admin/content` requests permanently redirect to `/admin` with the query string preserved; `/api/admin/content` remains unchanged.
 - Public guestbook writes fail closed in production unless the required Wrangler caller and credential limiter bindings are present; counter keys never contain plaintext visitor addresses or names.
