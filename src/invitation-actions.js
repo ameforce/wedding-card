@@ -1,3 +1,18 @@
+// The user confirmed on 2026-09-26 that calendar entries end exactly two hours
+// after the published ceremony start. Keep this value in sync with worker/index.js.
+export const CALENDAR_EVENT_DURATION_MINUTES = 120;
+export const CALENDAR_FILE_PATH = "/calendar.ics";
+
+const ICS_LINE_OCTET_LIMIT = 75;
+const GOOGLE_CALENDAR_TEMPLATE_URL = "https://calendar.google.com/calendar/render";
+const KAKAOTALK_EXTERNAL_BROWSER_URL = "kakaotalk://web/openExternal?url=";
+// Only Safari itself hands a text/calendar response to the Calendar app. Other iOS
+// browsers and in-app browsers run on WKWebView, so they receive the Google Calendar
+// editor instead. Safari's user agent ends with its Safari token; in-app browsers
+// usually append their own, and some browsers insert a token before it.
+const SAFARI_USER_AGENT = /Version\/[\d.]+.*Safari\/[\d.]+$/;
+const NON_SAFARI_APPLE_BROWSERS = /CriOS|FxiOS|EdgiOS|OPiOS|OPT\/|GSA\/|DuckDuckGo|Ddg\/|YaBrowser|Whale\//i;
+
 function escapeIcsValue(value) {
   return String(value)
     .replaceAll("\\", "\\\\")
@@ -6,23 +21,94 @@ function escapeIcsValue(value) {
     .replaceAll(/\r?\n/g, "\\n");
 }
 
-function compactDate(value) {
-  return value.replaceAll("-", "");
+function utf8Length(character) {
+  const codePoint = character.codePointAt(0);
+  if (codePoint <= 0x7f) return 1;
+  if (codePoint <= 0x7ff) return 2;
+  if (codePoint <= 0xffff) return 3;
+  return 4;
 }
 
-function compactTime(value) {
-  return value.replace(":", "") + "00";
+// RFC 5545 section 3.1: content lines stay within 75 octets and continuation
+// lines begin with one space. Folding happens between code points, so a UTF-8
+// sequence is never split.
+function foldIcsLine(line) {
+  const segments = [];
+  let current = "";
+  let octets = 0;
+  for (const character of line) {
+    const size = utf8Length(character);
+    const limit = segments.length === 0 ? ICS_LINE_OCTET_LIMIT : ICS_LINE_OCTET_LIMIT - 1;
+    if (octets + size > limit) {
+      segments.push(current);
+      current = "";
+      octets = 0;
+    }
+    current += character;
+    octets += size;
+  }
+  segments.push(current);
+  return segments.join("\r\n ");
+}
+
+function pad(value) {
+  return String(value).padStart(2, "0");
+}
+
+function utcOffsetMinutes(offset) {
+  const match = /^([+-])(\d{2}):(\d{2})$/.exec(offset || "");
+  if (!match) throw new Error("invalid-utc-offset");
+  const minutes = Number(match[2]) * 60 + Number(match[3]);
+  return match[1] === "-" ? -minutes : minutes;
 }
 
 function formatUtcStamp(date) {
   return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
 
-export function createCalendarFile(content, now = new Date()) {
-  const summary = `${content.couple.groom} · ${content.couple.bride} 결혼식`;
-  const description = `${content.event.dateLabel} ${content.event.day} ${content.event.time}`;
+function formatLocalStamp(utcMilliseconds, offsetMinutes) {
+  const local = new Date(utcMilliseconds + offsetMinutes * 60_000);
+  return `${local.getUTCFullYear()}${pad(local.getUTCMonth() + 1)}${pad(local.getUTCDate())}`
+    + `T${pad(local.getUTCHours())}${pad(local.getUTCMinutes())}00`;
+}
+
+function formatIcsOffset(offsetMinutes) {
+  const absolute = Math.abs(offsetMinutes);
+  return `${offsetMinutes < 0 ? "-" : "+"}${pad(Math.floor(absolute / 60))}${pad(absolute % 60)}`;
+}
+
+export function calendarEventWindow(content) {
+  const [year, month, day] = content.event.isoDate.split("-").map(Number);
+  const [hour, minute] = content.event.startTime24h.split(":").map(Number);
+  const offsetMinutes = utcOffsetMinutes(content.event.timezone.utcOffset);
+  const startMilliseconds = Date.UTC(year, month - 1, day, hour, minute) - offsetMinutes * 60_000;
+  const endMilliseconds = startMilliseconds + CALENDAR_EVENT_DURATION_MINUTES * 60_000;
+  return {
+    start: new Date(startMilliseconds),
+    end: new Date(endMilliseconds),
+    localStart: formatLocalStamp(startMilliseconds, offsetMinutes),
+    localEnd: formatLocalStamp(endMilliseconds, offsetMinutes),
+    offsetMinutes,
+  };
+}
+
+function calendarTitle(content) {
+  return `${content.couple.groom} · ${content.couple.bride} 결혼식`;
+}
+
+function calendarDescription(content) {
+  return `${content.event.dateLabel} ${content.event.day} ${content.event.time}`;
+}
+
+function calendarLocation(content) {
   const venueLabel = [content.venue.name, content.venue.floor].filter(Boolean).join(" ");
-  const uidDate = compactDate(content.event.isoDate);
+  return `${venueLabel}, ${content.venue.address}`;
+}
+
+export function createCalendarFile(content, now = new Date()) {
+  const eventWindow = calendarEventWindow(content);
+  const offset = formatIcsOffset(eventWindow.offsetMinutes);
+  const uidDate = content.event.isoDate.replaceAll("-", "");
 
   return [
     "BEGIN:VCALENDAR",
@@ -30,18 +116,84 @@ export function createCalendarFile(content, now = new Date()) {
     "PRODID:-//Wedding Card//Invitation//KO",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
+    "BEGIN:VTIMEZONE",
+    `TZID:${content.event.timezone.iana}`,
+    "BEGIN:STANDARD",
+    "DTSTART:19700101T000000",
+    `TZOFFSETFROM:${offset}`,
+    `TZOFFSETTO:${offset}`,
+    "END:STANDARD",
+    "END:VTIMEZONE",
     "BEGIN:VEVENT",
     `UID:${uidDate}-${content.couple.groom}-${content.couple.bride}@wedding-card.local`,
     `DTSTAMP:${formatUtcStamp(now)}`,
-    `DTSTART;TZID=${content.event.timezone.iana}:${uidDate}T${compactTime(content.event.startTime24h)}`,
-    `SUMMARY:${escapeIcsValue(summary)}`,
-    `DESCRIPTION:${escapeIcsValue(description)}`,
-    `LOCATION:${escapeIcsValue(`${venueLabel}, ${content.venue.address}`)}`,
+    `DTSTART;TZID=${content.event.timezone.iana}:${eventWindow.localStart}`,
+    `DTEND;TZID=${content.event.timezone.iana}:${eventWindow.localEnd}`,
+    `SUMMARY:${escapeIcsValue(calendarTitle(content))}`,
+    `DESCRIPTION:${escapeIcsValue(calendarDescription(content))}`,
+    `LOCATION:${escapeIcsValue(calendarLocation(content))}`,
     "STATUS:CONFIRMED",
     "END:VEVENT",
     "END:VCALENDAR",
     "",
-  ].join("\r\n");
+  ].map(foldIcsLine).join("\r\n");
+}
+
+export function googleCalendarUrl(content) {
+  const eventWindow = calendarEventWindow(content);
+  const parameters = [
+    ["action", "TEMPLATE"],
+    ["text", calendarTitle(content)],
+    ["dates", `${formatUtcStamp(eventWindow.start)}/${formatUtcStamp(eventWindow.end)}`],
+    ["ctz", content.event.timezone.iana],
+    ["details", calendarDescription(content)],
+    ["location", calendarLocation(content)],
+  ];
+  const query = parameters.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
+  return `${GOOGLE_CALENDAR_TEMPLATE_URL}?${query}`;
+}
+
+function describeCalendarDevice(userAgent, maxTouchPoints) {
+  const agent = String(userAgent || "");
+  // iPadOS Safari reports a desktop Macintosh user agent; touch support separates it from macOS.
+  const apple = /iPhone|iPad|iPod/i.test(agent) || (/Macintosh/i.test(agent) && maxTouchPoints > 1);
+  // The external-browser scheme is a mobile KakaoTalk feature; desktop builds get the Google editor.
+  const kakaoTalk = /KAKAOTALK/i.test(agent) && (apple || /Android/i.test(agent));
+  const appleSafari = apple
+    && !kakaoTalk
+    && SAFARI_USER_AGENT.test(agent.trim())
+    && !NON_SAFARI_APPLE_BROWSERS.test(agent);
+  return { apple, kakaoTalk, appleSafari };
+}
+
+function absoluteUrl(path, origin) {
+  try {
+    return new URL(path, origin).href;
+  } catch {
+    return null;
+  }
+}
+
+// Every device opens an add-event screen with all fields filled in. The visitor
+// still confirms with one save tap because the web cannot write to a calendar
+// silently. Returns null when Safari should open the browser-built file instead
+// of the Worker file, which serves only the published revision.
+export function calendarLaunchHref(content, {
+  userAgent = globalThis.navigator?.userAgent ?? "",
+  maxTouchPoints = globalThis.navigator?.maxTouchPoints ?? 0,
+  origin = globalThis.location?.origin ?? "",
+  publishedFile = false,
+} = {}) {
+  const device = describeCalendarDevice(userAgent, maxTouchPoints);
+  const googleUrl = googleCalendarUrl(content);
+  if (device.kakaoTalk) {
+    // KakaoTalk's in-app browser cannot pass .ics files to Calendar and may block
+    // Google sign-in, so the same destination opens in the external browser.
+    const calendarFile = device.apple && publishedFile ? absoluteUrl(CALENDAR_FILE_PATH, origin) : null;
+    return `${KAKAOTALK_EXTERNAL_BROWSER_URL}${encodeURIComponent(calendarFile ?? googleUrl)}`;
+  }
+  if (device.appleSafari) return publishedFile ? CALENDAR_FILE_PATH : null;
+  return googleUrl;
 }
 
 export function eventSummaryText(content) {
@@ -86,50 +238,6 @@ export function openCalendarFile(content) {
   anchor.click();
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
-}
-
-function calendarFilename(content) {
-  return `${content.event.isoDate}-${content.couple.groom}-${content.couple.bride}.ics`;
-}
-
-function createCalendarShareFile(content) {
-  if (typeof File !== "function") return null;
-  return new File(
-    [createCalendarFile(content)],
-    calendarFilename(content),
-    { type: "text/calendar;charset=utf-8" },
-  );
-}
-
-export async function saveCalendar(content, platform = navigator, fallback = openCalendarFile) {
-  const file = createCalendarShareFile(content);
-  const payload = file
-    ? { title: `${content.couple.groom} · ${content.couple.bride} 결혼식 일정`, files: [file] }
-    : null;
-
-  // There is no cross-platform browser API that inserts an event into the
-  // user's default calendar. When the current browser/OS explicitly reports
-  // that it can share an iCalendar file, hand the file to its native chooser.
-  if (payload && platform.share && platform.canShare) {
-    let canShareCalendar = false;
-    try {
-      canShareCalendar = platform.canShare(payload);
-    } catch {
-      canShareCalendar = false;
-    }
-
-    if (canShareCalendar) {
-      try {
-        await platform.share(payload);
-        return "shared-file";
-      } catch (error) {
-        if (error?.name === "AbortError") return "cancelled";
-      }
-    }
-  }
-
-  fallback(content);
-  return "opened-file";
 }
 
 export async function shareInvitation(content, url, platform = navigator, fallback = copyText) {

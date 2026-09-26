@@ -5,6 +5,12 @@ const MEDIA_API_PREFIX = "/api/media";
 const ADMIN_CONTENT_PAGE = "/admin";
 const LEGACY_ADMIN_CONTENT_PAGE = "/admin/content";
 const PRODUCTION_HOSTNAME = "wdcard.enmsoftware.com";
+const CALENDAR_FILE_PATH = "/calendar.ics";
+// The user confirmed on 2026-09-26 that calendar entries end exactly two hours
+// after the published ceremony start. Keep this value in sync with src/invitation-actions.js.
+const CALENDAR_EVENT_DURATION_MINUTES = 120;
+const CALENDAR_TIMEZONE = Object.freeze({ iana: "Asia/Seoul", utcOffsetMinutes: 9 * 60 });
+const ICS_LINE_OCTET_LIMIT = 75;
 // workerd rejects PBKDF2 requests above 100,000 iterations. Keep the value in
 // the encoded verifier and reject unsupported verifier metadata before asking
 // Web Crypto to derive any bits.
@@ -988,6 +994,168 @@ async function getPublishedInvitation(env) {
   const published = await getPublishedInvitationPayload(env);
   if (!published) return apiError(503, "CONTENT_NOT_PUBLISHED", "공개된 초대장 콘텐츠가 아직 없습니다.");
   return json(published);
+}
+
+// Mirrors createCalendarFile in src/invitation-actions.js. The Worker is uploaded
+// without bundling, so it cannot import that module and must keep the same output.
+function escapeIcsText(value) {
+  return String(value)
+    .replaceAll("\\", "\\\\")
+    .replaceAll(";", "\\;")
+    .replaceAll(",", "\\,")
+    .replaceAll(/\r?\n/g, "\\n");
+}
+
+function utf8Length(character) {
+  const codePoint = character.codePointAt(0);
+  if (codePoint <= 0x7f) return 1;
+  if (codePoint <= 0x7ff) return 2;
+  if (codePoint <= 0xffff) return 3;
+  return 4;
+}
+
+// RFC 5545 section 3.1: content lines stay within 75 octets and continuation
+// lines begin with one space, folding only between code points.
+function foldIcsLine(line) {
+  const segments = [];
+  let current = "";
+  let octets = 0;
+  for (const character of line) {
+    const size = utf8Length(character);
+    const limit = segments.length === 0 ? ICS_LINE_OCTET_LIMIT : ICS_LINE_OCTET_LIMIT - 1;
+    if (octets + size > limit) {
+      segments.push(current);
+      current = "";
+      octets = 0;
+    }
+    current += character;
+    octets += size;
+  }
+  segments.push(current);
+  return segments.join("\r\n ");
+}
+
+function padCalendarField(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatCalendarUtcStamp(date) {
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function formatCalendarLocalStamp(utcMilliseconds) {
+  const local = new Date(utcMilliseconds + CALENDAR_TIMEZONE.utcOffsetMinutes * 60_000);
+  return `${local.getUTCFullYear()}${padCalendarField(local.getUTCMonth() + 1)}${padCalendarField(local.getUTCDate())}`
+    + `T${padCalendarField(local.getUTCHours())}${padCalendarField(local.getUTCMinutes())}00`;
+}
+
+function formatCalendarOffset(offsetMinutes) {
+  const absolute = Math.abs(offsetMinutes);
+  return `${offsetMinutes < 0 ? "-" : "+"}${padCalendarField(Math.floor(absolute / 60))}${padCalendarField(absolute % 60)}`;
+}
+
+// Mirrors normalizeContentDocument in src/admin-content/content-document.js: the
+// page trims each value and replaces a missing or over-long one with bundled
+// content. The Worker cannot reproduce that bundled value, so it refuses the file
+// instead of serving an event that differs from the rendered invitation.
+function calendarText(value, maxLength) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized && normalized.length <= maxLength ? normalized : null;
+}
+
+function publishedCalendarEvent(document) {
+  if (![1, 2].includes(document?.schemaVersion)) return null;
+  const content = document.content;
+  const labels = derivedEventLabels(content?.event?.isoDate, content?.event?.startTime24h);
+  const groom = calendarText(content?.couple?.groom, 80);
+  const bride = calendarText(content?.couple?.bride, 80);
+  const venueName = calendarText(content?.venue?.name, 80);
+  const venueFloor = calendarText(content?.venue?.floor, 80);
+  const address = calendarText(content?.venue?.address, 240);
+  if (!labels || !groom || !bride || !venueName || !venueFloor || !address) return null;
+  return {
+    groom,
+    bride,
+    isoDate: content.event.isoDate,
+    startTime24h: content.event.startTime24h,
+    ...labels,
+    venueLabel: `${venueName} ${venueFloor}`,
+    address,
+  };
+}
+
+function createPublishedCalendarFile(event, now = new Date()) {
+  const [year, month, day] = event.isoDate.split("-").map(Number);
+  const [hour, minute] = event.startTime24h.split(":").map(Number);
+  const startMilliseconds = Date.UTC(year, month - 1, day, hour, minute) - CALENDAR_TIMEZONE.utcOffsetMinutes * 60_000;
+  const endMilliseconds = startMilliseconds + CALENDAR_EVENT_DURATION_MINUTES * 60_000;
+  const offset = formatCalendarOffset(CALENDAR_TIMEZONE.utcOffsetMinutes);
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Wedding Card//Invitation//KO",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VTIMEZONE",
+    `TZID:${CALENDAR_TIMEZONE.iana}`,
+    "BEGIN:STANDARD",
+    "DTSTART:19700101T000000",
+    `TZOFFSETFROM:${offset}`,
+    `TZOFFSETTO:${offset}`,
+    "END:STANDARD",
+    "END:VTIMEZONE",
+    "BEGIN:VEVENT",
+    `UID:${event.isoDate.replaceAll("-", "")}-${event.groom}-${event.bride}@wedding-card.local`,
+    `DTSTAMP:${formatCalendarUtcStamp(now)}`,
+    `DTSTART;TZID=${CALENDAR_TIMEZONE.iana}:${formatCalendarLocalStamp(startMilliseconds)}`,
+    `DTEND;TZID=${CALENDAR_TIMEZONE.iana}:${formatCalendarLocalStamp(endMilliseconds)}`,
+    `SUMMARY:${escapeIcsText(`${event.groom} · ${event.bride} 결혼식`)}`,
+    `DESCRIPTION:${escapeIcsText(`${event.dateLabel} ${event.day} ${event.time}`)}`,
+    `LOCATION:${escapeIcsText(`${event.venueLabel}, ${event.address}`)}`,
+    "STATUS:CONFIRMED",
+    "END:VEVENT",
+    "END:VCALENDAR",
+    "",
+  ].map(foldIcsLine).join("\r\n");
+}
+
+function calendarTextResponse(status, message, extraHeaders = {}) {
+  return new Response(message, {
+    status,
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "text/plain; charset=utf-8",
+      ...extraHeaders,
+    },
+  });
+}
+
+// iPhone Safari navigates here so iOS Calendar can show a prefilled event. Only
+// the current published revision is served; drafts are never read.
+async function handleCalendarFile(request, env) {
+  if (!["GET", "HEAD"].includes(request.method)) {
+    return calendarTextResponse(405, "허용되지 않은 캘린더 요청입니다.", { allow: "GET, HEAD" });
+  }
+  let published = null;
+  try {
+    published = await getPublishedInvitationPayload(env);
+  } catch {
+    published = null;
+  }
+  const event = publishedCalendarEvent(published?.document);
+  if (!event) {
+    return calendarTextResponse(503, "캘린더 일정을 준비하지 못했습니다. 청첩장으로 돌아가 다시 시도해 주세요.");
+  }
+  return new Response(request.method === "HEAD" ? null : createPublishedCalendarFile(event), {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "text/calendar; charset=utf-8",
+      "content-disposition": "inline; filename=\"wedding-invitation.ics\"",
+      "x-wedding-content-source": "cloudflare-published",
+      "x-wedding-revision": String(published.revisionId),
+    },
+  });
 }
 
 async function getAdminInvitation(request, env) {
@@ -2444,6 +2612,9 @@ export default {
       || url.pathname.startsWith(`${ADMIN_API_PREFIX}/`)
       || url.pathname.startsWith(`${MEDIA_API_PREFIX}/`)) {
       return withSearchPrivacy(await handleContent(request, env, url), env);
+    }
+    if (url.pathname === CALENDAR_FILE_PATH) {
+      return withSearchPrivacy(await handleCalendarFile(request, env), env);
     }
 
     const redirectsLegacyAdmin = env.ADMIN_CONTENT_REDIRECT_ENABLED === "true"
