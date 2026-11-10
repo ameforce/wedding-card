@@ -962,7 +962,8 @@ test("the app exposes the canonical content admin route and runtime content prov
   const shellSource = await readFile(new URL("../src/admin-content/AdminShell.jsx", import.meta.url), "utf8");
   assert.match(source, /\["\/admin", "\/admin\/content"\]\.includes\(window\.location\.pathname\)/);
   assert.match(source, /pathname === "\/admin\/guestbook"/);
-  assert.match(source, /import \{ GuestbookAdmin \}/);
+  assert.match(source, /const GuestbookAdmin = lazy\(\(\) => import\("\.\/admin-content\/GuestbookAdmin\.jsx"\)/);
+  assert.match(source, /const ContentAdmin = lazy\(\(\) => import\("\.\/admin-content\/ContentAdmin\.jsx"\)/);
   assert.match(shellSource, /href: "\/admin", label: "콘텐츠"/);
   assert.match(source, /WeddingRuntimeContext\.Provider/);
   assert.match(source, /usePublicInvitationContent\(weddingContent\)/);
