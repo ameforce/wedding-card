@@ -346,6 +346,8 @@ test("real invitation ribbon preserves every frame and restores access across lo
         HTMLMediaElement.prototype.play = function () {
           window.__musicQA.calls.push({ at: performance.now(), active: navigator.userActivation?.isActive });
           this.__qaPaused = window.__musicQA.blocked;
+          Object.defineProperty(this, "readyState", { configurable: true, get: () => 4 });
+          Object.defineProperty(this, "currentTime", { configurable: true, get: () => 0, set() {} });
           Object.defineProperty(this, "paused", { configurable: true, get: () => this.__qaPaused });
           if (!window.__musicQA.blocked) this.dispatchEvent(new Event("play"));
           return window.__musicQA.blocked ? Promise.reject(new DOMException("Autoplay denied", "NotAllowedError")) : Promise.resolve();
@@ -389,6 +391,47 @@ test("real invitation ribbon preserves every frame and restores access across lo
     }
   });
 
+  await scenarioTest("opening audio remains silent while rewind and buffering are pending", async () => {
+    const page = await newPage({ autoTap: false });
+    await page.addInitScript(() => {
+      window.__seekQA = { requested: false, ready: 4, seeking: false, time: 0 };
+      HTMLMediaElement.prototype.play = function () {
+        const qa = window.__seekQA;
+        qa.time = 3;
+        Object.defineProperties(this, {
+          paused: { configurable: true, get: () => false },
+          readyState: { configurable: true, get: () => qa.ready },
+          seeking: { configurable: true, get: () => qa.seeking },
+          currentTime: { configurable: true, get: () => qa.time, set(value) {
+            qa.time = value; qa.seeking = true; qa.requested = true;
+          } },
+        });
+        this.dispatchEvent(new Event("play"));
+        return Promise.resolve();
+      };
+    });
+    await servePublishedMusic(page, true);
+    try {
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+      await page.locator(".pastel-intro-cover__start").click();
+      await page.waitForFunction(() => window.__seekQA.requested);
+      assert.equal(await page.locator(".music-control button").getAttribute("aria-pressed"), "false");
+      await page.evaluate(() => {
+        const audio = document.querySelector("audio");
+        audio.dispatchEvent(new Event("canplay"));
+        window.__seekQA.ready = 2;
+        window.__seekQA.seeking = false;
+        audio.dispatchEvent(new Event("seeked"));
+      });
+      assert.equal(await page.locator(".music-control button").getAttribute("aria-pressed"), "false");
+      await page.evaluate(() => {
+        window.__seekQA.ready = 4;
+        document.querySelector("audio").dispatchEvent(new Event("canplay"));
+      });
+      await page.waitForFunction(() => document.querySelector(".music-control button")?.getAttribute("aria-pressed") === "true");
+    } finally { await page.close(); }
+  });
+
   await scenarioTest("native Chromium accepts ribbon-tap music and keeps it silent until opening completes", async () => {
     const page = await newPage({ autoTap: false });
     await page.addInitScript(() => {
@@ -407,6 +450,17 @@ test("real invitation ribbon preserves every frame and restores access across lo
       await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
       await page.locator(".pastel-intro-cover__start").click();
       await page.waitForFunction(() => window.__ribbonQA?.openedAt !== null && !document.querySelector(".pastel-intro-cover"), null, { timeout: 12_000 });
+      await page.waitForFunction(() => window.__nativeMusicQA.rejections.length > 0
+        || (window.__nativeMusicQA.playing > 0
+          && document.querySelector(".music-control button")?.getAttribute("aria-pressed") === "true"));
+      const rejected = await page.evaluate(() => window.__nativeMusicQA.rejections.length > 0);
+      if (!rejected) {
+        const startedAt = await page.locator(".music-control audio").evaluate((audio) => audio.currentTime);
+        await page.waitForFunction((previousTime) => {
+          const audio = document.querySelector(".music-control audio");
+          return !audio.paused && audio.readyState >= 3 && audio.currentTime > previousTime + 0.25;
+        }, startedAt, { timeout: 6_000 });
+      }
       const result = await page.evaluate(() => ({
         ...window.__nativeMusicQA,
         paused: document.querySelector(".music-control audio")?.paused,
@@ -1021,8 +1075,12 @@ test("real invitation ribbon preserves every frame and restores access across lo
     try {
       await page.goto(syntheticUrl, { waitUntil: "commit" });
       await page.waitForTimeout(400);
-      const initial = await page.locator("#pastel-intro-early-poster img").first().evaluate((image) => ({ ready: image.complete && image.naturalWidth > 0, rootEmpty: document.querySelector("#root").childElementCount === 0 }));
-      assert.deepEqual(initial, { ready: true, rootEmpty: true });
+      const initial = await page.locator("#pastel-intro-early-poster img").first().evaluate((image) => {
+        const root = document.querySelector("#root");
+        const status = root.querySelector(".invitation-boot-status[role=\"status\"]");
+        return { ready: image.complete && image.naturalWidth > 0, loadingOnly: root.childElementCount === 1 && status === root.firstElementChild };
+      });
+      assert.deepEqual(initial, { ready: true, loadingOnly: true });
       await page.waitForFunction(() => window.__ribbonQA.handoff !== null);
       const handoff = await page.evaluate(() => window.__ribbonQA.handoff);
       const expected = { x: 390 / 2 - synthetic.registration.x * 390 / synthetic.width, y: 844 / 2 - synthetic.registration.y * 390 / synthetic.width, width: 390, height: synthetic.height * 390 / synthetic.width };

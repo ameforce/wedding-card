@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,9 +20,10 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
+import { prepareOpeningAudio } from "./opening-audio.js";
 import { getCalendarMonth, SESANG_STICKERS, WEDDING_PHOTOS, weddingContent } from "./content.js";
-import { ContentAdmin } from "./admin-content/ContentAdmin.jsx";
-import { GuestbookAdmin } from "./admin-content/GuestbookAdmin.jsx";
+const ContentAdmin = lazy(() => import("./admin-content/ContentAdmin.jsx").then((module) => ({ default: module.ContentAdmin })));
+const GuestbookAdmin = lazy(() => import("./admin-content/GuestbookAdmin.jsx").then((module) => ({ default: module.GuestbookAdmin })));
 import { getInvitationPhotos } from "./admin-content/content-document.js";
 import { usePublicInvitationContent } from "./admin-content/public-content.jsx";
 import { pastelGalleryLayout } from "./gallery-layout.js";
@@ -666,11 +667,14 @@ function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
   const audioRef = useRef(null);
   const audioGraphRef = useRef(null);
   const openingStageRef = useRef("idle");
+  const cancelRevealRef = useRef(null);
   const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
     const audio = audioRef.current;
     return () => {
+      cancelRevealRef.current?.();
+      cancelRevealRef.current = null;
       audio?.pause();
       if (audio) audio.currentTime = 0;
       audio?.load();
@@ -704,9 +708,10 @@ function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
         const resumed = context.resume();
         const playback = audio.play();
         Promise.all([resumed, playback]).catch(() => {
-          if (openingStageRef.current !== "armed") return;
+          if (!["armed", "revealing"].includes(openingStageRef.current)) return;
+          cancelRevealRef.current?.();
           openingStageRef.current = "failed";
-          gain.gain.value = 1;
+          gain.gain.value = 0;
           setPlaying(false);
         });
       } catch {
@@ -719,21 +724,32 @@ function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
       const graph = audioGraphRef.current;
       if (!audio) return;
       if (openingStageRef.current === "armed" && graph) {
-        openingStageRef.current = "audible";
-        try { audio.currentTime = 0; } catch { /* Metadata may still be loading. */ }
-        const { gain, context } = graph;
-        gain.gain.cancelScheduledValues(context.currentTime);
-        gain.gain.setValueAtTime(0, context.currentTime);
-        gain.gain.linearRampToValueAtTime(1, context.currentTime + 0.45);
-        const resumed = context.state === "running" ? Promise.resolve() : context.resume();
-        resumed.then(() => {
-          if (openingStageRef.current === "audible" && !audio.paused) setPlaying(true);
-        }).catch(() => {
+        openingStageRef.current = "revealing";
+        cancelRevealRef.current = prepareOpeningAudio(audio, () => {
+          if (openingStageRef.current !== "revealing") return;
+          const { gain, context } = graph;
+          const resumed = context.state === "running" ? Promise.resolve() : context.resume();
+          resumed.then(() => {
+            if (openingStageRef.current !== "revealing") return;
+            openingStageRef.current = "audible";
+            gain.gain.cancelScheduledValues(context.currentTime);
+            gain.gain.setValueAtTime(0, context.currentTime);
+            gain.gain.linearRampToValueAtTime(1, context.currentTime + 0.45);
+            setPlaying(!audio.paused);
+          }).catch(() => {
+            if (openingStageRef.current !== "revealing") return;
+            openingStageRef.current = "failed";
+            setPlaying(false);
+            notify("음악이 차단되었습니다. 오른쪽 위 재생 버튼을 눌러 주세요.", "error");
+          });
+        }, () => {
+          openingStageRef.current = "failed";
           setPlaying(false);
-          notify("음악이 차단되었습니다. 오른쪽 위 재생 버튼을 눌러 주세요.", "error");
+          notify("음악을 불러오지 못했습니다. 오른쪽 위 재생 버튼을 눌러 주세요.", "error");
         });
         return;
       }
+      if (["revealing", "audible"].includes(openingStageRef.current)) return;
       if (openingStageRef.current === "failed") {
         notify("음악이 차단되었습니다. 오른쪽 위 재생 버튼을 눌러 주세요.", "error");
         return;
@@ -746,7 +762,9 @@ function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
       });
     };
     const cancelOpeningPlayback = () => {
-      if (openingStageRef.current !== "armed") return;
+      if (!["armed", "revealing"].includes(openingStageRef.current)) return;
+      cancelRevealRef.current?.();
+      cancelRevealRef.current = null;
       openingStageRef.current = "idle";
       if (audioGraphRef.current) audioGraphRef.current.gain.gain.value = 1;
       const audio = audioRef.current;
@@ -773,6 +791,10 @@ function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
       return;
     }
     try {
+      cancelRevealRef.current?.();
+      cancelRevealRef.current = null;
+      openingStageRef.current = "manual";
+      if (audioGraphRef.current) audioGraphRef.current.gain.gain.value = 1;
       const resumed = audioGraphRef.current?.context.resume();
       const playback = audio.play();
       await Promise.all([resumed, playback]);
@@ -794,7 +816,7 @@ function MusicTrackControl({ music, notify, allowOpeningPlayback }) {
         preload={allowOpeningPlayback && music.autoPlayOnOpen === true ? "auto" : "none"}
         loop
         onPause={() => setPlaying(false)}
-        onPlay={() => setPlaying(openingStageRef.current !== "armed")}
+        onPlay={() => setPlaying(!["armed", "revealing"].includes(openingStageRef.current))}
         onError={() => setPlaying(false)}
       />
     </div>
@@ -1172,7 +1194,7 @@ function WeddingApp() {
 }
 
 export function App() {
-  if (window.location.pathname === "/admin/guestbook") return <GuestbookAdmin />;
-  if (["/admin", "/admin/content"].includes(window.location.pathname)) return <ContentAdmin />;
+  if (window.location.pathname === "/admin/guestbook") return <Suspense fallback={<InvitationLoadingShell />}><GuestbookAdmin /></Suspense>;
+  if (["/admin", "/admin/content"].includes(window.location.pathname)) return <Suspense fallback={<InvitationLoadingShell />}><ContentAdmin /></Suspense>;
   return <WeddingApp />;
 }

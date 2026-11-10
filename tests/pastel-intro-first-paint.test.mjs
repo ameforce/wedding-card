@@ -308,3 +308,30 @@ test("the handoff reuses the inline early-paper bytes when the public paper URL 
   assert.ok(handoffProgress <= 0.025, "The paper patch must be compared before panel opening changes its face lighting.");
   assert.ok(meanDifference <= 1, `The blocked-paper handoff changes the same paper patch by ${meanDifference.toFixed(3)} mean channel value.`);
 });
+
+test("slow entry retains a neutral loading surface after the cover deadline", { timeout: 20_000 }, async (t) => {
+  const server = await createServer({ root: projectRoot, logLevel: "silent", server: { host: "127.0.0.1", port: 0, strictPort: false } });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  let releaseEntry;
+  const gate = new Promise((resolve) => { releaseEntry = resolve; });
+  t.after(async () => { releaseEntry(); await page.unrouteAll({ behavior: "wait" }); await browser.close(); await server.close(); });
+  await page.route("**/src/main.jsx*", async (route) => { await gate; await route.continue().catch(() => {}); });
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`, { waitUntil: "commit" });
+  await page.waitForFunction(() => window.__pastelIntroEarly?.reason === "timeout", null, { timeout: 8000 });
+  assert.equal(await page.locator("#pastel-intro-early-poster").count(), 0);
+  assert.equal(await page.locator(".invitation-boot-status").isVisible(), true);
+  assert.equal(await page.locator(".invitation-boot-status").textContent(), "초대장을 불러오는 중입니다.");
+  const letter = page.locator(".invitation-boot-status__letter");
+  assert.equal(await letter.getAttribute("aria-hidden"), "true");
+  assert.equal(await letter.evaluate((node) => getComputedStyle(node).animationName), "invitation-letter-float");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  assert.equal(await letter.evaluate((node) => getComputedStyle(node).animationName), "none");
+  assert.equal(await page.locator(".invitation-boot-status__dots i").first().evaluate((node) => getComputedStyle(node).animationName), "none");
+  assert.equal(await page.locator(".invitation-boot-status").isVisible(), true);
+  releaseEntry();
+  await page.locator(".app-shell").waitFor({ state: "visible" });
+  assert.equal(await page.locator(".invitation-boot-status").count(), 0, "React replaces the static status without a stale overlay.");
+  assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).overflow), "hidden");
+});
